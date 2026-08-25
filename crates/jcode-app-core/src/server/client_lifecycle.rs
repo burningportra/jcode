@@ -3032,11 +3032,16 @@ async fn start_processing_message(
         }
         let (completion_report, prompt_suggestion_snapshot) = if result.is_ok() {
             let agent = report_agent.lock().await;
+            let client_supports_prompt_suggestions = PROMPT_SUGGESTION_SENDERS
+                .lock()
+                .map(|senders| senders.contains_key(&prompt_suggestion_session_id))
+                .unwrap_or(false);
             (
                 agent.latest_assistant_text_after(start_message_index),
                 super::prompt_suggestions::snapshot_from_agent(
                     &prompt_suggestion_session_id,
                     &agent,
+                    client_supports_prompt_suggestions,
                 ),
             )
         } else {

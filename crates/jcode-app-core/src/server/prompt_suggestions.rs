@@ -9,7 +9,6 @@ Return only plain text for the user to send next.
 Return NO_SUGGESTION if there is no useful next prompt.
 Do not use Markdown fences, bullets, quotes, explanations, or labels."#;
 
-const DEFAULT_MAX_CHARS: usize = 180;
 const MAX_CONTEXT_CHARS: usize = 6_000;
 const NO_SUGGESTION_SENTINELS: &[&str] = &["NO_SUGGESTION", "NO SUGGESTION", "NONE", "N/A"];
 
@@ -199,7 +198,23 @@ impl PromptSuggestionService {
 pub(super) fn snapshot_from_agent(
     session_id: &str,
     agent: &Agent,
+    client_supports_prompt_suggestions: bool,
 ) -> Option<PromptSuggestionSnapshot> {
+    let workspace = agent.working_dir().unwrap_or_default();
+    let config = jcode_base::config::config()
+        .prompt_suggestions
+        .for_workspace(workspace);
+    let eligibility = jcode_base::prompt_suggestions::PromptSuggestionEligibility {
+        config_enabled: config.enabled,
+        interactive: client_supports_prompt_suggestions,
+        successful_turn: true,
+        headless: false,
+        scripted: false,
+        debug: false,
+    };
+    if !eligibility.is_eligible() {
+        return None;
+    }
     if agent.last_visible_conversation_role() != Some(jcode_message_types::Role::Assistant) {
         return None;
     }
@@ -211,7 +226,7 @@ pub(super) fn snapshot_from_agent(
     Some(PromptSuggestionSnapshot {
         session_id: session_id.to_string(),
         transcript,
-        max_chars: DEFAULT_MAX_CHARS,
+        max_chars: config.max_chars,
     })
 }
 
