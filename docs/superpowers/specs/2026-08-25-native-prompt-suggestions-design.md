@@ -1,12 +1,12 @@
 # Native Prompt Suggestions Design
 
 **Date:** 2026-08-25
-**Status:** Approved for implementation planning
+**Status:** Approved, amended for opt-in rollout
 **Reference:** [`guwidoe/pi-prompt-suggester`](https://github.com/guwidoe/pi-prompt-suggester)
 
 ## Summary
 
-Jcode will generate a likely next user prompt after every successfully completed interactive assistant turn and display it as ghost text in the empty TUI composer. Generation will run asynchronously in the daemon, while clients remain responsible for presentation and explicit acceptance.
+When explicitly enabled, Jcode will generate a likely next user prompt after every successfully completed interactive assistant turn and display it as ghost text in the empty TUI composer. Generation will run asynchronously in the daemon, while clients remain responsible for presentation and explicit acceptance.
 
 The first version will reuse Jcode's existing session, repository, memory, todo, and project-guidance context rather than introducing a separate repository-seeding subsystem.
 
@@ -19,6 +19,7 @@ The first version will reuse Jcode's existing session, repository, memory, todo,
 - Provide consistent behavior for local and remote TUI sessions.
 - Keep suggestion latency, failures, and cancellations outside the critical turn-completion path.
 - Use a lightweight default model route with global and project-level overrides.
+- Avoid unexpected model requests or cost by requiring explicit opt-in.
 
 ## Non-goals
 
@@ -26,6 +27,7 @@ The first version will reuse Jcode's existing session, repository, memory, todo,
 - Suggest prompts during active streaming or internal tool turns.
 - Generate suggestions for debug, scripted, or other non-interactive sessions.
 - Add a general extension framework before shipping this feature.
+- Extract a standalone plugin or public plugin repository before the integration boundary has stabilized.
 - Add an agentic project-seeding pipeline in the first version.
 - Persist raw suggestion prompts in observability logs.
 
@@ -117,7 +119,7 @@ When compatible ghost text is visible:
 
 When no compatible suggestion is visible:
 
-- `Tab` retains its current model-switch behavior;
+- `Tab` retains its current autocomplete behavior;
 - `Right Arrow` retains normal cursor movement behavior.
 
 A suggestion is cleared or invalidated by:
@@ -153,15 +155,15 @@ Initial configuration surface:
 - `prompt_suggestions.model`
 - `prompt_suggestions.reasoning_effort`
 - `prompt_suggestions.max_chars`
-- `prompt_suggestions.accept_keys`
+- `prompt_suggestions.acceptance_keys`
 
 Defaults:
 
-- enabled for normal interactive sessions;
+- disabled by default and enabled only through explicit configuration;
 - disabled for non-interactive, debug, and scripted sessions;
 - lightweight model route;
 - low or minimal reasoning effort;
-- both `tab` and `right` acceptance keys;
+- both `tab` and `right_arrow` acceptance keys;
 - a conservative maximum length suitable for the TUI composer.
 
 Project configuration overrides global configuration using Jcode's existing precedence conventions. Invalid routes or settings should fall back safely and surface through status or debug diagnostics rather than breaking a turn.
@@ -209,7 +211,7 @@ Diagnostics must not persist the raw conversation context or generated suggestio
 - cancellation state transitions;
 - ghost compatibility rules;
 - `Tab` and `Right Arrow` acceptance;
-- fallback to existing model switching and cursor movement;
+- fallback to existing autocomplete and cursor movement;
 - multiline wrapping and cursor placement.
 
 ### Integration tests
@@ -227,7 +229,7 @@ Build and run the changed binary against a dedicated daemon socket so verificati
 
 - ghost text appears after a completed turn;
 - multiline ghost text renders and wraps correctly;
-- `Tab` accepts when visible and switches models otherwise;
+- `Tab` accepts when visible and retains autocomplete behavior otherwise;
 - `Right Arrow` accepts when visible and moves the cursor otherwise;
 - typing and session switching clear the ghost;
 - remote and local sessions behave consistently.
@@ -235,10 +237,12 @@ Build and run the changed binary against a dedicated daemon socket so verificati
 ## Architectural constraints discovered
 
 - `crates/jcode-tui/src/tui/ui_input.rs` is already a large rendering module. Generation, lifecycle management, and model routing must not be added there.
-- `Tab` already participates in model switching, so suggestion acceptance must be a narrow conditional that applies only to visible, compatible ghost text.
+- `Tab` already participates in autocomplete, so suggestion acceptance must be a narrow conditional that applies only to visible, compatible ghost text. Model switching remains on `Ctrl+Tab`.
 - Provider `MessageEnd` can precede final bookkeeping. Suggestion generation must trigger from finalized turn completion, not the first message-end signal.
 - Runtime verification must use the rebuilt binary and a dedicated socket or coordinated self-dev reload. A plain `cargo build` does not validate the active daemon behavior.
 
 ## Rollout
 
-Ship behind configuration with the recommended behavior enabled by default for normal interactive sessions. Keep generation failures invisible to users, but expose sufficient debug metrics to evaluate latency, cost, cancellation frequency, and no-suggestion rate. If production evidence shows excessive cost or distraction, the default can be adjusted without changing protocol or rendering architecture.
+Ship the built-in integration behind configuration and disabled by default. Users opt in with `prompt_suggestions.enabled = true`, which prevents unexpected model requests and cost. Keep generation failures invisible to users, but expose sufficient debug metrics to evaluate latency, cost, cancellation frequency, and no-suggestion rate.
+
+Treat the built-in implementation as the proving ground for a future plugin boundary. A standalone public plugin repository is deferred until the generation context, lifecycle hooks, protocol events, configuration contract, and client presentation API are stable enough to support third-party consumers without copying Jcode internals.
