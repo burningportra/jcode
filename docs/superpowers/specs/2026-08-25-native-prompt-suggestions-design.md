@@ -1,12 +1,12 @@
 # Native Prompt Suggestions Design
 
 **Date:** 2026-08-25
-**Status:** Approved, amended for opt-in rollout
+**Status:** Approved, amended for default-on rollout
 **Reference:** [`guwidoe/pi-prompt-suggester`](https://github.com/guwidoe/pi-prompt-suggester)
 
 ## Summary
 
-When explicitly enabled, Jcode will generate a likely next user prompt after every successfully completed interactive assistant turn and display it as ghost text in the empty TUI composer. Generation will run asynchronously in the daemon, while clients remain responsible for presentation and explicit acceptance.
+Jcode will generate a likely next user prompt after every successfully completed interactive assistant turn and display it as ghost text in the empty TUI composer. Generation will run asynchronously in the daemon, while clients remain responsible for presentation and explicit acceptance.
 
 The first version will reuse Jcode's existing session, repository, memory, todo, and project-guidance context rather than introducing a separate repository-seeding subsystem.
 
@@ -19,7 +19,7 @@ The first version will reuse Jcode's existing session, repository, memory, todo,
 - Provide consistent behavior for local and remote TUI sessions.
 - Keep suggestion latency, failures, and cancellations outside the critical turn-completion path.
 - Use a lightweight default model route with global and project-level overrides.
-- Avoid unexpected model requests or cost by requiring explicit opt-in.
+- Keep the feature easy to disable globally or per workspace for users who do not want the additional model request.
 
 ## Non-goals
 
@@ -159,7 +159,7 @@ Initial configuration surface:
 
 Defaults:
 
-- disabled by default and enabled only through explicit configuration;
+- enabled by default for compatible interactive clients;
 - disabled for non-interactive, debug, and scripted sessions;
 - lightweight model route;
 - low or minimal reasoning effort;
@@ -243,6 +243,6 @@ Build and run the changed binary against a dedicated daemon socket so verificati
 
 ## Rollout
 
-Ship the built-in integration behind configuration and disabled by default. Users opt in with `prompt_suggestions.enabled = true`, which prevents unexpected model requests and cost. Keep generation failures invisible to users, but expose sufficient debug metrics to evaluate latency, cost, cancellation frequency, and no-suggestion rate.
+Ship the built-in integration enabled by default for compatible interactive clients. Users can opt out globally or per workspace with `prompt_suggestions.enabled = false`. Keep generation failures invisible to users, but expose sufficient debug metrics to evaluate latency, cost, cancellation frequency, and no-suggestion rate.
 
 Treat the built-in implementation as the proving ground for a future plugin boundary. A standalone public plugin repository is deferred until the generation context, lifecycle hooks, protocol events, configuration contract, and client presentation API are stable enough to support third-party consumers without copying Jcode internals.

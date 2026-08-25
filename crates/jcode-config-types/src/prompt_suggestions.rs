@@ -38,7 +38,7 @@ pub struct PromptSuggestionsConfig {
 impl Default for PromptSuggestionsConfig {
     fn default() -> Self {
         Self {
-            enabled: false,
+            enabled: true,
             model: None,
             reasoning_effort: Some("low".to_string()),
             max_chars: PROMPT_SUGGESTION_DEFAULT_MAX_CHARS,
