@@ -29,7 +29,7 @@ graph TD
 - `crates/jcode-base/src/config.rs`
 - configuration defaults, parsing, change-report, and documentation files discovered during implementation
 
-Add a serializable `PromptSuggestionsConfig` with defaults for enabled state, optional model route, reasoning effort, maximum characters, and acceptance keys. Follow existing global/project precedence rather than creating a feature-specific config store. Model invalid modes explicitly and clamp unsafe maximum lengths at the config boundary.
+Add a serializable `PromptSuggestionsConfig` following the existing `jcode-config-types` patterns used by `FeatureConfig` and `AgentsConfig`. Jcode currently loads user config from `~/.jcode/config.toml` plus environment overrides, so preserve the approved per-project behavior as an explicit workspace-keyed override map within that config unless implementation discovers an existing supported workspace overlay. Defaults cover enabled state, optional model route, reasoning effort, maximum characters, and acceptance keybindings. Clamp unsafe maximum lengths at the config boundary.
 
 Add pure domain helpers for eligibility, output normalization, no-suggestion sentinel recognition, and bounded UTF-8 truncation. Keep these outside the TUI so server and tests share one contract.
 
@@ -41,7 +41,7 @@ Add pure domain helpers for eligibility, output normalization, no-suggestion sen
 - `crates/jcode-protocol/src/wire.rs`
 - protocol serialization tests and any generated/version compatibility fixtures
 
-Add a backward-compatible `ServerEvent::PromptSuggestionUpdated` carrying session identity, monotonically increasing generation, and `Option<String>`. `None` clears existing state. Ensure older clients can ignore the additive event according to current protocol behavior.
+Add backward-compatible `ServerEvent::PromptSuggestionUpdated` and a client request for composer-dirty cancellation. The update carries session identity, monotonically increasing generation, and `Option<String>`, where `None` clears existing state. Wire subscription/replay so reconnecting clients receive the latest compatible state. Audit mixed-version behavior because unknown tagged events count toward the remote stray-protocol limit and can disconnect older clients.
 
 **Verification:** JSON round-trip tests for populated and clearing events, protocol compatibility tests.
 
@@ -68,7 +68,7 @@ Use existing provider construction and simple-completion APIs. Do not hold sessi
 - finalized turn handling in `crates/jcode-app-core/src/agent/turn_streaming_mpsc.rs`
 - session/client lifecycle in `crates/jcode-app-core/src/server/`
 
-Trigger generation only after final successful turn bookkeeping, never directly on provider `MessageEnd`. Exclude failed, aborted, debug, scripted, headless, and non-interactive runs. Broadcast results only to the owning session. Cancel on newer turns, user input submission, session closure, or connection teardown where those events are daemon-visible.
+Trigger generation after `process_message_streaming_mpsc` returns success in `crates/jcode-app-core/src/server/client_lifecycle.rs`, after final turn bookkeeping and never directly on provider `MessageEnd`. Exclude failed, aborted, debug, scripted, headless, auto-poke/follow-up, and non-interactive runs. Snapshot required agent/session context, then release the `Agent` mutex before awaiting generation. Broadcast results only to the owning session. Cancel on newer turns, explicit composer-dirty requests, session closure, or connection teardown.
 
 Preserve turn latency by spawning after finalization and never awaiting suggestion completion in the turn path.
 
@@ -91,7 +91,7 @@ Add a small `PromptSuggestionState` separate from `input`, containing session id
 - `crates/jcode-tui/src/tui/ui_input.rs`
 - focused helper module if needed to avoid adding lifecycle logic to the large renderer
 
-Extend composer layout to account for ghost text only when the input is empty and no incompatible modal, overlay, shell mode, history search, pending input, or interactive picker owns the composer. Render dim text after the existing prompt prefix using the same multiline wrapping width as editable input. Do not include ghost text in selection/copy snapshots or cursor calculations.
+Extend composer layout to account for ghost text only when the input is empty and no incompatible modal, overlay, shell mode, history search, pending input, or interactive picker owns the composer. Keep ghost eligibility and layout in focused helpers outside the already-large `ui_input.rs` where practical. Render dim text after the existing prompt prefix using the same multiline wrapping width as editable input. Do not include ghost text in selection/copy snapshots or cursor calculations. Advance the relevant suggestion/render cache epoch whenever ghost state changes.
 
 **Verification:** buffer/frame tests for single-line, multiline, wrapping, narrow terminal, overlay suppression, and selection/cursor exclusion.
 
@@ -102,7 +102,7 @@ Extend composer layout to account for ghost text only when the input is empty an
 - `crates/jcode-tui/src/tui/app/remote/key_handling.rs`
 - input mutation helpers and session-switch handlers
 
-Intercept unmodified `Tab` and `Right Arrow` before their existing basic-key behavior only when a compatible ghost is visible. Acceptance copies the full suggestion into `input`, moves the cursor to the end, clears suggestion state, and requests redraw without submission. Otherwise preserve model switching and cursor motion exactly.
+Intercept unmodified `Tab` and `Right Arrow` before their existing basic-key behavior only when a compatible ghost is visible. Acceptance copies the full suggestion into `input`, moves the cursor to the end, clears suggestion state, and requests redraw without submission. Otherwise preserve current behavior exactly: `Tab` remains autocomplete or an empty-composer no-op, while model switching remains on its existing Ctrl+Tab binding and `Right Arrow` retains cursor motion. Express configurable acceptance through the existing `KeybindingsConfig` machinery where possible rather than inventing a parallel key DSL.
 
 Clear suggestions through centralized input/session mutation boundaries for typing, paste, submission, session/branch changes, incompatible modes, and disablement. Avoid scattered field writes that can miss remote paths.
 
@@ -117,7 +117,7 @@ Add integration coverage across:
 - concurrent generations and stale-result rejection;
 - provider failure and absent lightweight route;
 - configuration precedence and live reload behavior where supported;
-- existing `Tab` model switching and `Right Arrow` cursor navigation;
+- existing `Tab` autocomplete/no-op behavior, Ctrl+Tab model switching, and `Right Arrow` cursor navigation;
 - composer copy, mouse positioning, multiline height, overlays, and queued-message states.
 
 Run focused crate tests first, then the relevant TUI and app-core suites. Fix regressions before proceeding.
@@ -130,7 +130,7 @@ Use `selfdev build-reload target=tui`. After reload, create a dedicated debug-so
 2. observe automatic ghost text in the empty composer;
 3. accept with `Tab` and confirm text is inserted but not submitted;
 4. repeat and accept with `Right Arrow`;
-5. verify `Tab` still switches models without a ghost;
+5. verify `Tab` still performs autocomplete or remains a no-op without a compatible ghost, and Ctrl+Tab still switches models;
 6. verify `Right Arrow` still moves the cursor without a ghost;
 7. type before a delayed result and confirm no stale ghost appears;
 8. switch sessions and confirm suggestions do not leak;
