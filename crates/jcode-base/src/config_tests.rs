@@ -1404,12 +1404,12 @@ fn config_reload_generation_increments_on_cache_invalidation() {
 
 #[test]
 fn prompt_suggestions_defaults_parse_and_clamp_max_chars() {
-    assert!(Config::default().prompt_suggestions.enabled);
+    assert!(!Config::default().prompt_suggestions.enabled);
     assert_eq!(Config::default().prompt_suggestions.max_chars, 240);
 
     let cfg: Config = toml::from_str(
         r#"[prompt_suggestions]
-enabled = false
+enabled = true
 model = "gpt-5.5-mini"
 reasoning_effort = "none"
 max_chars = 999999
@@ -1417,7 +1417,7 @@ acceptance_keys = ["tab"]
 "#,
     )
     .expect("prompt suggestions config should parse");
-    assert!(!cfg.prompt_suggestions.enabled);
+    assert!(cfg.prompt_suggestions.enabled);
     assert_eq!(
         cfg.prompt_suggestions.model.as_deref(),
         Some("gpt-5.5-mini")
