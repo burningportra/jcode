@@ -3,6 +3,12 @@ use serde::{Deserialize, Serialize};
 mod display;
 pub use display::DisplayConfig;
 pub mod keybindings;
+mod prompt_suggestions;
+pub use prompt_suggestions::{
+    PROMPT_SUGGESTION_DEFAULT_MAX_CHARS, PROMPT_SUGGESTION_MAX_CHARS_LIMIT,
+    PromptSuggestionAcceptanceKey, PromptSuggestionsConfig, PromptSuggestionsResolvedConfig,
+    PromptSuggestionsWorkspaceOverride, normalize_prompt_suggestion_workspace,
+};
 mod serde_lenient;
 pub use keybindings::{
     KEYBINDING_DEFAULTS, KeybindingDefault, KeybindingIssue, KeybindingIssueKind,

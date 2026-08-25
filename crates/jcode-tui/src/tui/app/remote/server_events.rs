@@ -612,6 +612,11 @@ pub(in crate::tui::app) fn handle_server_event(
     let call_output_tokens_seen = remote.call_output_tokens_seen();
 
     match event {
+        ServerEvent::PromptSuggestionUpdated {
+            session_id,
+            generation,
+            suggestion,
+        } => app.set_prompt_suggestion(session_id, generation, suggestion),
         ServerEvent::TextDelta { text } => {
             if let Some(thought_line) = App::extract_thought_line(&text) {
                 let ops = app.stream_buffer.flush();

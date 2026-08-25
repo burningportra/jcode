@@ -637,3 +637,90 @@ fn test_error_event_retry_after_back_compat_default() -> Result<()> {
     assert_eq!(retry_after_secs, None);
     Ok(())
 }
+
+#[test]
+fn test_prompt_suggestion_updated_event_roundtrip_populated_and_clear() -> Result<()> {
+    let event = ServerEvent::PromptSuggestionUpdated {
+        session_id: "sess_prompt".to_string(),
+        generation: 7,
+        suggestion: Some("Try asking for a shorter summary".to_string()),
+    };
+    let json = encode_event(&event);
+    assert!(json.contains("\"type\":\"prompt_suggestion_updated\""));
+    let decoded = parse_event_json(json.trim())?;
+    let ServerEvent::PromptSuggestionUpdated {
+        session_id,
+        generation,
+        suggestion,
+    } = decoded else {
+        return Err(anyhow!("wrong event type"));
+    };
+    assert_eq!(session_id, "sess_prompt");
+    assert_eq!(generation, 7);
+    assert_eq!(suggestion.as_deref(), Some("Try asking for a shorter summary"));
+
+    let clear = ServerEvent::PromptSuggestionUpdated {
+        session_id: "sess_prompt".to_string(),
+        generation: 8,
+        suggestion: None,
+    };
+    let json = encode_event(&clear);
+    assert!(json.contains("\"suggestion\":null"));
+    let decoded = parse_event_json(json.trim())?;
+    let ServerEvent::PromptSuggestionUpdated { suggestion, .. } = decoded else {
+        return Err(anyhow!("wrong event type"));
+    };
+    assert_eq!(suggestion, None);
+    Ok(())
+}
+
+#[test]
+fn test_prompt_suggestion_client_requests_roundtrip_and_subscribe_defaults() -> Result<()> {
+    let dirty = Request::ComposerDirty {
+        id: 11,
+        session_id: Some("sess_prompt".to_string()),
+        generation: Some(7),
+    };
+    let json = serde_json::to_string(&dirty)?;
+    let Request::ComposerDirty {
+        id,
+        session_id,
+        generation,
+    } = parse_request_json(&json)? else {
+        return Err(anyhow!("wrong request type"));
+    };
+    assert_eq!(id, 11);
+    assert_eq!(session_id.as_deref(), Some("sess_prompt"));
+    assert_eq!(generation, Some(7));
+
+    let replay = Request::GetPromptSuggestion {
+        id: 12,
+        session_id: Some("sess_prompt".to_string()),
+        known_generation: Some(6),
+    };
+    let json = serde_json::to_string(&replay)?;
+    let Request::GetPromptSuggestion {
+        id,
+        session_id,
+        known_generation,
+    } = parse_request_json(&json)? else {
+        return Err(anyhow!("wrong request type"));
+    };
+    assert_eq!(id, 12);
+    assert_eq!(session_id.as_deref(), Some("sess_prompt"));
+    assert_eq!(known_generation, Some(6));
+
+    let legacy_subscribe = r#"{"type":"subscribe","id":13}"#;
+    let Request::Subscribe {
+        prompt_suggestions,
+        prompt_suggestion_generation,
+        terminal_env,
+        ..
+    } = parse_request_json(legacy_subscribe)? else {
+        return Err(anyhow!("wrong request type"));
+    };
+    assert!(!prompt_suggestions);
+    assert_eq!(prompt_suggestion_generation, None);
+    assert!(terminal_env.is_empty());
+    Ok(())
+}

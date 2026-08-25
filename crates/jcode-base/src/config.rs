@@ -10,9 +10,11 @@ pub use jcode_config_types::{
     KeybindingsConfig, LatexRenderingMode, LaunchHotkeyEntry, LaunchHotkeysConfig,
     MarkdownSpacingMode, NamedProviderAuth, NamedProviderConfig, NamedProviderModelConfig,
     NamedProviderType, NativeScrollbarConfig, NotificationsConfig, OverscrollStatusMode,
-    PowerConfig, ProviderConfig, ReasoningDisplayMode, SafetyConfig, SessionPickerResumeAction,
-    SponsorsConfig, SwarmSpawnMode, SwarmStripLayout, TerminalConfig, UpdateChannel,
-    WebSearchConfig, WebSearchEngine,
+    PowerConfig, PromptSuggestionAcceptanceKey, PromptSuggestionsConfig,
+    PromptSuggestionsResolvedConfig, PromptSuggestionsWorkspaceOverride, ProviderConfig,
+    ReasoningDisplayMode, SafetyConfig, SessionPickerResumeAction, SponsorsConfig, SwarmSpawnMode,
+    SwarmStripLayout, TerminalConfig, UpdateChannel, WebSearchConfig, WebSearchEngine,
+    normalize_prompt_suggestion_workspace,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
@@ -540,6 +542,9 @@ pub struct Config {
     /// [`sponsors_is_default`]).
     #[serde(skip_serializing_if = "sponsors_is_default")]
     pub sponsors: SponsorsConfig,
+
+    /// Native next-prompt suggestion generation and acceptance settings.
+    pub prompt_suggestions: PromptSuggestionsConfig,
 
     /// Global "launch a new jcode" hotkeys (macOS). Baked once by auto-import.
     pub launch_hotkeys: LaunchHotkeysConfig,

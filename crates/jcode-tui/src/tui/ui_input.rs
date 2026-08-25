@@ -2603,15 +2603,29 @@ pub(super) fn draw_input(
         return None;
     }
 
-    let (all_lines, cursor_line, cursor_col) = wrap_input_text(
-        input_text,
-        cursor_pos,
+    let render_text = app.prompt_suggestion().unwrap_or(input_text);
+    let render_cursor_pos = if app.prompt_suggestion().is_some() {
+        0
+    } else {
+        cursor_pos
+    };
+    let (mut all_lines, cursor_line, cursor_col) = wrap_input_text(
+        render_text,
+        render_cursor_pos,
         line_width,
         &num_str,
         prompt_char,
         caret_color,
         prompt_len,
     );
+
+    if app.prompt_suggestion().is_some() {
+        super::input_prompt_suggestion_ui::apply_ghost_style(
+            &mut all_lines,
+            prompt_len,
+            dim_color(),
+        );
+    }
 
     let mut lines: Vec<Line> = Vec::new();
     let mut hint_shown = false;

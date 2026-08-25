@@ -898,6 +898,9 @@ async fn handle_remote_key_internal(
             }
         }
         KeyCode::Right => {
+            if app.accept_prompt_suggestion() {
+                return Ok(());
+            }
             if app.cursor_pos < app.input.len() {
                 app.cursor_pos = core::next_char_boundary(&app.input, app.cursor_pos);
             }
@@ -909,6 +912,9 @@ async fn handle_remote_key_internal(
             app.cursor_pos = app.input.len();
         }
         KeyCode::Tab => {
+            if app.accept_prompt_suggestion() {
+                return Ok(());
+            }
             app.autocomplete();
         }
         KeyCode::Enter => {

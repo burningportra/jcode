@@ -59,6 +59,16 @@ pub enum Request {
     #[serde(rename = "cancel")]
     Cancel { id: u64 },
 
+    /// Notify daemon that the composer became dirty so any pending prompt suggestion can be cancelled.
+    #[serde(rename = "composer_dirty")]
+    ComposerDirty {
+        id: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        session_id: Option<String>,
+        #[serde(default)]
+        generation: Option<u64>,
+    },
+
     /// Move the currently executing tool to background
     #[serde(rename = "background_tool")]
     BackgroundTool { id: u64 },
@@ -137,6 +147,24 @@ pub enum Request {
         /// to the client's terminal instead of its own stale startup env (#405).
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         terminal_env: Vec<(String, String)>,
+        /// Whether this client supports native prompt suggestion events. Servers
+        /// must not send prompt_suggestion_updated unless this is true.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        prompt_suggestions: bool,
+        /// Last prompt suggestion generation the client already has, used by the
+        /// daemon to replay the current state only when the client needs it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        prompt_suggestion_generation: Option<u64>,
+    },
+
+    /// Get current prompt suggestion state for reconnect/replay.
+    #[serde(rename = "get_prompt_suggestion")]
+    GetPromptSuggestion {
+        id: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        session_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        known_generation: Option<u64>,
     },
 
     /// Get full conversation history (for TUI sync on connect)
@@ -874,6 +902,18 @@ pub enum ServerEvent {
     MessageEnd {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         stop_reason: Option<String>,
+    },
+
+    /// Session-scoped native prompt suggestion update. `suggestion: null` clears
+    /// any existing suggestion for the generation. Servers should only send this
+    /// to clients that opted in through `subscribe.prompt_suggestions`, because
+    /// older tagged-enum clients may reject unknown event types instead of
+    /// ignoring them.
+    #[serde(rename = "prompt_suggestion_updated")]
+    PromptSuggestionUpdated {
+        session_id: String,
+        generation: u64,
+        suggestion: Option<String>,
     },
 
     /// A transient transport fault interrupted the provider stream mid-response

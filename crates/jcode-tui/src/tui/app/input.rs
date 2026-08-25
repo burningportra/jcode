@@ -1064,6 +1064,7 @@ pub(super) fn insert_input_text(app: &mut App, text: &str) {
     // Keeping this at the shared insertion boundary also covers paste and
     // Shift+Enter, rather than relying on individual key dispatchers to remember
     // to reconcile the transcript viewport.
+    app.clear_prompt_suggestion();
     app.follow_chat_bottom_for_typing();
 
     let at_end = app.cursor_pos == app.input.len();
@@ -2720,6 +2721,9 @@ pub(super) fn handle_basic_key(app: &mut App, code: KeyCode) -> bool {
             true
         }
         KeyCode::Right => {
+            if app.accept_prompt_suggestion() {
+                return true;
+            }
             if app.cursor_pos < app.input.len() {
                 app.cursor_pos = crate::tui::core::next_char_boundary(&app.input, app.cursor_pos);
             }
@@ -2734,6 +2738,9 @@ pub(super) fn handle_basic_key(app: &mut App, code: KeyCode) -> bool {
             true
         }
         KeyCode::Tab => {
+            if app.accept_prompt_suggestion() {
+                return true;
+            }
             app.autocomplete();
             true
         }

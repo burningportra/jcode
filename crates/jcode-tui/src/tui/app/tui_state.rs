@@ -601,6 +601,10 @@ impl crate::tui::TuiState for App {
         &self.input
     }
 
+    fn prompt_suggestion(&self) -> Option<&str> {
+        self.visible_prompt_suggestion()
+    }
+
     fn cursor_pos(&self) -> usize {
         self.cursor_pos
     }

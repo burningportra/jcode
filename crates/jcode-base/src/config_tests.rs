@@ -1,7 +1,8 @@
 use super::{
     AmbientConfig, Config, DiffDisplayMode, DisplayConfig, HookCommands, LatexRenderingMode,
-    McpToolsMode, ProviderConfig, SessionPickerResumeAction, SwarmSpawnMode, ToolConfig,
-    config_env_fingerprint, populate_context_limits_from_config_ref,
+    McpToolsMode, PromptSuggestionAcceptanceKey, ProviderConfig, SessionPickerResumeAction,
+    SwarmSpawnMode, ToolConfig, config_env_fingerprint, normalize_prompt_suggestion_workspace,
+    populate_context_limits_from_config_ref,
 };
 use std::ffi::OsString;
 use std::path::Path;
@@ -1082,6 +1083,8 @@ fn populate_context_limits_from_config_ref_seeds_global_cache() {
                 id: model_id.to_string(),
                 context_window: Some(1_000_000),
                 input: Vec::new(),
+                reasoning: None,
+                reasoning_effort: None,
             }],
             ..Default::default()
         },
@@ -1116,11 +1119,15 @@ fn populate_context_limits_from_config_seeds_qualified_runtime_model_shapes() {
                     id: "issue421-qwen-128k".to_string(),
                     context_window: Some(131_072),
                     input: Vec::new(),
+                    reasoning: None,
+                    reasoning_effort: None,
                 },
                 NamedProviderModelConfig {
                     id: "/opt/models/issue421-ornith-35b-q4.gguf".to_string(),
                     context_window: Some(131_072),
                     input: Vec::new(),
+                    reasoning: None,
+                    reasoning_effort: None,
                 },
             ],
             ..Default::default()
@@ -1392,5 +1399,77 @@ fn config_reload_generation_increments_on_cache_invalidation() {
     assert!(
         after > before,
         "invalidate_config_cache must bump the reload generation ({before} -> {after})"
+    );
+}
+
+#[test]
+fn prompt_suggestions_defaults_parse_and_clamp_max_chars() {
+    assert!(Config::default().prompt_suggestions.enabled);
+    assert_eq!(Config::default().prompt_suggestions.max_chars, 240);
+
+    let cfg: Config = toml::from_str(
+        r#"[prompt_suggestions]
+enabled = false
+model = "gpt-5.5-mini"
+reasoning_effort = "none"
+max_chars = 999999
+acceptance_keys = ["tab"]
+"#,
+    )
+    .expect("prompt suggestions config should parse");
+    assert!(!cfg.prompt_suggestions.enabled);
+    assert_eq!(
+        cfg.prompt_suggestions.model.as_deref(),
+        Some("gpt-5.5-mini")
+    );
+    assert_eq!(
+        cfg.prompt_suggestions.reasoning_effort.as_deref(),
+        Some("none")
+    );
+    assert_eq!(cfg.prompt_suggestions.max_chars, 2_000);
+    assert_eq!(
+        cfg.prompt_suggestions.acceptance_keys,
+        vec![PromptSuggestionAcceptanceKey::Tab]
+    );
+}
+
+#[test]
+fn prompt_suggestions_reject_invalid_acceptance_key() {
+    let err = toml::from_str::<Config>(
+        r#"[prompt_suggestions]
+acceptance_keys = ["escape"]
+"#,
+    )
+    .expect_err("invalid acceptance key should fail at config boundary");
+    assert!(err.to_string().contains("unknown variant"));
+}
+
+#[test]
+fn prompt_suggestions_workspace_override_uses_normalized_key() {
+    let cfg: Config = toml::from_str(
+        r#"[prompt_suggestions]
+enabled = true
+max_chars = 300
+
+[prompt_suggestions.workspaces."/volumes/1tb/projects/jcode"]
+enabled = false
+max_chars = 10
+acceptance_keys = ["right_arrow"]
+"#,
+    )
+    .expect("workspace prompt suggestion override should parse");
+
+    assert_eq!(
+        normalize_prompt_suggestion_workspace("/Volumes/1tb/Projects/jcode/"),
+        "/volumes/1tb/projects/jcode"
+    );
+    let resolved = cfg
+        .prompt_suggestions
+        .for_workspace("/Volumes/1tb/Projects/jcode/");
+    assert!(!resolved.enabled);
+    assert_eq!(resolved.max_chars, 10);
+    assert_eq!(
+        resolved.acceptance_keys,
+        vec![PromptSuggestionAcceptanceKey::RightArrow]
     );
 }

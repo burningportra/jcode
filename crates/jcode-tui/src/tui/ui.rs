@@ -61,6 +61,8 @@ pub(crate) mod inline_image_ui;
 mod inline_interactive_ui;
 #[path = "ui_inline.rs"]
 mod inline_ui;
+#[path = "ui_input_prompt_suggestion.rs"]
+pub(crate) mod input_prompt_suggestion_ui;
 #[path = "ui_input.rs"]
 pub(crate) mod input_ui;
 #[path = "ui_memory_estimates.rs"]

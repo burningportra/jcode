@@ -64,6 +64,7 @@ pub mod power_inhibit;
 pub mod process_memory;
 pub mod process_title;
 pub mod prompt;
+pub mod prompt_suggestions;
 pub mod protocol;
 pub mod provider;
 pub mod provider_activity;

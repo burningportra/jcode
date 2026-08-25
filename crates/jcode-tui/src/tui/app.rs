@@ -85,6 +85,7 @@ mod onboarding_repair;
 mod onboarding_sim;
 mod productivity;
 mod prompt_history;
+mod prompt_suggestion;
 mod remote;
 mod remote_notifications;
 mod replay;
@@ -845,6 +846,7 @@ pub struct App {
     /// visibly jump. Resolved into `scroll_offset` by the next render frame.
     pending_history_anchor: Option<HistoryScrollAnchor>,
     input: String,
+    prompt_suggestion: prompt_suggestion::PromptSuggestionState,
     command_candidates_cache: RefCell<Option<CommandCandidatesCache>>,
     /// Per-input memo for `command_suggestions()`; see
     /// [`CommandSuggestionsCache`].

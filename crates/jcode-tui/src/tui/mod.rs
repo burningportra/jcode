@@ -312,6 +312,9 @@ pub trait TuiState {
 
     // ---- Input ----
     fn input(&self) -> &str;
+    fn prompt_suggestion(&self) -> Option<&str> {
+        None
+    }
     fn cursor_pos(&self) -> usize;
     fn is_processing(&self) -> bool;
     fn queued_messages(&self) -> &[String];

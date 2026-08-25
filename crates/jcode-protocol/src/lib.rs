@@ -563,6 +563,7 @@ impl Request {
         match self {
             Request::Message { id, .. } => *id,
             Request::Cancel { id } => *id,
+            Request::ComposerDirty { id, .. } => *id,
             Request::BackgroundTool { id } => *id,
             Request::SoftInterrupt { id, .. } => *id,
             Request::CancelSoftInterrupts { id } => *id,
@@ -575,6 +576,7 @@ impl Request {
             Request::ClientDebugCommand { id, .. } => *id,
             Request::ClientDebugResponse { id, .. } => *id,
             Request::Subscribe { id, .. } => *id,
+            Request::GetPromptSuggestion { id, .. } => *id,
             Request::GetHistory { id } => *id,
             Request::GetModelCatalog { id } => *id,
             Request::GetCompactedHistory { id, .. } => *id,

@@ -89,6 +89,8 @@ impl Client {
             client_has_local_history,
             allow_session_takeover,
             terminal_env: crate::terminal_launch::snapshot_client_terminal_env(),
+            prompt_suggestions: false,
+            prompt_suggestion_generation: None,
         };
         let json = serde_json::to_string(&request)? + "\n";
         self.writer.write_all(json.as_bytes()).await?;

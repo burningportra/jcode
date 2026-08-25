@@ -773,6 +773,8 @@ impl AcpRuntime {
                 client_has_local_history: false,
                 allow_session_takeover: false,
                 terminal_env: crate::terminal_launch::snapshot_client_terminal_env(),
+                prompt_suggestions: false,
+                prompt_suggestion_generation: None,
             })
             .await?;
         wait_for_done(&session, subscribe_id).await?;
@@ -824,6 +826,8 @@ impl AcpRuntime {
                 client_has_local_history: false,
                 allow_session_takeover: false,
                 terminal_env: crate::terminal_launch::snapshot_client_terminal_env(),
+                prompt_suggestions: false,
+                prompt_suggestion_generation: None,
             })
             .await?;
 

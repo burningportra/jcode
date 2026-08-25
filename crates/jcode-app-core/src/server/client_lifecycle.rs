@@ -65,7 +65,7 @@ use jcode_agent_runtime::{InterruptSignal, SoftInterruptSource, StreamError};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::{
-    Arc,
+    Arc, LazyLock, Mutex as StdMutex,
     atomic::{AtomicBool, Ordering},
 };
 use std::time::{Duration, Instant};
@@ -76,6 +76,34 @@ type SessionAgents = Arc<RwLock<HashMap<String, Arc<Mutex<Agent>>>>>;
 type ChannelSubscriptions = Arc<RwLock<HashMap<String, HashMap<String, HashSet<String>>>>>;
 const RELOAD_STARTING_GUARD_MAX_AGE: Duration = Duration::from_secs(30);
 const REQUEST_HANDLER_STALL_THRESHOLDS_MS: [u64; 3] = [2_000, 10_000, 60_000];
+
+static PROMPT_SUGGESTIONS: LazyLock<super::prompt_suggestions::PromptSuggestionService> =
+    LazyLock::new(|| {
+        super::prompt_suggestions::PromptSuggestionService::new(|update| {
+            if let Some(sender) = PROMPT_SUGGESTION_SENDERS
+                .lock()
+                .ok()
+                .and_then(|senders| senders.get(&update.session_id).cloned())
+            {
+                let _ = sender.send(ServerEvent::PromptSuggestionUpdated {
+                    session_id: update.session_id.clone(),
+                    generation: update.generation,
+                    suggestion: update.suggestion.clone(),
+                });
+            }
+            crate::logging::event_debug(
+                "PROMPT_SUGGESTION_UPDATED",
+                vec![
+                    ("session_id", update.session_id),
+                    ("generation", update.generation.to_string()),
+                    ("has_suggestion", update.suggestion.is_some().to_string()),
+                ],
+            );
+        })
+    });
+static PROMPT_SUGGESTION_SENDERS: LazyLock<
+    StdMutex<HashMap<String, mpsc::UnboundedSender<ServerEvent>>>,
+> = LazyLock::new(|| StdMutex::new(HashMap::new()));
 
 fn required_subscribe_working_dir(working_dir: Option<&str>) -> std::result::Result<&str, String> {
     let working_dir = working_dir
@@ -1189,6 +1217,34 @@ pub(super) async fn handle_client(
                 }
             }
 
+            Request::ComposerDirty {
+                id,
+                session_id,
+                generation: _,
+            } => {
+                let session_id = session_id.as_deref().unwrap_or(&client_session_id);
+                PROMPT_SUGGESTIONS.cancel(session_id).await;
+                let _ = client_event_tx.send(ServerEvent::Ack { id });
+            }
+
+            Request::GetPromptSuggestion {
+                id,
+                session_id,
+                known_generation,
+            } => {
+                let session_id = session_id.as_deref().unwrap_or(&client_session_id);
+                if let Some(update) = PROMPT_SUGGESTIONS.latest(session_id).await
+                    && known_generation.is_none_or(|known| known < update.generation)
+                {
+                    let _ = client_event_tx.send(ServerEvent::PromptSuggestionUpdated {
+                        session_id: update.session_id,
+                        generation: update.generation,
+                        suggestion: update.suggestion,
+                    });
+                }
+                let _ = client_event_tx.send(ServerEvent::Ack { id });
+            }
+
             Request::SoftInterrupt {
                 id,
                 content,
@@ -1412,6 +1468,7 @@ pub(super) async fn handle_client(
                 client_has_local_history,
                 allow_session_takeover,
                 terminal_env,
+                ..
             } => {
                 if let Err(message) =
                     required_subscribe_working_dir(subscribe_working_dir.as_deref())
@@ -2873,6 +2930,11 @@ async fn start_processing_message(
         return;
     }
 
+    // A submitted prompt makes any composer suggestion stale before the model
+    // turn starts. Typing/paste cancellation will use the protocol request added
+    // by the adjacent protocol task.
+    PROMPT_SUGGESTIONS.cancel(client_session_id).await;
+
     if !agent
         .lock()
         .await
@@ -2927,7 +2989,11 @@ async fn start_processing_message(
         Arc::clone(swarm.members),
         client_event_tx.clone(),
     );
+    if let Ok(mut senders) = PROMPT_SUGGESTION_SENDERS.lock() {
+        senders.insert(client_session_id.to_string(), tx.clone());
+    }
     let done_tx = processing_done_tx.clone();
+    let prompt_suggestion_session_id = client_session_id.to_string();
     crate::logging::info(&format!("Processing message id={} spawning task", id));
     *state.task = Some(tokio::spawn(async move {
         let event_tx = tx.clone();
@@ -2964,11 +3030,17 @@ async fn start_processing_message(
                 id, error
             )),
         }
-        let completion_report = if result.is_ok() {
+        let (completion_report, prompt_suggestion_snapshot) = if result.is_ok() {
             let agent = report_agent.lock().await;
-            agent.latest_assistant_text_after(start_message_index)
+            (
+                agent.latest_assistant_text_after(start_message_index),
+                super::prompt_suggestions::snapshot_from_agent(
+                    &prompt_suggestion_session_id,
+                    &agent,
+                ),
+            )
         } else {
-            None
+            (None, None)
         };
         // Keep the terminal event on the same ordered fanout channel as the
         // stream. Sending it later from the owning client's event loop could
@@ -2984,6 +3056,9 @@ async fn start_processing_message(
             },
         };
         let _ = tx.send(terminal_event);
+        if let Some(snapshot) = prompt_suggestion_snapshot {
+            PROMPT_SUGGESTIONS.generate_after_success(snapshot).await;
+        }
         let _ = done_tx.send((id, result, completion_report));
     }));
 }
