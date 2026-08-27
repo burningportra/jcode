@@ -105,6 +105,13 @@ static PROMPT_SUGGESTION_SENDERS: LazyLock<
     StdMutex<HashMap<String, mpsc::UnboundedSender<ServerEvent>>>,
 > = LazyLock::new(|| StdMutex::new(HashMap::new()));
 
+/// Drop prompt-suggestion state when a session is removed from the server.
+/// The per-session generation entry would otherwise leak for the life of the
+/// process and an in-flight generation task would keep running.
+pub(super) async fn remove_session_prompt_suggestions(session_id: &str) {
+    PROMPT_SUGGESTIONS.remove_session(session_id).await;
+}
+
 fn required_subscribe_working_dir(working_dir: Option<&str>) -> std::result::Result<&str, String> {
     let working_dir = working_dir
         .map(str::trim)

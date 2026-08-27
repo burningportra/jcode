@@ -1064,6 +1064,7 @@ pub(super) async fn handle_comm_stop(
     let removed_agent = super::remove_session_entry(sessions, &target_session).await;
     let removed_live_agent = removed_agent.is_some();
     if let Some(agent_arc) = removed_agent {
+        super::client_lifecycle::remove_session_prompt_suggestions(&target_session).await;
         remove_session_interrupt_queue(soft_interrupt_queues, &target_session).await;
         remove_background_tool_signal(&target_session);
         if let Ok(mut agent) = agent_arc.try_lock() {

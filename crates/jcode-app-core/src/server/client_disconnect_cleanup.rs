@@ -119,6 +119,7 @@ pub(super) async fn cleanup_client_connection(
     }
 
     {
+        super::client_lifecycle::remove_session_prompt_suggestions(client_session_id).await;
         if let Some(agent_arc) = super::remove_session_entry(sessions, client_session_id).await {
             let lock_result =
                 tokio::time::timeout(std::time::Duration::from_secs(2), agent_arc.lock()).await;
