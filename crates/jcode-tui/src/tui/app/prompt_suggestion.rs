@@ -19,7 +19,12 @@ impl PromptSuggestionState {
         generation: u64,
         suggestion: Option<String>,
     ) -> PromptSuggestionUpdate {
-        if active_session_id != Some(event_session_id) || generation < self.generation {
+        if active_session_id != Some(event_session_id) {
+            return PromptSuggestionUpdate::Ignored;
+        }
+        // Server generations are per-session, so a counter left over from a
+        // previous session must not suppress the new session's events.
+        if self.session_id.as_deref() == Some(event_session_id) && generation < self.generation {
             return PromptSuggestionUpdate::Ignored;
         }
         self.session_id = Some(event_session_id.to_string());
@@ -32,12 +37,6 @@ impl PromptSuggestionState {
     }
 
     pub(in crate::tui::app) fn clear(&mut self) {
-        self.suggestion = None;
-    }
-
-    pub(in crate::tui::app) fn clear_for_session_change(&mut self) {
-        self.session_id = None;
-        self.generation = 0;
         self.suggestion = None;
     }
 
@@ -101,10 +100,6 @@ impl crate::tui::app::App {
         self.prompt_suggestion.clear();
     }
 
-    pub(in crate::tui::app) fn clear_prompt_suggestion_for_session_change(&mut self) {
-        self.prompt_suggestion.clear_for_session_change();
-    }
-
     pub(crate) fn visible_prompt_suggestion(&self) -> Option<&str> {
         let active = self.active_prompt_suggestion_session_id();
         self.prompt_suggestion
@@ -152,6 +147,22 @@ mod tests {
             PromptSuggestionUpdate::Ignored
         );
         assert_eq!(state.suggestion(Some("a"), ""), Some("next"));
+    }
+
+    #[test]
+    fn generation_counter_is_scoped_per_session() {
+        let mut state = PromptSuggestionState::default();
+        assert_eq!(
+            state.set(Some("a"), "a", 5, Some("from a".into())),
+            PromptSuggestionUpdate::Applied
+        );
+        // Switching to a fresh session with a lower generation must not be
+        // suppressed by the previous session's leftover counter.
+        assert_eq!(
+            state.set(Some("b"), "b", 1, Some("from b".into())),
+            PromptSuggestionUpdate::Applied
+        );
+        assert_eq!(state.suggestion(Some("b"), ""), Some("from b"));
     }
 
     #[test]
