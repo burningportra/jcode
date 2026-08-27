@@ -88,6 +88,7 @@ impl Client {
             client_instance_id: None,
             client_has_local_history,
             allow_session_takeover,
+            crash_on_disconnect: false,
             terminal_env: crate::terminal_launch::snapshot_client_terminal_env(),
             prompt_suggestions: false,
             prompt_suggestion_generation: None,

@@ -2,6 +2,7 @@ use super::*;
 use crate::tool::selfdev::ReloadContext;
 use crate::tui::TuiState;
 use crate::tui::app as app_mod;
+use crate::tui::app::remote::input_dispatch::restore_pending_startup_prompt_echo;
 use crate::tui::app::remote::swarm_plan_core::RemoteSwarmPlanSnapshot;
 use crate::tui::app::remote::swarm_status_core::swarm_status_transition_notice;
 
@@ -1725,6 +1726,10 @@ pub(in crate::tui::app) fn handle_server_event(
             if catalog_outcome.catalog_changed {
                 app.persist_remote_model_catalog_cache();
             }
+            // `/model` may have been opened while the initial session catalog
+            // was still loading. Replace that loading row as soon as history
+            // supplies the authoritative snapshot.
+            app.refresh_open_model_picker_after_catalog_update();
             app.remote_skills = skills;
             app.invalidate_command_candidates_cache();
             app.remote_sessions = all_sessions;
@@ -1934,6 +1939,7 @@ pub(in crate::tui::app) fn handle_server_event(
                     app.pending_images.clear();
                     app.set_status_notice("Reload complete - prompt preserved");
                 }
+                restore_pending_startup_prompt_echo(app);
                 app.note_runtime_memory_event_force("history_loaded", "remote_history_applied");
                 crate::process_memory::release_retained_heap("client_history_loaded");
                 if let Some(notice) = app.pending_remote_rewind_notice.take() {

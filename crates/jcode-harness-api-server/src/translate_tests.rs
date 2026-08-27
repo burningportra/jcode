@@ -143,6 +143,26 @@ fn connection_phase_is_forwarded_to_api_clients() {
 }
 
 #[test]
+fn wake_request_is_forwarded_with_explicit_session_and_payload() {
+    let mut state = state_with_session();
+    let frames = state.legacy_event_to_api(&json!({
+        "type": "wake_requested",
+        "session_id": "target",
+        "reason": "background_task_completed",
+        "notification": "finished",
+    }));
+    assert_eq!(frames.len(), 1);
+    assert_eq!(
+        frames[0].event,
+        ApiEvent::WakeRequested {
+            session_id: "target".into(),
+            reason: "background_task_completed".into(),
+            notification: "finished".into(),
+        }
+    );
+}
+
+#[test]
 fn create_session_maps_to_subscribe() {
     let mut state = BridgeState::default();
     let out = state.api_request_to_legacy(&json!({"req": "create_session", "id": 1}));
@@ -151,6 +171,30 @@ fn create_session_maps_to_subscribe() {
     };
     assert_eq!(value["type"], "subscribe");
     assert!(value["working_dir"].is_string());
+}
+
+#[test]
+fn desktop_owned_session_requests_crash_on_disconnect() {
+    let mut state = BridgeState::with_crash_on_disconnect(true);
+    let out = state.api_request_to_legacy(&json!({"req": "create_session", "id": 1}));
+    let Outbound::Legacy(value) = &out[0] else {
+        panic!("expected legacy outbound");
+    };
+    assert_eq!(value["crash_on_disconnect"], true);
+}
+
+#[test]
+fn detach_disarms_crash_on_disconnect() {
+    let mut state = BridgeState::with_crash_on_disconnect(true);
+    let out = state.api_request_to_legacy(&json!({
+        "req": "detach_session",
+        "id": 2,
+        "session_id": "abc",
+    }));
+    let Outbound::Legacy(value) = &out[0] else {
+        panic!("expected legacy outbound");
+    };
+    assert_eq!(value["type"], "prepare_disconnect");
 }
 
 #[test]
@@ -508,14 +552,14 @@ fn an_available_models_push_updates_the_model() {
 
 #[test]
 fn create_session_in_a_jcode_checkout_requests_selfdev() {
-    // Regression: desktop2 opens its own crate, and without the `selfdev`
+    // Regression: external client opens its own crate, and without the `selfdev`
     // flag the daemon hands back an agent with no self-dev tools or prompt.
     let mut state = BridgeState::default();
     let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .and_then(std::path::Path::parent)
         .expect("workspace root")
-        .join("crates/jcode-desktop2");
+        .join("crates/jcode-tui");
     let out = state.api_request_to_legacy(&json!({
         "req": "create_session",
         "id": 1,
@@ -1073,6 +1117,79 @@ fn capability_requests_need_an_attached_session() {
             other => panic!("{req} reached the daemon unattached: {other:?}"),
         }
     }
+}
+
+#[test]
+fn another_sessions_broadcast_does_not_replace_the_attachment() {
+    let mut state = BridgeState::default();
+    let attach = state.api_request_to_legacy(&json!({
+        "id": 7,
+        "req": "attach_session",
+        "session_id": "session_retriever_1_a",
+    }));
+    let state_id = match &attach[1] {
+        Outbound::Legacy(value) => value["id"].as_u64().expect("state request id"),
+        other => panic!("unexpected attach output: {other:?}"),
+    };
+    state.legacy_event_to_api(&json!({
+        "type": "state",
+        "id": state_id,
+        "session_id": "session_retriever_1_a",
+    }));
+
+    state.legacy_event_to_api(&json!({
+        "type": "session",
+        "session_id": "session_pawprint_2_b",
+    }));
+
+    assert!(matches!(
+        state
+            .api_request_to_legacy(&json!({
+                "id": 8,
+                "req": "send_message",
+                "session_id": "session_retriever_1_a",
+                "content": "still routed to the attached session",
+            }))
+            .as_slice(),
+        [Outbound::Legacy(_)]
+    ));
+}
+
+#[test]
+fn another_sessions_state_does_not_replace_the_attachment() {
+    let mut state = BridgeState::default();
+    let attach = state.api_request_to_legacy(&json!({
+        "id": 7,
+        "req": "attach_session",
+        "session_id": "session_retriever_1_a",
+    }));
+    let state_id = match &attach[1] {
+        Outbound::Legacy(value) => value["id"].as_u64().expect("state request id"),
+        other => panic!("unexpected attach output: {other:?}"),
+    };
+    state.legacy_event_to_api(&json!({
+        "type": "state",
+        "id": state_id,
+        "session_id": "session_retriever_1_a",
+    }));
+
+    state.legacy_event_to_api(&json!({
+        "type": "state",
+        "id": state_id + 100,
+        "session_id": "session_pawprint_2_b",
+    }));
+
+    assert!(matches!(
+        state
+            .api_request_to_legacy(&json!({
+                "id": 8,
+                "req": "send_message",
+                "session_id": "session_retriever_1_a",
+                "content": "still routed to the attached session",
+            }))
+            .as_slice(),
+        [Outbound::Legacy(_)]
+    ));
 }
 
 /// A session id becomes a filesystem path, so it must be treated as untrusted.

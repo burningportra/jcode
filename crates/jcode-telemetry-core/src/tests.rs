@@ -169,6 +169,57 @@ fn test_do_not_track() {
 }
 
 #[test]
+fn false_opt_out_values_keep_telemetry_enabled() {
+    let _guard = lock_test_env();
+    for value in ["", "0", "false", "no", "off"] {
+        jcode_core::env::set_var("JCODE_NO_TELEMETRY", value);
+        jcode_core::env::set_var("DO_NOT_TRACK", value);
+        assert!(is_enabled(), "{value:?} should not opt out");
+    }
+}
+
+#[test]
+fn in_app_opt_out_emits_once_then_stops_telemetry() {
+    let _guard = lock_test_env();
+    TEST_EMITTED_PAYLOADS.lock().unwrap().clear();
+
+    assert!(set_usage_telemetry_enabled(false));
+    assert!(!is_enabled());
+    assert!(set_usage_telemetry_enabled(false));
+
+    let payloads = TEST_EMITTED_PAYLOADS.lock().unwrap();
+    let opt_outs = payloads
+        .iter()
+        .filter(|payload| payload["event"] == "telemetry_opt_out")
+        .collect::<Vec<_>>();
+    assert_eq!(opt_outs.len(), 1);
+    assert_eq!(opt_outs[0]["step"], "telemetry_settings");
+}
+
+#[test]
+fn record_turn_emits_prompt_submitted_immediately() {
+    let _guard = lock_telemetry_test_state();
+    TEST_EMITTED_PAYLOADS.lock().unwrap().clear();
+    if let Ok(mut session) = SESSION_STATE.lock() {
+        *session = None;
+    }
+    begin_session_with_mode("openai", "gpt-test", None, false);
+
+    record_turn();
+
+    let payloads = TEST_EMITTED_PAYLOADS.lock().unwrap().clone();
+    let prompt = payloads
+        .iter()
+        .find(|payload| payload["event"] == "prompt_submitted")
+        .expect("prompt_submitted should be emitted before turn completion");
+    assert_eq!(prompt["turn_index"], 1);
+    assert!(prompt["session_id"].is_string());
+    if let Ok(mut session) = SESSION_STATE.lock() {
+        *session = None;
+    }
+}
+
+#[test]
 fn telemetry_status_on_fresh_home_is_read_only() {
     let _guard = lock_test_env();
 

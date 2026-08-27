@@ -577,6 +577,7 @@ impl Request {
             Request::ClientDebugResponse { id, .. } => *id,
             Request::Subscribe { id, .. } => *id,
             Request::GetPromptSuggestion { id, .. } => *id,
+            Request::PrepareDisconnect { id } => *id,
             Request::GetHistory { id } => *id,
             Request::GetModelCatalog { id } => *id,
             Request::GetCompactedHistory { id, .. } => *id,

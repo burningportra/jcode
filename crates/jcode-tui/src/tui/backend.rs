@@ -353,6 +353,7 @@ impl RemoteConnection {
             client_instance_id: conn.client_instance_id.clone(),
             client_has_local_history,
             allow_session_takeover,
+            crash_on_disconnect: false,
             terminal_env: crate::terminal_launch::snapshot_client_terminal_env(),
             prompt_suggestions: true,
             prompt_suggestion_generation: None,
@@ -1293,6 +1294,11 @@ impl RemoteConnection {
     #[cfg(test)]
     pub(crate) fn take_dummy_peer(&mut self) -> Option<Stream> {
         self._dummy_peer.take()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn next_request_id_for_test(&self) -> u64 {
+        self.next_request_id
     }
 
     /// Set session ID

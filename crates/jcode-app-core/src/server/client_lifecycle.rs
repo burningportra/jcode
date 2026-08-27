@@ -508,6 +508,7 @@ pub(super) async fn handle_client(
 
     // Per-client state
     let mut client_is_processing = false;
+    let mut crash_on_disconnect = false;
     let (processing_done_tx, mut processing_done_rx) =
         mpsc::unbounded_channel::<(u64, Result<()>, Option<String>)>();
     let mut processing_task: Option<tokio::task::JoinHandle<()>> = None;
@@ -1444,6 +1445,15 @@ pub(super) async fn handle_client(
                 }
             }
 
+            Request::PrepareDisconnect { id } => {
+                crash_on_disconnect = false;
+                let json = encode_event(&ServerEvent::Done { id });
+                let mut w = writer.lock().await;
+                if w.write_all(json.as_bytes()).await.is_err() {
+                    break;
+                }
+            }
+
             Request::GetState { id } => {
                 if handle_get_state(
                     id,
@@ -1467,9 +1477,11 @@ pub(super) async fn handle_client(
                 client_instance_id,
                 client_has_local_history,
                 allow_session_takeover,
+                crash_on_disconnect: requested_crash_on_disconnect,
                 terminal_env,
                 ..
             } => {
+                crash_on_disconnect = requested_crash_on_disconnect;
                 if let Err(message) =
                     required_subscribe_working_dir(subscribe_working_dir.as_deref())
                 {
@@ -2401,7 +2413,6 @@ pub(super) async fn handle_client(
                 initial_message,
                 request_nonce,
                 spawn_mode,
-                model,
                 effort,
                 label,
             } => {
@@ -2416,7 +2427,6 @@ pub(super) async fn handle_client(
                     initial_message,
                     request_nonce,
                     spawn_mode,
-                    model,
                     effort,
                     label,
                     &client_event_tx,
@@ -2670,7 +2680,6 @@ pub(super) async fn handle_client(
                 prefer_spawn,
                 spawn_if_needed,
                 message,
-                model,
                 effort,
             } => {
                 handle_comm_assign_next(
@@ -2681,7 +2690,6 @@ pub(super) async fn handle_client(
                     prefer_spawn,
                     spawn_if_needed,
                     message,
-                    model,
                     effort,
                     &client_event_tx,
                     &sessions,
@@ -2839,6 +2847,7 @@ pub(super) async fn handle_client(
             &sessions,
             &client_session_id,
             client_is_processing,
+            crash_on_disconnect,
             &mut processing_task,
             event_handle,
             &swarm_members,

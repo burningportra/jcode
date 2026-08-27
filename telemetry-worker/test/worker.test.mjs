@@ -368,6 +368,49 @@ test("event is dual-written: firehose point + D1 insert", async () => {
   assert.ok(db.executed.some(({ sql }) => /INSERT OR IGNORE INTO events/.test(sql)));
 });
 
+test("prompt_submitted is accepted and marks meaningful daily activity", async () => {
+  const db = makeDb();
+  const response = await worker.fetch(
+    postRequest(makeBody({
+      event: "prompt_submitted",
+      event_id: "prompt-1",
+      session_id: "session-1",
+      turn_index: 1,
+      build_channel: "release",
+    })),
+    { DB: db },
+    makeCtx(),
+  );
+
+  assert.equal(response.status, 200);
+  const eventInsert = db.executed.find(({ sql }) => /INSERT OR IGNORE INTO events/.test(sql));
+  assert.ok(eventInsert, "prompt event should be persisted");
+  const rollup = db.executed.find(({ sql }) => /INSERT INTO daily_active_users/.test(sql));
+  assert.ok(rollup, "prompt event should update daily activity");
+  assert.equal(rollup.values[2], 1, "prompt activity should be meaningful");
+  assert.equal(rollup.values[4], 1, "release prompt activity should be meaningful release activity");
+});
+
+test("telemetry_opt_out is accepted and persists only coarse metadata", async () => {
+  const db = makeDb();
+  const response = await worker.fetch(
+    postRequest(makeBody({
+      event: "telemetry_opt_out",
+      event_id: "opt-out-1",
+      step: "telemetry_settings",
+    })),
+    { DB: db },
+    makeCtx(),
+  );
+
+  assert.equal(response.status, 200);
+  const insert = db.executed.find(({ sql }) => /INSERT OR IGNORE INTO events/.test(sql));
+  assert.ok(insert, "opt-out event should be persisted");
+  assert.ok(columnIndex(insert.sql, "step") >= 0);
+  assert.equal(insert.values[columnIndex(insert.sql, "step")], "telemetry_settings");
+  assert.equal(columnIndex(insert.sql, "session_id"), -1);
+});
+
 test("session_end persists todo telemetry into session_details", async () => {
   const db = makeDb();
   const response = await worker.fetch(
@@ -483,6 +526,27 @@ test("discovery telemetry accepts the catalog suggest phase", async () => {
   const detailInsert = db.executed.find(({ sql }) => /INSERT OR IGNORE INTO discovery_details/.test(sql));
   const columns = detailInsert.sql.match(/\(([^)]+)\)/)[1].split(", ");
   assert.equal(detailInsert.values[columns.indexOf("phase")], "suggest");
+});
+
+test("discovery telemetry accepts and persists the catalog details phase", async () => {
+  const db = makeDb();
+  const discoveryFirehose = makeFirehose();
+  const response = await worker.fetch(
+    postRequest(makeDiscoveryBody({
+      phase: "details",
+      selected_tool: "agentcard",
+      result_count: 1,
+    })),
+    { DB: db, FIREHOSE_DISCOVERY: discoveryFirehose },
+    makeCtx(),
+  );
+  assert.equal(response.status, 200);
+  assert.equal(discoveryFirehose.points[0].blobs[8], "details");
+  assert.equal(discoveryFirehose.points[0].blobs[10], "agentcard");
+  const detailInsert = db.executed.find(({ sql }) => /INSERT OR IGNORE INTO discovery_details/.test(sql));
+  const columns = detailInsert.sql.match(/\(([^)]+)\)/)[1].split(", ");
+  assert.equal(detailInsert.values[columns.indexOf("phase")], "details");
+  assert.equal(detailInsert.values[columns.indexOf("selected_tool")], "agentcard");
 });
 
 test("discovery event rejects unknown failure classifications", async () => {
