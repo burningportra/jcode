@@ -363,6 +363,7 @@ There are two ways to set one up:
   jcode login --provider <profile-id>
   # for example:
   jcode login --provider openrouter
+  jcode login --provider vercel-ai-gateway
   jcode login --provider orcarouter
   jcode login --provider deepseek
   jcode login --provider opencode      # OpenCode Zen
@@ -370,7 +371,7 @@ There are two ways to set one up:
   jcode login --provider meta-muse     # Meta Model API / Muse Spark
   ```
 
-  Built-in OpenAI-compatible profile ids include: `openrouter`, `orcarouter`, `deepseek`, `zai`, `kimi`, `moonshotai`, `meta-muse` (Meta Model API / Muse Spark), `opencode` (OpenCode Zen), `opencode-go`, `302ai`, `baseten`, `cortecs`, `huggingface`, `nebius`, `scaleway`, `stackit`, and `firmware`. Each profile only sets the endpoint and key variable; you still pick the model with `/model` (or `--model`). Run `jcode login` with no provider to see the interactive list.
+  Built-in OpenAI-compatible profile ids include: `openrouter`, `vercel-ai-gateway` (Vercel AI Gateway), `orcarouter`, `deepseek`, `zai`, `kimi`, `moonshotai`, `meta-muse` (Meta Model API / Muse Spark), `opencode` (OpenCode Zen), `opencode-go`, `302ai`, `baseten`, `cortecs`, `huggingface`, `nebius`, `scaleway`, `stackit`, and `firmware`. Each profile only sets the endpoint and key variable; you still pick the model with `/model` (or `--model`). Run `jcode login` with no provider to see the interactive list. Vercel AI Gateway uses `AI_GATEWAY_API_KEY` and the `https://ai-gateway.vercel.sh/v1` OpenAI-compatible endpoint.
 
 - **Any other endpoint** — point jcode at an arbitrary OpenAI-compatible API (hosted or local) with `jcode login --provider openai-compatible` or the scriptable `jcode provider add` command described below.
 
