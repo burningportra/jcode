@@ -91,6 +91,83 @@ fn is_visible_conversation_message(message: &StoredMessage) -> bool {
         && !is_scheduled_task_message(message)
 }
 
+/// Return persisted user/assistant text that is eligible as durable workflow
+/// evidence. Internal reminders, scheduled prompts, display-only messages, and
+/// tool-only messages are deliberately excluded.
+pub fn durable_conversation_evidence_text(message: &StoredMessage) -> Option<String> {
+    if message.display_role.is_some()
+        || !matches!(message.role, Role::User | Role::Assistant)
+        || is_internal_system_reminder_message(message)
+        || is_scheduled_task_message(message)
+    {
+        return None;
+    }
+    let text = message
+        .content
+        .iter()
+        .filter_map(|block| match block {
+            ContentBlock::Text { text, .. } if !text.trim().is_empty() => Some(text.trim()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    (!text.is_empty()).then_some(text)
+}
+
+#[cfg(test)]
+mod durable_conversation_evidence_tests {
+    use super::*;
+    use jcode_session_types::StoredDisplayRole;
+
+    fn message(role: Role, content: Vec<ContentBlock>) -> StoredMessage {
+        StoredMessage {
+            id: "evidence-message".to_string(),
+            role,
+            content,
+            display_role: None,
+            timestamp: Some(Utc::now()),
+            tool_duration_ms: None,
+            token_usage: None,
+        }
+    }
+
+    #[test]
+    fn durable_conversation_evidence_accepts_text_and_rejects_internal_or_tool_only() {
+        let text = ContentBlock::Text {
+            text: "  useful workflow  ".to_string(),
+            cache_control: None,
+        };
+        assert_eq!(
+            durable_conversation_evidence_text(&message(Role::User, vec![text.clone()])),
+            Some("useful workflow".to_string())
+        );
+
+        let mut background = message(Role::Assistant, vec![text]);
+        background.display_role = Some(StoredDisplayRole::BackgroundTask);
+        assert!(durable_conversation_evidence_text(&background).is_none());
+
+        let scheduled = message(
+            Role::User,
+            vec![ContentBlock::Text {
+                text: "[Scheduled task]\nrun this".to_string(),
+                cache_control: None,
+            }],
+        );
+        assert!(durable_conversation_evidence_text(&scheduled).is_none());
+
+        let tool_only = message(
+            Role::Assistant,
+            vec![ContentBlock::ToolUse {
+                id: "tool-1".to_string(),
+                name: "read".to_string(),
+                input: serde_json::json!({}),
+                thought_signature: None,
+            }],
+        );
+        assert!(durable_conversation_evidence_text(&tool_only).is_none());
+    }
+}
+
 /// Recognize scheduler prompts persisted before they received an explicit
 /// system display role. This keeps old sessions from treating them as user
 /// prompts after resume.

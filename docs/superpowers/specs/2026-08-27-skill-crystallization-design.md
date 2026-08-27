@@ -137,7 +137,7 @@ Approval repeats all deduplication checks so state changes after proposal creati
 
 A proposal call never writes a skill.
 
-Approval requires `confirmed = true` and a persisted user-message reference. The message must be eligible conversation evidence, occur after the proposal was created, and contain both the full proposal ID and explicit approval language. Without verifiable confirmation, return the preview and exact confirmation request.
+Approval requires `confirmed = true` and a persisted user-message reference. The message must be eligible conversation evidence, occur strictly after the proposal was created, and exactly match `I approve skill crystallization proposal <proposal-id>.` after whitespace and case normalization. Without verifiable confirmation, return the preview and exact confirmation request.
 
 Before installation, approval re-reads the proposal from disk, validates its schema and bounds, verifies every full-message evidence digest, validates the approval message, recomputes its content-addressed proposal ID, and repeats all deduplication checks. Malformed, stale, duplicate, or modified-under-the-approved-ID proposals fail closed.
 

@@ -28,7 +28,7 @@ Implement:
 - canonical content-addressed proposal ID
 - journal-aware session/message evidence verification with bounded single-component IDs and stored-ID equality checks
 - full persisted-message evidence digests and a shared session-level eligibility helper
-- persisted user approval-message verification bound to the proposal ID and creation time
+- persisted user approval-message verification bound to the proposal ID and creation time using one exact canonical approval sentence
 - safe evidence excerpt rendering without unrelated transcript text
 - pending proposal directory and approved archive paths
 - bounded JSON reads
