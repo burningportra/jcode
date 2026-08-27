@@ -208,6 +208,41 @@ async fn ready_fff_preserves_literal_whitespace_semantics() {
     assert_eq!(output.output, "spaced.rs");
 }
 
+#[cfg(all(feature = "fff-search", unix))]
+#[tokio::test]
+async fn ready_fff_matches_linked_for_unicode_crlf_ignored_and_binary_files() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    fs::write(temp.path().join(".gitignore"), "ignored.txt\n").unwrap();
+    fs::write(temp.path().join("unicodé.txt"), "EdgeNeedle\r\n").unwrap();
+    fs::write(temp.path().join("ignored.txt"), "EdgeNeedle\n").unwrap();
+    fs::write(temp.path().join("binary.dat"), b"\0EdgeNeedle\0" as &[u8]).unwrap();
+    let status = std::process::Command::new("git")
+        .args(["init", "-q"])
+        .current_dir(temp.path())
+        .status()
+        .unwrap();
+    assert!(status.success());
+    let tool = AgentGrepTool::with_fff_mode(crate::config::FffBackendMode::Prefer);
+    let input = paths_only_input("EdgeNeedle");
+    let _ = tool
+        .execute(serde_json::to_value(&input).unwrap(), test_ctx(temp.path()))
+        .await
+        .unwrap();
+    assert!(tool.wait_for_fff_ready(std::time::Duration::from_secs(10)));
+
+    let linked = execute_linked_agentgrep(&input, &test_ctx(temp.path()), None)
+        .unwrap()
+        .output;
+    let output = tool
+        .execute(serde_json::to_value(&input).unwrap(), test_ctx(temp.path()))
+        .await
+        .unwrap();
+
+    assert_eq!(output.metadata.as_ref().unwrap()["search_backend"], "fff");
+    assert_eq!(output.output, linked);
+    assert_eq!(output.output, "unicodé.txt");
+}
+
 #[cfg(feature = "fff-search")]
 #[tokio::test]
 async fn phase_one_ineligible_requests_fall_back_with_machine_readable_reason() {

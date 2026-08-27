@@ -971,4 +971,78 @@ mod tests {
             observation.classification == ObservationClassification::CandidateChanged
         }));
     }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn public_quality_workflow_changes_from_fail_to_pass_after_simplification() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let fixture = fixture_repo(
+            r#"[{"code":"eslint(complexity)","message":"complexity 5 exceeds max 3","filename":"src/a.ts","line":1}]"#,
+        );
+        let tool = QualityTool::new();
+        let failing = tool
+            .execute(json!({"action": "check"}), test_ctx(fixture.path()))
+            .await
+            .unwrap();
+        let failing_report: QualityReport =
+            serde_json::from_value(failing.metadata.unwrap()["quality_report"].clone()).unwrap();
+        assert_eq!(failing_report.verdict, QualityVerdict::Fail);
+
+        fs::write(
+            fixture.path().join("src/a.ts"),
+            "export function value() { return 2; }\n",
+        )
+        .unwrap();
+        let bin = fixture.path().join("node_modules/.bin/oxlint");
+        fs::write(
+            &bin,
+            "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 'oxlint 1.0.0-test'; exit 0; fi\nprintf '[]\\n'\n",
+        )
+        .unwrap();
+        fs::set_permissions(&bin, fs::Permissions::from_mode(0o755)).unwrap();
+
+        let passing = tool
+            .execute(json!({"action": "check"}), test_ctx(fixture.path()))
+            .await
+            .unwrap();
+        let passing_report: QualityReport =
+            serde_json::from_value(passing.metadata.unwrap()["quality_report"].clone()).unwrap();
+        assert_eq!(passing_report.verdict, QualityVerdict::Pass);
+        assert_eq!(passing_report.subject.file_scope, vec!["src/a.ts"]);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn analyzer_failure_is_incomplete_with_bounded_command_evidence() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let fixture = fixture_repo("[]");
+        let bin = fixture.path().join("node_modules/.bin/oxlint");
+        fs::write(
+            &bin,
+            "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 'oxlint 1.0.0-test'; exit 0; fi\nprintf 'not-json\\n' >&2\nexit 2\n",
+        )
+        .unwrap();
+        fs::set_permissions(&bin, fs::Permissions::from_mode(0o755)).unwrap();
+
+        let output = QualityTool::new()
+            .execute(json!({"action": "check"}), test_ctx(fixture.path()))
+            .await
+            .unwrap();
+        let report: QualityReport =
+            serde_json::from_value(output.metadata.unwrap()["quality_report"].clone()).unwrap();
+
+        assert_eq!(report.verdict, QualityVerdict::Incomplete);
+        assert!(report.observations.iter().any(|observation| {
+            observation.classification == ObservationClassification::AnalyzerFailed
+        }));
+        let command = report
+            .evidence
+            .iter()
+            .find(|evidence| evidence.id == "command-0")
+            .unwrap();
+        assert!(command.summary.contains("exit=Some(2)"));
+        assert!(!command.summary.contains("not-json"));
+    }
 }
