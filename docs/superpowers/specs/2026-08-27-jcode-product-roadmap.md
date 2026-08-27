@@ -25,7 +25,7 @@ Design: `docs/superpowers/specs/2026-08-27-skill-crystallization-design.md`
 
 ### Next
 
-- Proactively suggest repeated workflows using the same proposal and approval path.
+- Proactively suggest repeated workflows using the same proposal and approval path. The first on-demand discovery slice is specified in `docs/superpowers/specs/2026-08-27-proactive-skill-discovery-design.md`.
 - Create portable context capsules for handoffs.
 - Compile smaller, better task context.
 - Learn editable preferences and project invariants from evidence.
