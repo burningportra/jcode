@@ -109,7 +109,13 @@ pub(crate) fn parse_openai_model_catalog(data: &serde_json::Value) -> OpenAIMode
         available.insert(slug.clone());
 
         if let Some(ctx) = model
-            .get("context_window")
+            // The Codex catalog distinguishes its conservative/default prompt
+            // budget from the model's actual supported maximum. The context
+            // meter and compaction budget need the latter or 1.05M models are
+            // silently reported as 272K.
+            .get("max_context_window")
+            .or_else(|| model.get("max_context_length"))
+            .or_else(|| model.get("context_window"))
             .or_else(|| model.get("context_length"))
             .and_then(|c| c.as_u64())
         {
@@ -372,6 +378,26 @@ mod tests {
                 "xhigh".to_string()
             ])
         );
+    }
+
+    #[test]
+    fn openai_catalog_prefers_the_supported_maximum_context_window() {
+        let catalog = parse_openai_model_catalog(&serde_json::json!({
+            "models": [
+                {
+                    "slug": "gpt-5.4",
+                    "context_window": 272_000,
+                    "max_context_window": 1_050_000
+                },
+                {
+                    "slug": "legacy-shape",
+                    "context_window": 128_000
+                }
+            ]
+        }));
+
+        assert_eq!(catalog.context_limits.get("gpt-5.4"), Some(&1_050_000));
+        assert_eq!(catalog.context_limits.get("legacy-shape"), Some(&128_000));
     }
 }
 

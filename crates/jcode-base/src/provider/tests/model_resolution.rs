@@ -1889,24 +1889,24 @@ fn test_context_limit_spark_vs_codex() {
         context_limit_for_model("gpt-5.3-codex-spark"),
         Some(128_000)
     );
-    assert_eq!(context_limit_for_model("gpt-5.5"), Some(272_000));
-    assert_eq!(context_limit_for_model("gpt-5.3-codex"), Some(272_000));
-    assert_eq!(context_limit_for_model("gpt-5.2-codex"), Some(272_000));
-    assert_eq!(context_limit_for_model("gpt-5-codex"), Some(272_000));
+    assert_eq!(context_limit_for_model("gpt-5.5"), Some(1_050_000));
+    assert_eq!(context_limit_for_model("gpt-5.3-codex"), Some(400_000));
+    assert_eq!(context_limit_for_model("gpt-5.2-codex"), Some(400_000));
+    assert_eq!(context_limit_for_model("gpt-5-codex"), Some(400_000));
 }
 
 #[test]
 fn test_context_limit_gpt_5_4() {
-    assert_eq!(context_limit_for_model("gpt-5.4"), Some(1_000_000));
-    assert_eq!(context_limit_for_model("gpt-5.4-pro"), Some(1_000_000));
-    assert_eq!(context_limit_for_model("gpt-5.4[1m]"), Some(1_000_000));
+    assert_eq!(context_limit_for_model("gpt-5.4"), Some(1_050_000));
+    assert_eq!(context_limit_for_model("gpt-5.4-pro"), Some(1_050_000));
+    assert_eq!(context_limit_for_model("gpt-5.4[1m]"), Some(1_050_000));
 }
 
 #[test]
 fn test_context_limit_respects_provider_hint() {
     assert_eq!(
         context_limit_for_model_with_provider("gpt-5.4", Some("openai")),
-        Some(1_000_000)
+        Some(1_050_000)
     );
     assert_eq!(
         context_limit_for_model_with_provider("gpt-5.4", Some("copilot")),
@@ -1922,7 +1922,7 @@ fn test_context_limit_respects_provider_hint() {
 fn test_resolve_model_capabilities_uses_provider_hint() {
     let openai = resolve_model_capabilities("gpt-5.4", Some("openai"));
     assert_eq!(openai.provider.as_deref(), Some("openai"));
-    assert_eq!(openai.context_window, Some(1_000_000));
+    assert_eq!(openai.context_window, Some(1_050_000));
 
     let copilot = resolve_model_capabilities("gpt-5.4", Some("copilot"));
     assert_eq!(copilot.provider.as_deref(), Some("copilot"));
