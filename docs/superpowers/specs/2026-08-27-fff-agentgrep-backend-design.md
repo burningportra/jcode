@@ -17,6 +17,17 @@ whitespace behavior, shadow parity, unsupported-request fallback, and create,
 modify, rename, and delete watcher updates. The existing AgentGrep test module,
 formatting, config tests, and `jcode-app-core --no-default-features` check pass.
 
+Isolated real-daemon acceptance with disposable `JCODE_HOME`, runtime directory,
+socket, and Git fixtures observed cold linked fallback followed by ready FFF
+routing with the same output and generation. The live watcher reflected create,
+modify, rename, and delete operations. Regex, excerpt, path, glob, type, hidden,
+and no-ignore requests stayed on linked AgentGrep with their expected fallback
+reasons. A second repository replaced the inactive index and advanced the
+generation, shadow mode reported `shadow_parity = true`, and
+`max_fff_indexes = 0` forced the disabled fallback. Focused registry tests also
+prove the two-search process cap, active-index replacement protection, and
+filesystem-root and home-root rejection.
+
 On the Jcode repository on macOS arm64, 50 measured calls after 5 warmups through
 the same `AgentGrepTool::execute` boundary observed linked p50/p95 of
 36,911/65,796 microseconds and FFF p50/p95 of 31,539/62,648 microseconds. A local

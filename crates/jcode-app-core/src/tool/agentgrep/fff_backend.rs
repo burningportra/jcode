@@ -393,3 +393,52 @@ fn fallback(
         shadow_output: None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn active_index_is_not_replaced_and_global_search_capacity_is_bounded() {
+        let first = tempfile::tempdir().unwrap();
+        let second = tempfile::tempdir().unwrap();
+        let first_root = first.path().canonicalize().unwrap();
+        let second_root = second.path().canonicalize().unwrap();
+        let registry = FffIndexRegistry::new();
+        let entry = registry.entry_for(&first_root).unwrap();
+
+        let first_permit = registry.begin_search(&entry).unwrap();
+        let second_permit = registry.begin_search(&entry).unwrap();
+        assert_eq!(registry.begin_search(&entry).err(), Some("search_capacity"));
+        assert_eq!(registry.entry_for(&second_root).err(), Some("index_busy"));
+
+        drop(first_permit);
+        drop(second_permit);
+        let replacement = registry.entry_for(&second_root).unwrap();
+        assert!(replacement.generation > entry.generation);
+        assert_eq!(replacement.root, second_root);
+    }
+
+    #[test]
+    fn filesystem_and_home_roots_are_rejected() {
+        let filesystem_root = PathBuf::from(std::path::MAIN_SEPARATOR.to_string());
+        let filesystem_ctx = ToolContext {
+            session_id: "root-test".into(),
+            message_id: "root-test".into(),
+            tool_call_id: "root-test".into(),
+            working_dir: Some(filesystem_root),
+            stdin_request_tx: None,
+            graceful_shutdown_signal: None,
+            execution_mode: crate::tool::ToolExecutionMode::Direct,
+        };
+        assert!(index_root(&filesystem_ctx).is_none());
+
+        if let Some(home) = dirs::home_dir() {
+            let home_ctx = ToolContext {
+                working_dir: Some(home),
+                ..filesystem_ctx
+            };
+            assert!(index_root(&home_ctx).is_none());
+        }
+    }
+}
