@@ -83,7 +83,7 @@ pub fn acquire_operation_lock() -> Result<OperationLock> {
     Ok(OperationLock(file))
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 pub struct EvidenceReference {
     pub session_id: String,
     pub message_id: String,
@@ -365,7 +365,7 @@ fn validate_persisted(proposal: &Proposal, expected_id: &str) -> Result<()> {
     Ok(())
 }
 
-fn verify_evidence(references: &[EvidenceReference]) -> Result<Vec<VerifiedEvidence>> {
+pub(super) fn verify_evidence(references: &[EvidenceReference]) -> Result<Vec<VerifiedEvidence>> {
     if !(2..=MAX_EVIDENCE).contains(&references.len()) {
         bail!("evidence must contain between 2 and {MAX_EVIDENCE} references");
     }
