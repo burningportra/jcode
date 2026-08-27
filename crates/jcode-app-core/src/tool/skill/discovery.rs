@@ -322,6 +322,11 @@ fn eligible_workflow(normalized: &str) -> bool {
     let chars = normalized.chars().count();
     (MIN_TEXT_CHARS..=MAX_TEXT_CHARS).contains(&chars)
         && !normalized.starts_with("i approve skill crystallization proposal ")
+        && !normalized.starts_with("[auto]")
+        && !normalized.starts_with("**background task**")
+        && !normalized.starts_with("🐝 **swarm await finished**")
+        && !normalized.starts_with("⚠ file activity:")
+        && !(normalized.starts_with("you have ") && normalized.contains(" incomplete todos"))
 }
 
 fn suggestion_id(pattern_id: &str, evidence: &[EvidenceReference]) -> String {

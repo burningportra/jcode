@@ -1245,6 +1245,26 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn proactive_discovery_ignores_jcode_control_plane_messages() {
+        let _env_lock = crate::storage::lock_test_env();
+        let _home = TestHome::new();
+        for suffix in ["a", "b", "c"] {
+            save_evidence_session(
+                &format!("control-plane-{suffix}"),
+                "[auto] Quality checks passed. Give the user a concise final response now.",
+            );
+        }
+        let output = create_test_tool()
+            .execute(
+                json!({"action": "discover_crystallization"}),
+                create_test_context(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(output.metadata.unwrap()["status"], "no_suggestion");
+    }
+
+    #[tokio::test]
     async fn crystallization_public_workflow_requires_confirmation_and_reloads() {
         let _env_lock = crate::storage::lock_test_env();
         let home = TestHome::new();
