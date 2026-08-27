@@ -187,6 +187,31 @@ fn test_cerebras_model_routes_are_profile_scoped_and_unique() {
 }
 
 #[test]
+fn test_vercel_ai_gateway_has_immediate_profile_scoped_model_routes() {
+    with_clean_provider_test_env(|| {
+        with_env_var("AI_GATEWAY_API_KEY", "test-vercel-key", || {
+            let profile = crate::provider_catalog::openai_compatible_profile_by_id(
+                "vercel-ai-gateway",
+            )
+            .expect("Vercel AI Gateway profile");
+            let static_models =
+                crate::provider_catalog::openai_compatible_profile_static_models(profile);
+
+            assert!(static_models.contains(&"openai/gpt-5.5".to_string()));
+            assert!(static_models.contains(&"anthropic/claude-sonnet-5".to_string()));
+
+            let routes = MultiProvider::new_fast().model_routes();
+            assert!(routes.iter().any(|route| {
+                route.model == "openai/gpt-5.5"
+                    && route.provider == "Vercel AI Gateway"
+                    && route.api_method == "openai-compatible:vercel-ai-gateway"
+                    && route.available
+            }));
+        });
+    });
+}
+
+#[test]
 fn test_direct_chutes_ignores_legacy_openrouter_catalog_cache() {
     with_clean_provider_test_env(|| {
         let temp_home = tempfile::tempdir().expect("temp HOME");
