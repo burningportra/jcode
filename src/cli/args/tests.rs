@@ -95,6 +95,9 @@ fn test_provider_choice_aliases_parse() {
     let args = Args::try_parse_from(["jcode", "--provider", "together", "run", "smoke"]).unwrap();
     assert_eq!(args.provider, ProviderChoice::TogetherAi);
 
+    let args = Args::try_parse_from(["jcode", "--provider", "vercel", "run", "smoke"]).unwrap();
+    assert_eq!(args.provider, ProviderChoice::VercelAiGateway);
+
     let args = Args::try_parse_from(["jcode", "--provider", "grok", "run", "smoke"]).unwrap();
     assert_eq!(args.provider, ProviderChoice::Xai);
 
