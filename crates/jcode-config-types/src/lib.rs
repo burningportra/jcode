@@ -3,9 +3,9 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum FffBackendMode {
-    #[default]
     Off,
     Shadow,
+    #[default]
     Prefer,
 }
 
@@ -19,7 +19,7 @@ pub struct SearchConfig {
 impl Default for SearchConfig {
     fn default() -> Self {
         Self {
-            fff_backend: FffBackendMode::Off,
+            fff_backend: FffBackendMode::Prefer,
             max_fff_indexes: 1,
         }
     }

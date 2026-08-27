@@ -1,8 +1,8 @@
 use super::{
-    AmbientConfig, Config, DiffDisplayMode, DisplayConfig, HookCommands, LatexRenderingMode,
-    McpToolsMode, PromptSuggestionAcceptanceKey, ProviderConfig, SessionPickerResumeAction,
-    SwarmSpawnMode, ToolConfig, config_env_fingerprint, normalize_prompt_suggestion_workspace,
-    populate_context_limits_from_config_ref,
+    AmbientConfig, Config, DiffDisplayMode, DisplayConfig, FffBackendMode, HookCommands,
+    LatexRenderingMode, McpToolsMode, PromptSuggestionAcceptanceKey, ProviderConfig,
+    SessionPickerResumeAction, SwarmSpawnMode, ToolConfig, config_env_fingerprint,
+    normalize_prompt_suggestion_workspace, populate_context_limits_from_config_ref,
 };
 use std::ffi::OsString;
 use std::path::Path;
@@ -34,6 +34,14 @@ fn test_openai_fast_mode_defaults_to_priority() {
 #[test]
 fn preserve_reasoning_context_defaults_to_enabled() {
     assert!(ProviderConfig::default().preserve_reasoning_context);
+}
+
+#[test]
+fn fff_search_defaults_to_prefer() {
+    assert_eq!(Config::default().search.fff_backend, FffBackendMode::Prefer);
+
+    let config: Config = toml::from_str("").expect("an omitted search section should use defaults");
+    assert_eq!(config.search.fff_backend, FffBackendMode::Prefer);
 }
 
 #[test]

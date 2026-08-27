@@ -315,9 +315,9 @@ bing_market = "en-US"
 # searxng_url = "https://searx.example.org"
 
 [search]
-# Warm in-process FFF backend rollout: "off", "shadow", or "prefer".
+# Warm in-process FFF backend: "off", "shadow", or "prefer".
 # Phase 1 routes only literal case-sensitive paths-only grep; every other request falls back.
-fff_backend = "off"
+fff_backend = "prefer"
 max_fff_indexes = 1
 
 [quality]
@@ -734,6 +734,7 @@ mod tests {
             toml::from_str::<Config>(&template).expect("the shipped config template must parse");
         assert_eq!(config.tools.mcp_tools, McpToolsMode::Auto);
         assert_eq!(config.tools.mcp_tools_token_threshold, 8_000);
+        assert_eq!(config.search.fff_backend, FffBackendMode::Prefer);
         assert!(
             config.display.show_thinking,
             "the shipped user config must request model reasoning"
