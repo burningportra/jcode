@@ -489,21 +489,21 @@ Using a self-dev Jcode binary and isolated daemon socket:
 
 ## Rollout and rollback
 
-Start behind a typed setting:
+The backend ships behind a typed setting, with the accepted indexed path enabled by default:
 
 ```toml
 [search]
-fff_backend = "off" # off | shadow | prefer
+fff_backend = "prefer" # off | shadow | prefer
 max_fff_indexes = 1
 ```
 
 The typed setting belongs to `jcode-config-types`; runtime resolution remains in Jcode's normal config path. `AgentGrepTool::new()` owns an isolated registry, and Jcode's existing process-wide base-tool cache shares the production instance across sessions.
 
-- `off`: current behavior
+- `off`: force the linked AgentGrep backend
 - `shadow`: linked AgentGrep answers; eligible requests also run FFF for parity and timing without affecting output
 - `prefer`: ready eligible requests use FFF; all others fall back
 
-Default to `off` for the first merged build, then `shadow` for self-dev and canary use. Shadow comparisons are sampled and run outside the response critical path. Move to `prefer` only after parity, watcher, memory, and packaging acceptance pass. Rollback is one configuration change and requires no data migration.
+The initial implementation landed disabled while parity, watcher, resource, performance, and packaging acceptance ran. Those checks passed, so the shipped default is now `prefer`. Shadow remains available for diagnostics, and rollback is one configuration change with no data migration.
 
 ## Success criteria
 
