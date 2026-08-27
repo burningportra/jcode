@@ -1103,8 +1103,6 @@ fn populate_context_limits_from_config_ref_seeds_global_cache() {
                 reasoning_effort: None,
                 context_window: Some(1_000_000),
                 input: Vec::new(),
-                reasoning: None,
-                reasoning_effort: None,
             }],
             ..Default::default()
         },
@@ -1141,8 +1139,6 @@ fn populate_context_limits_from_config_seeds_qualified_runtime_model_shapes() {
                     reasoning_effort: None,
                     context_window: Some(131_072),
                     input: Vec::new(),
-                    reasoning: None,
-                    reasoning_effort: None,
                 },
                 NamedProviderModelConfig {
                     id: "/opt/models/issue421-ornith-35b-q4.gguf".to_string(),
@@ -1150,8 +1146,6 @@ fn populate_context_limits_from_config_seeds_qualified_runtime_model_shapes() {
                     reasoning_effort: None,
                     context_window: Some(131_072),
                     input: Vec::new(),
-                    reasoning: None,
-                    reasoning_effort: None,
                 },
             ],
             ..Default::default()
