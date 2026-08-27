@@ -1,5 +1,42 @@
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum FffBackendMode {
+    #[default]
+    Off,
+    Shadow,
+    Prefer,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SearchConfig {
+    pub fff_backend: FffBackendMode,
+    pub max_fff_indexes: usize,
+}
+
+impl Default for SearchConfig {
+    fn default() -> Self {
+        Self {
+            fff_backend: FffBackendMode::Off,
+            max_fff_indexes: 1,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct QualityConfig {
+    pub enabled: bool,
+}
+
+impl Default for QualityConfig {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
+}
+
 mod display;
 pub use display::DisplayConfig;
 pub mod keybindings;

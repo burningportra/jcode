@@ -26,6 +26,7 @@ mod memory;
 mod multiedit;
 mod open;
 mod patch;
+mod quality;
 mod read;
 pub mod selfdev;
 pub(crate) mod serde_coerce;
@@ -287,6 +288,7 @@ impl Registry {
                 jcode_docs::JcodeDocsTool::new,
             );
             Self::insert_tool_timed(&mut m, &mut timings, "todo", todo::TodoTool::new);
+            Self::insert_tool_timed(&mut m, &mut timings, "quality", quality::QualityTool::new);
             Self::insert_tool_timed(&mut m, &mut timings, "bg", bg::BgTool::new);
             Self::insert_tool_timed(
                 &mut m,

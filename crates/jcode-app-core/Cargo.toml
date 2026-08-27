@@ -92,6 +92,7 @@ jcode-core = { path = "../jcode-core" }
 jcode-message-types = { path = "../jcode-message-types" }
 jcode-overnight-core = { path = "../jcode-overnight-core" }
 jcode-plan = { path = "../jcode-plan" }
+jcode-quality-types = { path = "../jcode-quality-types" }
 jcode-swarm-core = { path = "../jcode-swarm-core" }
 jcode-selfdev-types = { path = "../jcode-selfdev-types" }
 jcode-session-types = { path = "../jcode-session-types" }
@@ -105,9 +106,11 @@ flate2 = "1"
 tar = "0.4"
 tempfile = "3"
 agentgrep = { git = "https://github.com/1jehuang/agentgrep.git", tag = "v0.1.6" }
+fff-search = { version = "0.10.5", optional = true }
 
 [features]
-default = ["pdf", "embeddings", "bedrock"]
+default = ["pdf", "embeddings", "bedrock", "fff-search"]
+fff-search = ["dep:fff-search"]
 # jemalloc allocator stats live in jcode-base (process_memory); forward there.
 jemalloc = ["jcode-base/jemalloc"]
 jemalloc-prof = ["jcode-base/jemalloc-prof"]

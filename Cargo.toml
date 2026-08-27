@@ -36,6 +36,7 @@ members = [
     "crates/jcode-overnight-core",
     "crates/jcode-plan",
     "crates/jcode-productivity-core",
+    "crates/jcode-quality-types",
     "crates/jcode-swarm-core",
     "crates/jcode-protocol",
     "crates/jcode-selfdev-types",
@@ -211,7 +212,7 @@ tempfile = "3"
 # semantic retrieval, and embedding-backed features work out of the box.
 # Use `JCODE_DEV_FEATURE_PROFILE=minimal` for compile-speed probes that need
 # to skip optional default feature stacks.
-default = ["pdf", "embeddings", "bedrock"]
+default = ["pdf", "embeddings", "bedrock", "fff-search"]
 dev-bins = ["jcode-tui/dev-bins"]
 jemalloc = [
     "dep:tikv-jemallocator",
@@ -229,6 +230,7 @@ embeddings = ["jcode-tui/embeddings"]
 # Live AWS Bedrock support (the AWS SDK stack) lives in jcode-provider-bedrock;
 # forwards down through jcode-tui -> jcode-app-core -> jcode-base.
 bedrock = ["jcode-tui/bedrock"]
+fff-search = ["jcode-tui/fff-search"]
 # Internal release feature: build a supported OpenSSL inside the CentOS 7
 # compatibility image while preserving the glibc 2.17 runtime baseline.
 linux-compat-vendored-openssl = ["jcode-tui/linux-compat-vendored-openssl"]

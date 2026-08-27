@@ -1,7 +1,22 @@
 # Engineering standards and anti-slop quality gate
 
-Status: proposed
+Status: first report-only slice implemented
 Date: 2026-08-27
+
+## Implementation evidence
+
+The first report-only slice is implemented in `jcode-quality-types`,
+`jcode-base::quality`, and the public `quality check` tool. Focused public-tool
+tests cover a sourced pass, a source-linked threshold violation, missing Oxlint,
+an absent complexity rule, candidate policy weakening, partial scope, incomplete
+anti-slop accounting, and candidate mutation during analysis. The full quality
+tool test module, stable contract tests, formatting, and feature-disabled app-core
+build passed on macOS arm64 with Rust 1.98.0.
+
+The server-authoritative todo completion transition remains intentionally out of
+scope for this slice, as specified below. Every report therefore sets
+`gate_eligible = false`; the tool is evidence-producing and report-only rather
+than claiming enforcement that does not yet exist.
 
 ## Summary
 

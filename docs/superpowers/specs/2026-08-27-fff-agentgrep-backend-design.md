@@ -1,7 +1,30 @@
 # FFF-backed AgentGrep search
 
-Status: proposed
+Status: Phase 1A implemented, rollout default off
 Date: 2026-08-27
+
+## Implementation evidence
+
+Phase 1A is implemented behind the `fff-search` Cargo feature and the typed
+`[search].fff_backend = off | shadow | prefer` setting. The public tool keeps its
+existing name and schema. Production defaults to `off`; ready eligible requests
+can be compared in `shadow` or routed in `prefer`, while cold and unsupported
+requests use linked AgentGrep with machine-readable fallback metadata.
+
+Public-tool tests against the published `fff-search 0.10.5` crate prove ready
+backend selection, byte-for-byte parity, zero matches, ordering, case and literal
+whitespace behavior, shadow parity, unsupported-request fallback, and create,
+modify, rename, and delete watcher updates. The existing AgentGrep test module,
+formatting, config tests, and `jcode-app-core --no-default-features` check pass.
+
+On the Jcode repository on macOS arm64, 50 measured calls after 5 warmups through
+the same `AgentGrepTool::execute` boundary observed linked p50/p95 of
+36,911/65,796 microseconds and FFF p50/p95 of 31,539/62,648 microseconds. A local
+self-dev binary comparison measured 337,556,368 bytes with FFF and 326,804,144
+bytes without it, a 10,752,224-byte increase. `cargo tree -e features` confirms
+the stable crate's default `ripgrep` feature and no `zlob` feature. Cross-platform
+release linking and release-profile size remain CI acceptance items because this
+machine has only the macOS arm64 and wasm targets installed.
 
 ## Summary
 

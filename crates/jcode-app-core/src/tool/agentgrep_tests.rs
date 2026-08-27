@@ -44,6 +44,13 @@ fn grep_input(query: &str, max_regions: Option<usize>) -> AgentGrepInput {
     }
 }
 
+#[cfg(feature = "fff-search")]
+fn paths_only_input(query: &str) -> AgentGrepInput {
+    let mut input = grep_input(query, None);
+    input.paths_only = Some(true);
+    input
+}
+
 #[tokio::test]
 async fn foreground_budget_returns_fast_search_result_directly() {
     let handle = tokio::spawn(async { Ok(ToolOutput::new("fast result")) });
@@ -58,6 +65,321 @@ async fn foreground_budget_returns_fast_search_result_directly() {
 
     assert_eq!(output.output, "fast result");
     assert!(output.metadata.is_none());
+}
+
+#[cfg(feature = "fff-search")]
+#[tokio::test]
+async fn prefer_mode_routes_ready_literal_paths_only_search_through_fff() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    fs::write(
+        temp.path().join("zeta.rs"),
+        "const NEEDLE: &str = \"CaseNeedle\";\n",
+    )
+    .unwrap();
+    fs::write(temp.path().join("alpha.rs"), "// CaseNeedle\n").unwrap();
+    fs::write(temp.path().join("lower.rs"), "// caseneedle\n").unwrap();
+    let tool = AgentGrepTool::with_fff_mode(crate::config::FffBackendMode::Prefer);
+    let input = paths_only_input("CaseNeedle");
+
+    let cold = tool
+        .execute(serde_json::to_value(&input).unwrap(), test_ctx(temp.path()))
+        .await
+        .unwrap();
+    assert_eq!(
+        cold.metadata.as_ref().unwrap()["search_backend"],
+        "linked_agentgrep"
+    );
+    assert_eq!(cold.metadata.as_ref().unwrap()["index_state"], "warming");
+    assert!(tool.wait_for_fff_ready(std::time::Duration::from_secs(10)));
+
+    let linked = execute_linked_agentgrep(&input, &test_ctx(temp.path()), None)
+        .unwrap()
+        .output;
+    let warm = tool
+        .execute(serde_json::to_value(&input).unwrap(), test_ctx(temp.path()))
+        .await
+        .unwrap();
+    let metadata = warm.metadata.as_ref().unwrap();
+    assert_eq!(metadata["search_backend"], "fff");
+    assert_eq!(metadata["index_state"], "ready");
+    assert!(metadata["index_generation"].as_u64().is_some());
+    assert_eq!(warm.output, linked);
+    assert_eq!(warm.output, "alpha.rs\nzeta.rs");
+    assert!(
+        !warm.output.contains("lower.rs"),
+        "search must remain case-sensitive"
+    );
+}
+
+#[cfg(feature = "fff-search")]
+#[tokio::test]
+async fn ready_fff_preserves_zero_match_output_byte_for_byte() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    fs::write(temp.path().join("a.rs"), "present\n").unwrap();
+    let tool = AgentGrepTool::with_fff_mode(crate::config::FffBackendMode::Prefer);
+    let warmup = paths_only_input("missing-needle");
+    let _ = tool
+        .execute(
+            serde_json::to_value(&warmup).unwrap(),
+            test_ctx(temp.path()),
+        )
+        .await
+        .unwrap();
+    assert!(tool.wait_for_fff_ready(std::time::Duration::from_secs(10)));
+
+    let linked = execute_linked_agentgrep(&warmup, &test_ctx(temp.path()), None)
+        .unwrap()
+        .output;
+    let output = tool
+        .execute(
+            serde_json::to_value(&warmup).unwrap(),
+            test_ctx(temp.path()),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(output.metadata.as_ref().unwrap()["search_backend"], "fff");
+    assert_eq!(output.output, linked);
+    assert_eq!(output.output, "");
+}
+
+#[cfg(feature = "fff-search")]
+#[tokio::test]
+async fn shadow_mode_returns_linked_output_and_reports_completed_parity() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    fs::write(temp.path().join("a.rs"), "ShadowNeedle\n").unwrap();
+    let tool = AgentGrepTool::with_fff_mode(crate::config::FffBackendMode::Shadow);
+    let input = paths_only_input("ShadowNeedle");
+    let cold = tool
+        .execute(serde_json::to_value(&input).unwrap(), test_ctx(temp.path()))
+        .await
+        .unwrap();
+    assert_eq!(cold.metadata.as_ref().unwrap()["index_state"], "warming");
+    assert!(tool.wait_for_fff_ready(std::time::Duration::from_secs(10)));
+
+    let linked = execute_linked_agentgrep(&input, &test_ctx(temp.path()), None)
+        .unwrap()
+        .output;
+    let output = tool
+        .execute(serde_json::to_value(&input).unwrap(), test_ctx(temp.path()))
+        .await
+        .unwrap();
+    let metadata = output.metadata.as_ref().unwrap();
+
+    assert_eq!(output.output, linked);
+    assert_eq!(metadata["search_backend"], "linked_agentgrep");
+    assert_eq!(metadata["index_state"], "ready");
+    assert_eq!(metadata["fallback_reason"], "shadow_mode");
+    assert_eq!(metadata["shadow_parity"], true);
+}
+
+#[cfg(feature = "fff-search")]
+#[tokio::test]
+async fn ready_fff_preserves_literal_whitespace_semantics() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    fs::write(
+        temp.path().join("spaced.rs"),
+        "const VALUE: &str = \" a b \";\n",
+    )
+    .unwrap();
+    fs::write(
+        temp.path().join("compact.rs"),
+        "const VALUE: &str = \"a b\";\n",
+    )
+    .unwrap();
+    let tool = AgentGrepTool::with_fff_mode(crate::config::FffBackendMode::Prefer);
+    let input = paths_only_input(" a b ");
+    let _ = tool
+        .execute(serde_json::to_value(&input).unwrap(), test_ctx(temp.path()))
+        .await
+        .unwrap();
+    assert!(tool.wait_for_fff_ready(std::time::Duration::from_secs(10)));
+
+    let linked = execute_linked_agentgrep(&input, &test_ctx(temp.path()), None)
+        .unwrap()
+        .output;
+    let output = tool
+        .execute(serde_json::to_value(&input).unwrap(), test_ctx(temp.path()))
+        .await
+        .unwrap();
+
+    assert_eq!(output.metadata.as_ref().unwrap()["search_backend"], "fff");
+    assert_eq!(output.output, linked);
+    assert_eq!(output.output, "spaced.rs");
+}
+
+#[cfg(feature = "fff-search")]
+#[tokio::test]
+async fn phase_one_ineligible_requests_fall_back_with_machine_readable_reason() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    fs::write(temp.path().join("a.rs"), "CaseNeedle\n").unwrap();
+    let tool = AgentGrepTool::with_fff_mode(crate::config::FffBackendMode::Prefer);
+    let mut input = paths_only_input("CaseNeedle");
+    input.regex = Some(true);
+
+    let output = tool
+        .execute(serde_json::to_value(&input).unwrap(), test_ctx(temp.path()))
+        .await
+        .unwrap();
+    let metadata = output.metadata.unwrap();
+    assert_eq!(metadata["search_backend"], "linked_agentgrep");
+    assert_eq!(metadata["index_state"], "ineligible");
+    assert_eq!(metadata["fallback_reason"], "regex_deferred");
+}
+
+#[cfg(feature = "fff-search")]
+#[tokio::test]
+async fn ready_fff_index_observes_created_and_deleted_files() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    fs::write(temp.path().join("base.rs"), "WatchNeedle\n").unwrap();
+    let tool = AgentGrepTool::with_fff_mode(crate::config::FffBackendMode::Prefer);
+    let input = paths_only_input("WatchNeedle");
+    let _ = tool
+        .execute(serde_json::to_value(&input).unwrap(), test_ctx(temp.path()))
+        .await
+        .unwrap();
+    assert!(tool.wait_for_fff_ready(std::time::Duration::from_secs(10)));
+
+    fs::write(temp.path().join("new.rs"), "WatchNeedle\n").unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    loop {
+        let output = tool
+            .execute(serde_json::to_value(&input).unwrap(), test_ctx(temp.path()))
+            .await
+            .unwrap();
+        if output.output.contains("new.rs") {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "FFF watcher missed created file"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+
+    fs::write(temp.path().join("base.rs"), "no longer matches\n").unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    loop {
+        let output = tool
+            .execute(serde_json::to_value(&input).unwrap(), test_ctx(temp.path()))
+            .await
+            .unwrap();
+        if !output.output.contains("base.rs") {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "FFF watcher missed modified file"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+
+    fs::rename(temp.path().join("new.rs"), temp.path().join("renamed.rs")).unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    loop {
+        let output = tool
+            .execute(serde_json::to_value(&input).unwrap(), test_ctx(temp.path()))
+            .await
+            .unwrap();
+        if output.output.contains("renamed.rs") && !output.output.contains("new.rs") {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "FFF watcher missed renamed file"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+
+    fs::remove_file(temp.path().join("base.rs")).unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    loop {
+        let output = tool
+            .execute(serde_json::to_value(&input).unwrap(), test_ctx(temp.path()))
+            .await
+            .unwrap();
+        if !output.output.contains("base.rs") {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "FFF watcher missed deleted file"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+}
+
+#[cfg(feature = "fff-search")]
+#[tokio::test]
+#[ignore = "developer benchmark: measures 50 warm searches on the Jcode repository"]
+async fn benchmark_warm_fff_against_linked_agentgrep() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("workspace root");
+    let linked_tool = AgentGrepTool::with_fff_mode(crate::config::FffBackendMode::Off);
+    let tool = AgentGrepTool::with_fff_mode(crate::config::FffBackendMode::Prefer);
+    let input = paths_only_input("ToolOutput");
+    let ctx = test_ctx(root);
+    let _ = tool
+        .execute(serde_json::to_value(&input).unwrap(), ctx.clone())
+        .await
+        .unwrap();
+    assert!(tool.wait_for_fff_ready(std::time::Duration::from_secs(30)));
+
+    for _ in 0..5 {
+        let linked = linked_tool
+            .execute(serde_json::to_value(&input).unwrap(), ctx.clone())
+            .await
+            .unwrap();
+        let fff = tool
+            .execute(serde_json::to_value(&input).unwrap(), ctx.clone())
+            .await
+            .unwrap();
+        assert_eq!(fff.metadata.as_ref().unwrap()["search_backend"], "fff");
+        assert_eq!(fff.output, linked.output);
+    }
+
+    let mut linked_micros = Vec::with_capacity(50);
+    let mut fff_micros = Vec::with_capacity(50);
+    for _ in 0..50 {
+        let started = std::time::Instant::now();
+        let linked = linked_tool
+            .execute(serde_json::to_value(&input).unwrap(), ctx.clone())
+            .await
+            .unwrap();
+        linked_micros.push(started.elapsed().as_micros() as u64);
+
+        let started = std::time::Instant::now();
+        let fff = tool
+            .execute(serde_json::to_value(&input).unwrap(), ctx.clone())
+            .await
+            .unwrap();
+        fff_micros.push(started.elapsed().as_micros() as u64);
+        assert_eq!(fff.output, linked.output);
+        assert!(started.elapsed() < std::time::Duration::from_secs(5));
+    }
+    linked_micros.sort_unstable();
+    fff_micros.sort_unstable();
+    let percentile = |samples: &[u64], numerator: usize| {
+        samples[(samples.len() * numerator / 100).min(samples.len() - 1)]
+    };
+    eprintln!(
+        "FFF_BENCHMARK {}",
+        serde_json::json!({
+            "sample_count": 50,
+            "warmup_count": 5,
+            "query_class": "case-sensitive literal paths_only grep",
+            "index_state": "ready",
+            "filesystem_cache": "warm after five unmeasured calls",
+            "os": std::env::consts::OS,
+            "arch": std::env::consts::ARCH,
+            "linked_p50_us": percentile(&linked_micros, 50),
+            "linked_p95_us": percentile(&linked_micros, 95),
+            "fff_p50_us": percentile(&fff_micros, 50),
+            "fff_p95_us": percentile(&fff_micros, 95),
+        })
+    );
 }
 
 #[tokio::test]

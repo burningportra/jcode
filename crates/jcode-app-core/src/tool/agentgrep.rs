@@ -17,6 +17,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+#[cfg(feature = "fff-search")]
+use std::sync::Arc;
 use std::sync::OnceLock;
 use std::time::Duration;
 
@@ -24,6 +26,8 @@ const AGENTGREP_FOREGROUND_BUDGET: Duration = Duration::from_secs(5);
 
 mod args;
 mod context;
+#[cfg(feature = "fff-search")]
+mod fff_backend;
 
 #[cfg(test)]
 use self::args::trace_or_smart_terms_owned;
@@ -40,7 +44,7 @@ use ::agentgrep::render::{
     render_find_output, render_grep_output, render_outline_output, render_smart_output,
 };
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct AgentGrepInput {
     #[serde(default = "default_agentgrep_mode")]
     mode: String,
@@ -173,11 +177,34 @@ struct ExposureDescriptor {
     compaction_cutoff: Option<usize>,
 }
 
-pub struct AgentGrepTool;
+pub struct AgentGrepTool {
+    #[cfg(feature = "fff-search")]
+    fff_registry: Arc<fff_backend::FffIndexRegistry>,
+    #[cfg(test)]
+    fff_mode_override: Option<crate::config::FffBackendMode>,
+}
 
 impl AgentGrepTool {
     pub fn new() -> Self {
-        Self
+        Self {
+            #[cfg(feature = "fff-search")]
+            fff_registry: Arc::new(fff_backend::FffIndexRegistry::new()),
+            #[cfg(test)]
+            fff_mode_override: None,
+        }
+    }
+
+    #[cfg(all(test, feature = "fff-search"))]
+    fn with_fff_mode(mode: crate::config::FffBackendMode) -> Self {
+        Self {
+            fff_registry: Arc::new(fff_backend::FffIndexRegistry::new()),
+            fff_mode_override: Some(mode),
+        }
+    }
+
+    #[cfg(all(test, feature = "fff-search"))]
+    fn wait_for_fff_ready(&self, timeout: Duration) -> bool {
+        self.fff_registry.wait_for_ready(timeout)
     }
 }
 
@@ -250,6 +277,10 @@ impl Tool for AgentGrepTool {
         let params: AgentGrepInput = serde_json::from_value(input)?;
         let display_name = summarize_background_search(&params);
         let session_id = ctx.session_id.clone();
+        #[cfg(feature = "fff-search")]
+        let fff_registry = self.fff_registry.clone();
+        #[cfg(test)]
+        let fff_mode_override = self.fff_mode_override;
         // The search shells out to ripgrep and walks/reads files (and for
         // trace/outline modes also loads the session and reads more files),
         // all of which is blocking work with no async yield points. Offload it
@@ -259,8 +290,16 @@ impl Tool for AgentGrepTool {
         // the first cold-cache search feel like it "takes forever" with no
         // spinner and an unresponsive interrupt. This mirrors how the sibling
         // grep/glob/ls tools offload their work.
-        let work_handle =
-            tokio::task::spawn_blocking(move || run_agentgrep_blocking(&params, &ctx));
+        let work_handle = tokio::task::spawn_blocking(move || {
+            run_agentgrep_blocking_with_backend(
+                &params,
+                &ctx,
+                #[cfg(feature = "fff-search")]
+                &fff_registry,
+                #[cfg(test)]
+                fff_mode_override,
+            )
+        });
         await_or_background_search(
             work_handle,
             AGENTGREP_FOREGROUND_BUDGET,
@@ -332,7 +371,25 @@ fn summarize_background_search(params: &AgentGrepInput) -> String {
     )
 }
 
+#[cfg(test)]
 fn run_agentgrep_blocking(params: &AgentGrepInput, ctx: &ToolContext) -> Result<ToolOutput> {
+    #[cfg(feature = "fff-search")]
+    let registry = fff_backend::FffIndexRegistry::new();
+    run_agentgrep_blocking_with_backend(
+        params,
+        ctx,
+        #[cfg(feature = "fff-search")]
+        &registry,
+        Some(crate::config::FffBackendMode::Off),
+    )
+}
+
+fn run_agentgrep_blocking_with_backend(
+    params: &AgentGrepInput,
+    ctx: &ToolContext,
+    #[cfg(feature = "fff-search")] fff_registry: &fff_backend::FffIndexRegistry,
+    #[cfg(test)] fff_mode_override: Option<crate::config::FffBackendMode>,
+) -> Result<ToolOutput> {
     if ctx.working_dir.is_none() {
         let explicit_path = params.path.as_deref().or(params.file.as_deref());
         if explicit_path.is_none_or(|path| !Path::new(path).is_absolute()) {
@@ -344,7 +401,45 @@ fn run_agentgrep_blocking(params: &AgentGrepInput, ctx: &ToolContext) -> Result<
     let context_path = maybe_write_context_json(params, ctx)?;
     let request = summarize_agentgrep_request(params, ctx, context_path.as_deref());
     let started_at = std::time::Instant::now();
-    let outcome = execute_linked_agentgrep(params, ctx, context_path.as_deref());
+    #[cfg(feature = "fff-search")]
+    let attempt = fff_backend::attempt(params, ctx, fff_registry, {
+        #[cfg(test)]
+        {
+            fff_mode_override.unwrap_or(crate::config::config().search.fff_backend)
+        }
+        #[cfg(not(test))]
+        {
+            let search = &crate::config::config().search;
+            if search.max_fff_indexes == 0 {
+                crate::config::FffBackendMode::Off
+            } else {
+                search.fff_backend
+            }
+        }
+    });
+    #[cfg(feature = "fff-search")]
+    let outcome = match attempt {
+        fff_backend::BackendAttempt::Answer(output) => Ok(output),
+        fff_backend::BackendAttempt::Fallback {
+            metadata,
+            shadow_output,
+        } => execute_linked_agentgrep(params, ctx, context_path.as_deref()).map(|mut output| {
+            let mut metadata = metadata;
+            if let Some(shadow_output) = shadow_output {
+                metadata["shadow_parity"] = Value::Bool(output.output == shadow_output);
+            }
+            output.metadata = Some(metadata);
+            output
+        }),
+    };
+    #[cfg(not(feature = "fff-search"))]
+    let outcome = execute_linked_agentgrep(params, ctx, context_path.as_deref()).map(|output| {
+        output.with_metadata(json!({
+            "search_backend": "linked_agentgrep",
+            "index_state": "ineligible",
+            "fallback_reason": "feature_disabled",
+        }))
+    });
     let elapsed_ms = started_at.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
 
     if let Some(path) = context_path {

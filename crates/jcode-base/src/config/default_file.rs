@@ -314,6 +314,16 @@ bing_market = "en-US"
 # set engine = "searxng" or add it to fallback_engines.
 # searxng_url = "https://searx.example.org"
 
+[search]
+# Warm in-process FFF backend rollout: "off", "shadow", or "prefer".
+# Phase 1 routes only literal case-sensitive paths-only grep; every other request falls back.
+fff_backend = "off"
+max_fff_indexes = 1
+
+[quality]
+# Report-only sourced standards check. This does not gate todo completion.
+enabled = true
+
 [tools]
 # Controls which built-in tools are sent to the model.
 # Profiles: "full" (default), "acp", "minimal"/"lite", or "none".
