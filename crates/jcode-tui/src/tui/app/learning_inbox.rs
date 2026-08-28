@@ -19,6 +19,7 @@ impl App {
                 Ok(Ok(crate::learning_inbox::RefreshOutcome::New(item))) => LearningInboxUpdated {
                     session_id,
                     suggestion_id: Some(item.suggestion_id),
+                    suggestion_kind: Some(item.suggestion_kind.as_str().to_string()),
                     workflow_text: Some(item.workflow_text),
                     evidence_count: item.evidence_count,
                     error: None,
@@ -27,6 +28,7 @@ impl App {
                 Ok(Err(error)) => LearningInboxUpdated {
                     session_id,
                     suggestion_id: None,
+                    suggestion_kind: None,
                     workflow_text: None,
                     evidence_count: 0,
                     error: Some(error.to_string()),
@@ -34,6 +36,7 @@ impl App {
                 Err(error) => LearningInboxUpdated {
                     session_id,
                     suggestion_id: None,
+                    suggestion_kind: None,
                     workflow_text: None,
                     evidence_count: 0,
                     error: Some(error.to_string()),
@@ -55,9 +58,15 @@ impl App {
             return false;
         };
         let workflow = compact_workflow(&workflow, 160);
+        let subject = match update.suggestion_kind.as_deref() {
+            Some("refine") => "skill refinement",
+            Some("merge") => "skill merge",
+            Some("retire") => "skill retirement",
+            _ => "repeated workflow",
+        };
         self.push_display_message(DisplayMessage::system(format!(
-            "Learning Inbox: repeated workflow found in {} sessions: {}\n\nRun `/learning` to Review, Dismiss, or Never suggest this.",
-            update.evidence_count, workflow
+            "Learning Inbox: {subject} found from {} evidence records: {}\n\nRun `/learning` to Review, Dismiss, or Never suggest this.",
+            update.evidence_count, workflow,
         )));
         if let Some(suggestion_id) = update.suggestion_id
             && let Err(error) = crate::learning_inbox::mark_surfaced(&suggestion_id)
@@ -84,11 +93,9 @@ impl App {
             self.push_display_message(DisplayMessage::system(output));
         }
         if update.action == "review"
-            && let Some(suggestion_id) = update.suggestion_id
+            && let Some(review_prompt) = update.review_prompt
         {
-            self.queued_messages.push(format!(
-                "The user chose Review for Learning Inbox suggestion {suggestion_id}. Call skill_manage review_crystallization for this suggestion, inspect its evidence, draft one focused global skill, and call skill_manage crystallize. Do not approve or install it. Present the pending proposal for explicit user approval."
-            ));
+            self.queued_messages.push(review_prompt);
             self.pending_queued_dispatch = true;
             self.set_status_notice("Learning Inbox: drafting proposal");
         } else {
@@ -163,17 +170,21 @@ pub(super) fn handle_learning_command(app: &mut App, trimmed: &str) -> bool {
         })
         .await;
         let update = match result {
-            Ok(Ok(output)) => LearningInboxCommandCompleted {
+            Ok(Ok(result)) => LearningInboxCommandCompleted {
                 session_id,
                 action,
-                suggestion_id,
-                output: Some(output.output),
+                suggestion_id: result.suggestion_id,
+                suggestion_kind: result.suggestion_kind.map(|kind| kind.as_str().to_string()),
+                review_prompt: result.review_prompt,
+                output: Some(result.output.output),
                 error: None,
             },
             Ok(Err(error)) => LearningInboxCommandCompleted {
                 session_id,
                 action,
                 suggestion_id,
+                suggestion_kind: None,
+                review_prompt: None,
                 output: None,
                 error: Some(error.to_string()),
             },
@@ -181,6 +192,8 @@ pub(super) fn handle_learning_command(app: &mut App, trimmed: &str) -> bool {
                 session_id,
                 action,
                 suggestion_id,
+                suggestion_kind: None,
+                review_prompt: None,
                 output: None,
                 error: Some(error.to_string()),
             },

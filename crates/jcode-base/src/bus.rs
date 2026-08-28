@@ -395,6 +395,7 @@ pub enum SessionUpdateStatus {
 pub struct LearningInboxUpdated {
     pub session_id: String,
     pub suggestion_id: Option<String>,
+    pub suggestion_kind: Option<String>,
     pub workflow_text: Option<String>,
     pub evidence_count: usize,
     pub error: Option<String>,
@@ -405,6 +406,8 @@ pub struct LearningInboxCommandCompleted {
     pub session_id: String,
     pub action: String,
     pub suggestion_id: Option<String>,
+    pub suggestion_kind: Option<String>,
+    pub review_prompt: Option<String>,
     pub output: Option<String>,
     pub error: Option<String>,
 }

@@ -11,6 +11,7 @@ use tokio::sync::RwLock;
 
 pub(crate) mod crystallization;
 pub(crate) mod discovery;
+pub(crate) mod evolution;
 
 use crystallization::EvidenceReference;
 
@@ -63,6 +64,24 @@ struct SkillInput {
     approval_evidence: Option<EvidenceReference>,
     #[serde(default)]
     suggestion_id: Option<String>,
+    #[serde(default)]
+    usage_id: Option<String>,
+    #[serde(default)]
+    outcome: Option<String>,
+    #[serde(default)]
+    confidence: Option<f64>,
+    #[serde(default)]
+    rationale: Option<String>,
+    #[serde(default)]
+    related_skill: Option<String>,
+    #[serde(default)]
+    evolution_kind: Option<String>,
+    #[serde(default)]
+    source_names: Option<Vec<String>>,
+    #[serde(default)]
+    destination_name: Option<String>,
+    #[serde(default)]
+    proposed_content: Option<String>,
 }
 
 fn default_action() -> String {
@@ -76,6 +95,15 @@ fn validate_action_fields(params: &SkillInput) -> Result<()> {
                 || params.confirmed.is_some()
                 || params.approval_evidence.is_some()
                 || params.suggestion_id.is_some()
+                || params.usage_id.is_some()
+                || params.outcome.is_some()
+                || params.confidence.is_some()
+                || params.rationale.is_some()
+                || params.related_skill.is_some()
+                || params.evolution_kind.is_some()
+                || params.source_names.is_some()
+                || params.destination_name.is_some()
+                || params.proposed_content.is_some()
             {
                 anyhow::bail!("crystallize accepts name, description, content, and evidence only");
             }
@@ -87,6 +115,15 @@ fn validate_action_fields(params: &SkillInput) -> Result<()> {
                 || params.evidence.is_some()
                 || params.args.is_some()
                 || params.suggestion_id.is_some()
+                || params.usage_id.is_some()
+                || params.outcome.is_some()
+                || params.confidence.is_some()
+                || params.rationale.is_some()
+                || params.related_skill.is_some()
+                || params.evolution_kind.is_some()
+                || params.source_names.is_some()
+                || params.destination_name.is_some()
+                || params.proposed_content.is_some()
             {
                 anyhow::bail!(
                     "approve_crystallization accepts proposal_id, confirmed, and approval_evidence only"
@@ -103,6 +140,15 @@ fn validate_action_fields(params: &SkillInput) -> Result<()> {
                 || params.confirmed.is_some()
                 || params.approval_evidence.is_some()
                 || params.suggestion_id.is_some()
+                || params.usage_id.is_some()
+                || params.outcome.is_some()
+                || params.confidence.is_some()
+                || params.rationale.is_some()
+                || params.related_skill.is_some()
+                || params.evolution_kind.is_some()
+                || params.source_names.is_some()
+                || params.destination_name.is_some()
+                || params.proposed_content.is_some()
             {
                 anyhow::bail!("discover_crystallization accepts no action-specific fields");
             }
@@ -116,8 +162,89 @@ fn validate_action_fields(params: &SkillInput) -> Result<()> {
                 || params.proposal_id.is_some()
                 || params.confirmed.is_some()
                 || params.approval_evidence.is_some()
+                || params.usage_id.is_some()
+                || params.outcome.is_some()
+                || params.confidence.is_some()
+                || params.rationale.is_some()
+                || params.related_skill.is_some()
+                || params.evolution_kind.is_some()
+                || params.source_names.is_some()
+                || params.destination_name.is_some()
+                || params.proposed_content.is_some()
             {
                 anyhow::bail!("Discovery suggestion actions accept suggestion_id only");
+            }
+        }
+        "record_skill_outcome" => {
+            if params.usage_id.is_none()
+                || params.outcome.is_none()
+                || params.confidence.is_none()
+                || params.rationale.is_none()
+                || params.name.is_some()
+                || params.args.is_some()
+                || params.description.is_some()
+                || params.content.is_some()
+                || params.evidence.is_some()
+                || params.suggestion_id.is_some()
+                || params.proposal_id.is_some()
+                || params.confirmed.is_some()
+                || params.approval_evidence.is_some()
+                || params.evolution_kind.is_some()
+                || params.source_names.is_some()
+                || params.destination_name.is_some()
+                || params.proposed_content.is_some()
+            {
+                anyhow::bail!(
+                    "record_skill_outcome requires usage_id, outcome, confidence, and rationale"
+                );
+            }
+        }
+        "propose_skill_evolution" => {
+            if params.suggestion_id.is_none()
+                || params.evolution_kind.is_none()
+                || params.source_names.is_none()
+                || params.name.is_some()
+                || params.args.is_some()
+                || params.description.is_some()
+                || params.content.is_some()
+                || params.evidence.is_some()
+                || params.proposal_id.is_some()
+                || params.confirmed.is_some()
+                || params.approval_evidence.is_some()
+                || params.usage_id.is_some()
+                || params.outcome.is_some()
+                || params.confidence.is_some()
+                || params.rationale.is_some()
+                || params.related_skill.is_some()
+            {
+                anyhow::bail!(
+                    "propose_skill_evolution requires suggestion_id, evolution_kind, and source_names"
+                );
+            }
+        }
+        "approve_skill_evolution" => {
+            if params.proposal_id.is_none()
+                || params.confirmed.is_none()
+                || params.approval_evidence.is_none()
+                || params.name.is_some()
+                || params.suggestion_id.is_some()
+                || params.evolution_kind.is_some()
+                || params.source_names.is_some()
+                || params.destination_name.is_some()
+                || params.proposed_content.is_some()
+                || params.args.is_some()
+                || params.description.is_some()
+                || params.content.is_some()
+                || params.evidence.is_some()
+                || params.usage_id.is_some()
+                || params.outcome.is_some()
+                || params.confidence.is_some()
+                || params.rationale.is_some()
+                || params.related_skill.is_some()
+            {
+                anyhow::bail!(
+                    "approve_skill_evolution accepts proposal_id, confirmed, and approval_evidence only"
+                );
             }
         }
         _ => {
@@ -128,8 +255,19 @@ fn validate_action_fields(params: &SkillInput) -> Result<()> {
                 || params.confirmed.is_some()
                 || params.approval_evidence.is_some()
                 || params.suggestion_id.is_some()
+                || params.usage_id.is_some()
+                || params.outcome.is_some()
+                || params.confidence.is_some()
+                || params.rationale.is_some()
+                || params.related_skill.is_some()
+                || params.evolution_kind.is_some()
+                || params.source_names.is_some()
+                || params.destination_name.is_some()
+                || params.proposed_content.is_some()
             {
-                anyhow::bail!("Crystallization fields require a crystallization action");
+                anyhow::bail!(
+                    "Action-specific fields require their documented skill_manage action"
+                );
             }
         }
     }
@@ -153,7 +291,7 @@ impl Tool for SkillTool {
                 "intent": super::intent_schema_property(),
                 "action": {
                     "type": "string",
-                    "enum": ["load", "list", "reload", "reload_all", "read", "crystallize", "approve_crystallization", "discover_crystallization", "review_crystallization", "dismiss_crystallization", "suppress_crystallization"],
+                    "enum": ["load", "list", "reload", "reload_all", "read", "crystallize", "approve_crystallization", "discover_crystallization", "review_crystallization", "dismiss_crystallization", "suppress_crystallization", "record_skill_outcome", "propose_skill_evolution", "approve_skill_evolution"],
                     "description": "Action."
                 },
                 "name": {
@@ -201,7 +339,16 @@ impl Tool for SkillTool {
                 "suggestion_id": {
                     "type": "string",
                     "description": "Content-addressed proactive discovery suggestion ID."
-                }
+                },
+                "usage_id": {"type": "string", "description": "Content-addressed eligible skill usage ID."},
+                "outcome": {"type": "string", "enum": ["helped", "corrected", "replaced", "unused"]},
+                "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                "rationale": {"type": "string", "minLength": 1, "maxLength": 500},
+                "related_skill": {"type": "string", "description": "Canonical related skill, allowed only for replaced."},
+                "evolution_kind": {"type": "string", "enum": ["refine", "merge", "retire"]},
+                "source_names": {"type": "array", "minItems": 1, "maxItems": 2, "items": {"type": "string"}},
+                "destination_name": {"type": "string"},
+                "proposed_content": {"type": "string", "description": "Exact raw replacement SKILL.md including frontmatter."}
             }
         })
     }
@@ -209,15 +356,13 @@ impl Tool for SkillTool {
     async fn execute(&self, input: Value, ctx: ToolContext) -> Result<ToolOutput> {
         let params: SkillInput = serde_json::from_value(input)?;
         validate_action_fields(&params)?;
+        evolution::recover_if_needed(&self.registry).await?;
         let action_label = params.action.clone();
         let name_label = params.name.clone().unwrap_or_else(|| "<none>".to_string());
         let _args = params.args.as_deref();
 
         match params.action.as_str() {
-            "load" => {
-                self.load_skill(params.name, ctx.working_dir.as_deref())
-                    .await
-            }
+            "load" => self.load_skill(params.name, &ctx).await,
             "list" => self.list_skills(ctx.working_dir.as_deref()).await,
             "reload" => self.reload_skill(params.name).await,
             "reload_all" => self.reload_all_skills(ctx.working_dir.as_deref()).await,
@@ -246,6 +391,9 @@ impl Tool for SkillTool {
             "review_crystallization" => self.review_crystallization(params.suggestion_id).await,
             "dismiss_crystallization" => self.dismiss_crystallization(params.suggestion_id).await,
             "suppress_crystallization" => self.suppress_crystallization(params.suggestion_id).await,
+            "record_skill_outcome" => self.record_skill_outcome(&params, &ctx).await,
+            "propose_skill_evolution" => self.propose_skill_evolution(&params).await,
+            "approve_skill_evolution" => self.approve_skill_evolution(&params).await,
             _ => Ok(ToolOutput::new(format!(
                 "Unknown action: {}. Use a documented skill_manage action.",
                 params.action
@@ -262,6 +410,100 @@ impl Tool for SkillTool {
 }
 
 impl SkillTool {
+    async fn record_skill_outcome(
+        &self,
+        params: &SkillInput,
+        ctx: &ToolContext,
+    ) -> Result<ToolOutput> {
+        if ctx.execution_mode != jcode_tool_core::ToolExecutionMode::AgentTurn {
+            anyhow::bail!("Skill outcomes require an ordinary persisted agent turn");
+        }
+        let outcome =
+            evolution::OutcomeClass::parse(params.outcome.as_deref().unwrap_or_default())?;
+        let record = evolution::record_outcome(
+            &ctx.session_id,
+            &ctx.message_id,
+            &ctx.tool_call_id,
+            params.usage_id.as_deref().unwrap_or_default(),
+            outcome,
+            params.confidence.unwrap_or(f64::NAN),
+            params.rationale.as_deref().unwrap_or_default(),
+            params.related_skill.as_deref(),
+        )?;
+        Ok(ToolOutput::new(format!(
+            "Recorded verified skill outcome {} for usage {}.",
+            record.outcome_id, record.usage_id
+        )))
+    }
+
+    async fn propose_skill_evolution(&self, params: &SkillInput) -> Result<ToolOutput> {
+        let _operation = CRYSTALLIZATION_OPERATION_LOCK
+            .get_or_init(|| tokio::sync::Mutex::new(()))
+            .lock()
+            .await;
+        let _file_lock = crystallization::acquire_operation_lock()?;
+        let kind =
+            evolution::EvolutionKind::parse(params.evolution_kind.as_deref().unwrap_or_default())?;
+        let proposal = evolution::propose(
+            params.suggestion_id.as_deref().unwrap_or_default(),
+            kind,
+            params.source_names.clone().unwrap_or_default(),
+            params.destination_name.clone(),
+            params.proposed_content.clone(),
+        )?;
+        let preview = proposal
+            .proposed_content
+            .as_deref()
+            .unwrap_or("[archive the source skill without replacement]");
+        Ok(ToolOutput::new(format!(
+            "Created immutable skill evolution proposal {}.\n\nKind: {:?}\nSources: {}\nDestination: {}\n\nExact mutation preview:\n```markdown\n{}\n```\n\nTo approve, persist the exact user sentence: I approve skill evolution proposal {}.",
+            proposal.proposal_id,
+            proposal.kind,
+            proposal.source_names.join(", "),
+            proposal.destination_name.as_deref().unwrap_or("archive only"),
+            preview,
+            proposal.proposal_id
+        ))
+        .with_metadata(json!({
+            "schema_version": 1,
+            "status": "pending_approval",
+            "proposal_id": proposal.proposal_id,
+            "kind": proposal.kind,
+            "source_names": proposal.source_names,
+            "destination_name": proposal.destination_name,
+            "proposed_fingerprint": proposal.proposed_fingerprint
+        })))
+    }
+
+    async fn approve_skill_evolution(&self, params: &SkillInput) -> Result<ToolOutput> {
+        let _operation = CRYSTALLIZATION_OPERATION_LOCK
+            .get_or_init(|| tokio::sync::Mutex::new(()))
+            .lock()
+            .await;
+        let _file_lock = crystallization::acquire_operation_lock()?;
+        let approval = params
+            .approval_evidence
+            .as_ref()
+            .context("approval_evidence is required")?;
+        let result = evolution::approve_unlocked(
+            &self.registry,
+            params.proposal_id.as_deref().unwrap_or_default(),
+            params.confirmed == Some(true),
+            approval,
+        )
+        .await?;
+        Ok(ToolOutput::new(format!(
+            "Applied skill evolution proposal {} ({:?}). Sources: {}. Destination: {}.",
+            result.proposal_id,
+            result.kind,
+            result.source_names.join(", "),
+            result
+                .destination_name
+                .as_deref()
+                .unwrap_or("archived only")
+        )))
+    }
+
     async fn discover_crystallization(&self) -> Result<ToolOutput> {
         let _operation = CRYSTALLIZATION_OPERATION_LOCK
             .get_or_init(|| tokio::sync::Mutex::new(()))
@@ -390,14 +632,10 @@ impl SkillTool {
         ))
     }
 
-    async fn load_skill(
-        &self,
-        name: Option<String>,
-        working_dir: Option<&std::path::Path>,
-    ) -> Result<ToolOutput> {
+    async fn load_skill(&self, name: Option<String>, ctx: &ToolContext) -> Result<ToolOutput> {
         let name = normalize_skill_name(name, "load")?;
 
-        let registry = self.effective_registry(working_dir).await;
+        let registry = self.effective_registry(ctx.working_dir.as_deref()).await;
         let skill = registry.get(&name).ok_or_else(|| {
             // Endorsed skills are advertised in `list` but are not bundled;
             // a bare "not found" here reads like a bug (issue #445). Point at
@@ -430,11 +668,31 @@ impl SkillTool {
             .map(|p| p.display().to_string())
             .unwrap_or_else(|| ".".to_string());
 
+        let tracking = if ctx.execution_mode == jcode_tool_core::ToolExecutionMode::AgentTurn {
+            match evolution::record_usage(
+                &ctx.session_id,
+                &ctx.message_id,
+                &ctx.tool_call_id,
+                &skill.name,
+                &skill.path,
+            ) {
+                Ok(usage) => format!(
+                    "\n\n**Skill evolution tracking**: usage_id=`{}`. After applying this skill, report exactly one outcome with `skill_manage record_skill_outcome` from a later assistant message.",
+                    usage.usage_id
+                ),
+                Err(error) => format!(
+                    "\n\n**Skill evolution tracking**: unavailable ({error}). The skill loaded normally."
+                ),
+            }
+        } else {
+            "\n\n**Skill evolution tracking**: unavailable for direct execution.".to_string()
+        };
+
         Ok(ToolOutput::new(format!(
             "## Skill: {}\n\n**Base directory**: {}\n\n{}",
             skill.name,
             base_dir,
-            skill.get_prompt()
+            format!("{}{}", skill.get_prompt(), tracking)
         ))
         .with_title(format!("skill: {}", skill.name)))
     }
