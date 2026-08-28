@@ -16,7 +16,7 @@ The TUI adds `/learning`:
 - `/learning dismiss [suggestion-id]` dismisses only the current evidence snapshot.
 - `/learning never [suggestion-id]` suppresses the normalized workflow pattern.
 
-After a successful local turn, the TUI launches a background refresh. A newly surfaced suggestion adds one compact transcript notice and a status notice: `Learning Inbox: 1 suggestion · /learning`. It never modifies the composer, opens a modal, or starts approval automatically. Remote TUI sessions report that the inbox is unavailable rather than reading or mutating the client machine's unrelated session store.
+After a successful turn backed by the local daemon, the TUI launches a background refresh. A newly surfaced suggestion adds one compact transcript notice and a status notice: `Learning Inbox: 1 suggestion · /learning`. It never modifies the composer, opens a modal, or starts approval automatically. Explicit remote workspaces report that the inbox is unavailable rather than reading or mutating the client machine's unrelated session store.
 
 ## Backend behavior
 
@@ -31,11 +31,11 @@ After a successful local turn, the TUI launches a background refresh. A newly su
 
 `jcode-app-core::learning_inbox` is the public application boundary. It owns automatic refresh, latest pending lookup, and control actions while reusing the existing crystallization filesystem lock.
 
-The TUI runs local refresh work off the UI thread and receives a small `BusEvent::LearningInboxUpdated` payload. A future remote implementation must run discovery where the server-owned persisted sessions live.
+The TUI runs refresh work off the UI thread and receives a small `BusEvent::LearningInboxUpdated` payload. The normal local-daemon TUI shares the persisted store and enables the inbox. A future explicit-remote implementation must run discovery where the server-owned persisted sessions live.
 
 ## Acceptance requirements
 
-1. A successful local turn requests a nonblocking refresh.
+1. A successful turn backed by the local daemon requests a nonblocking refresh.
 2. A new suggestion produces one compact visible notice.
 3. The same suggestion does not repeatedly notify.
 4. Restarting preserves pending, dismissed, suppressed, and rate-limit state.

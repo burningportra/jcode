@@ -3,7 +3,14 @@ use crate::bus::{Bus, BusEvent, LearningInboxCommandCompleted, LearningInboxUpda
 use crate::tui::DisplayMessage;
 
 impl App {
+    pub fn set_learning_inbox_store_is_local(&mut self, is_local: bool) {
+        self.learning_inbox_store_is_local = is_local;
+    }
+
     pub(super) fn refresh_learning_inbox_after_turn(&self) {
+        if !self.learning_inbox_store_is_local {
+            return;
+        }
         let session_id = self.session.id.clone();
         tokio::spawn(async move {
             let result =
@@ -112,7 +119,7 @@ pub(super) fn handle_learning_command(app: &mut App, trimmed: &str) -> bool {
     if !rest.is_empty() && !rest.chars().next().is_some_and(char::is_whitespace) {
         return false;
     }
-    if app.is_remote {
+    if !app.learning_inbox_store_is_local {
         app.push_display_message(DisplayMessage::error(
             "Learning Inbox is not available in remote TUI sessions yet because its evidence lives on the server."
                 .to_string(),

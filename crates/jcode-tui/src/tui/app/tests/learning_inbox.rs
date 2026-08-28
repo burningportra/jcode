@@ -2,15 +2,14 @@
 fn learning_inbox_review_completion_queues_proposal_drafting_turn() {
     let mut app = create_test_app();
     let session_id = app.session.id.clone();
-    let handled = app.handle_learning_inbox_command_completed(
-        crate::bus::LearningInboxCommandCompleted {
+    let handled =
+        app.handle_learning_inbox_command_completed(crate::bus::LearningInboxCommandCompleted {
             session_id,
             action: "review".to_string(),
             suggestion_id: Some("a".repeat(64)),
             output: Some("Reviewed repeated workflow evidence.".to_string()),
             error: None,
-        },
-    );
+        });
 
     assert!(handled);
     assert!(app.pending_queued_dispatch);
@@ -23,6 +22,7 @@ fn learning_inbox_review_completion_queues_proposal_drafting_turn() {
 fn learning_inbox_command_fails_closed_in_remote_tui() {
     let mut app = create_test_app();
     app.is_remote = true;
+    app.set_learning_inbox_store_is_local(false);
 
     assert!(super::learning_inbox::handle_learning_command(
         &mut app,
