@@ -181,7 +181,19 @@ lens. Do not keep looping past rubric completion just to chase a round number.
 
 ## Phase 4: Converge
 
-Emit a short convergence report:
+**First, rewrite the plan body.** `initiative update` APPENDS to the update log;
+it does not revise `description`, `success_criteria`, or `milestones`. If you
+only log passes, the reader-facing artifact still describes the draft you spent
+the loop disproving, while the review history makes it look rigorous. An
+implementer reads top-down and would build the rejected design.
+
+So before reporting convergence, call `initiative update` with rewritten
+`description`, `success_criteria`, and `milestones` reflecting the converged
+design, then read it back with `initiative show` and check that each correction
+actually survived. Reading it back from an independent session is stronger,
+because it cannot be fooled by what you remember writing.
+
+Then emit a short convergence report:
 - Final score and the quality progression across passes.
 - Residual risks and explicit open questions.
 - Any rubric items intentionally deferred, with justification.
