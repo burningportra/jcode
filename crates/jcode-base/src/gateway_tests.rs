@@ -336,23 +336,14 @@ async fn test_gateway_ws_token_auth_bridges_browser_subscribe() {
         }
     });
 
-    // Connect exactly like the browser: token carried in Sec-WebSocket-Protocol
-    // (not the URL), with the echo protocol offered so the server can accept.
-    use tokio_tungstenite::tungstenite::client::IntoClientRequest;
-    let mut req = format!("ws://{addr}/ws").into_client_request().expect("req");
-    req.headers_mut().insert(
-        "sec-websocket-protocol",
-        format!("jcode.bearer.{token}, jcode.v1").parse().unwrap(),
-    );
-    let (mut ws, resp) = connect_async(req).await.expect("ws handshake accepted");
-    // The server must echo the non-secret protocol so the browser accepts it.
-    assert_eq!(
-        resp.headers()
-            .get("sec-websocket-protocol")
-            .and_then(|v| v.to_str().ok()),
-        Some("jcode.v1"),
-        "server should echo the safe subprotocol, not the bearer token"
-    );
+    // Connect exactly like the browser would over the bridge. We use the
+    // `?token=` path here because the tungstenite *client* in this test does not
+    // register subprotocols the way a browser does; the subprotocol auth path is
+    // proven at the unit level (test_extract_ws_auth_accepts_subprotocol_bearer_
+    // and_selects_echo) and at the raw-handshake level
+    // (test_gateway_ws_subprotocol_handshake_echoes_safe_protocol_not_token).
+    let url = format!("ws://{addr}/ws?token={token}");
+    let (mut ws, _resp) = connect_async(&url).await.expect("ws handshake accepted");
 
     // The gateway hands a server-side bridge stream to handle_client via the
     // channel as soon as the handshake completes.
@@ -418,4 +409,83 @@ async fn test_gateway_ws_rejects_bad_token_at_handshake() {
     let url = format!("ws://{addr}/ws?token={bogus}");
     let result = connect_async(&url).await;
     assert!(result.is_err(), "unknown token must fail the handshake");
+}
+
+/// Raw-socket proof of the browser-safe subprotocol auth: a paired device
+/// offering `jcode.bearer.<token>, jcode.v1` gets a 101 upgrade whose
+/// `Sec-WebSocket-Protocol` response header is exactly `jcode.v1` and never
+/// contains the secret token. This is the security property the feature exists
+/// for, verified at the byte level (the tungstenite client cannot express it).
+#[tokio::test]
+async fn test_gateway_ws_subprotocol_handshake_echoes_safe_protocol_not_token() {
+    use base64::Engine;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::{TcpListener, TcpStream};
+
+    let _env = crate::storage::lock_test_env();
+    let temp = tempfile::tempdir().expect("tempdir");
+    let prev_home = std::env::var_os("JCODE_HOME");
+    // SAFETY: guarded by lock_test_env.
+    unsafe {
+        std::env::set_var("JCODE_HOME", temp.path());
+    }
+
+    let token = {
+        let mut reg = DeviceRegistry::load();
+        let t = reg.pair_device("web".to_string(), "Web".to_string(), None);
+        reg.save().expect("save");
+        t
+    };
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    let (client_tx, _rx) = tokio::sync::mpsc::unbounded_channel::<super::GatewayClient>();
+    let registry = std::sync::Arc::new(tokio::sync::RwLock::new(DeviceRegistry::load()));
+    tokio::spawn(async move {
+        if let Ok((stream, peer)) = listener.accept().await {
+            let _ = super::handle_connection(stream, peer, registry, client_tx).await;
+        }
+    });
+
+    // Hand-write the WebSocket upgrade the way a browser does, with the token in
+    // Sec-WebSocket-Protocol rather than the URL.
+    let key = base64::engine::general_purpose::STANDARD.encode([0u8; 16]);
+    let req = format!(
+        "GET /ws HTTP/1.1\r\nHost: {addr}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\
+         Sec-WebSocket-Version: 13\r\nSec-WebSocket-Key: {key}\r\n\
+         Sec-WebSocket-Protocol: jcode.bearer.{token}, jcode.v1\r\n\r\n"
+    );
+    let mut stream = TcpStream::connect(addr).await.expect("connect");
+    stream.write_all(req.as_bytes()).await.expect("write");
+    stream.flush().await.expect("flush");
+
+    // Read the response head.
+    let mut buf = vec![0u8; 1024];
+    let n = tokio::time::timeout(std::time::Duration::from_secs(5), stream.read(&mut buf))
+        .await
+        .expect("read timeout")
+        .expect("read");
+    let resp = String::from_utf8_lossy(&buf[..n]);
+
+    assert!(
+        resp.starts_with("HTTP/1.1 101"),
+        "expected a 101 upgrade, got: {resp:?}"
+    );
+    // The security property: the response echoes only the safe protocol.
+    assert!(
+        resp.to_lowercase().contains("sec-websocket-protocol: jcode.v1"),
+        "server should echo jcode.v1, got: {resp:?}"
+    );
+    assert!(
+        !resp.contains(&token),
+        "the secret token must NEVER appear in the handshake response"
+    );
+
+    // SAFETY: still under lock_test_env.
+    unsafe {
+        match prev_home {
+            Some(v) => std::env::set_var("JCODE_HOME", v),
+            None => std::env::remove_var("JCODE_HOME"),
+        }
+    }
 }
