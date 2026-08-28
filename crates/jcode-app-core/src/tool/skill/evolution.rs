@@ -2016,4 +2016,65 @@ mod tests {
         assert!(loaded.description.contains("Refined"));
         assert!(latest_pending().unwrap().is_none());
     }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn merge_and_retire_transactions_update_files_and_the_injected_registry() {
+        let _env_lock = crate::storage::lock_test_env();
+        let home = TestHome::new();
+        let alpha = home.write_skill("alpha", "Alpha workflow");
+        let beta = home.write_skill("beta", "Beta workflow");
+        let merged_path = canonical_skill_path("merged").unwrap();
+        let merged_content = "---\nname: merged\ndescription: Unified workflow\n---\n\n# merged\n";
+        let registry = Arc::new(RwLock::new(SkillRegistry::load_global().unwrap()));
+        let merge = EvolutionProposal {
+            schema_version: SCHEMA_VERSION,
+            proposal_id: "3".repeat(64),
+            suggestion_id: "4".repeat(64),
+            kind: EvolutionKind::Merge,
+            source_names: vec!["alpha".to_string(), "beta".to_string()],
+            source_fingerprints: BTreeMap::from([
+                (
+                    "alpha".to_string(),
+                    fingerprint_raw_skill(&fs::read_to_string(&alpha).unwrap()),
+                ),
+                (
+                    "beta".to_string(),
+                    fingerprint_raw_skill(&fs::read_to_string(&beta).unwrap()),
+                ),
+            ]),
+            destination_name: Some("merged".to_string()),
+            proposed_content: Some(merged_content.to_string()),
+            proposed_fingerprint: Some(fingerprint_raw_skill(merged_content)),
+            outcome_ids: Vec::new(),
+            created_at: Utc::now(),
+        };
+        apply_transaction(&registry, &merge).await.unwrap();
+        assert!(!alpha.exists());
+        assert!(!beta.exists());
+        assert_eq!(fs::read_to_string(&merged_path).unwrap(), merged_content);
+        assert!(registry.read().await.get("merged").is_some());
+
+        let retired = home.write_skill("retired", "Obsolete workflow");
+        *registry.write().await = SkillRegistry::load_global().unwrap();
+        let retire = EvolutionProposal {
+            schema_version: SCHEMA_VERSION,
+            proposal_id: "5".repeat(64),
+            suggestion_id: "6".repeat(64),
+            kind: EvolutionKind::Retire,
+            source_names: vec!["retired".to_string()],
+            source_fingerprints: BTreeMap::from([(
+                "retired".to_string(),
+                fingerprint_raw_skill(&fs::read_to_string(&retired).unwrap()),
+            )]),
+            destination_name: None,
+            proposed_content: None,
+            proposed_fingerprint: None,
+            outcome_ids: Vec::new(),
+            created_at: Utc::now(),
+        };
+        apply_transaction(&registry, &retire).await.unwrap();
+        assert!(!retired.exists());
+        assert!(registry.read().await.get("retired").is_none());
+        assert!(registry.read().await.get("merged").is_some());
+    }
 }
