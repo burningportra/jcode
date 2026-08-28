@@ -1167,6 +1167,32 @@ fn format_swarm_model_list_renders_routes_and_pin() {
     assert!(output.contains("gpt-5.5 via OpenAI [openai-api-key] (API key)"));
     assert!(output.contains("claude-fable-5 via Anthropic [anthropic-api-key] [unavailable]"));
     assert!(output.contains("effort"));
+    assert!(output.contains("no per-spawn model override"));
+}
+
+#[test]
+fn format_swarm_model_list_dedupes_models_across_providers() {
+    // The same logical model offered by many providers must collapse to one
+    // line, preferring an available route, so `list_models` cannot dump tens of
+    // thousands of tokens of near-duplicate rows into the caller's context.
+    let route = |model: &str, provider: &str, available: bool| jcode_provider_core::ModelRoute {
+        model: model.to_string(),
+        provider: provider.to_string(),
+        api_method: "openai-compatible".to_string(),
+        available,
+        detail: String::new(),
+        cheapness: None,
+    };
+    let routes = vec![
+        route("glm-5.3", "OpenRouter", false),
+        route("glm-5.3", "Z.AI", true),
+        route("glm-5.3", "Novita", true),
+    ];
+    let output = format_swarm_model_list(None, None, &routes);
+    // Exactly one line for the model, and it uses the available provider.
+    assert_eq!(output.matches("- glm-5.3 via").count(), 1);
+    assert!(output.contains("- glm-5.3 via Z.AI"));
+    assert!(!output.contains("[unavailable]"));
 }
 
 #[test]

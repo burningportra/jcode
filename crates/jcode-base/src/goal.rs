@@ -592,6 +592,10 @@ pub fn render_goal_detail(goal: &Goal) -> String {
     }
     if !goal.updates.is_empty() {
         out.push_str("## Recent updates\n");
+        out.push_str(
+            "_History, newest first. The sections above are the current plan; \
+             older entries here may describe superseded designs._\n",
+        );
         for update in goal.updates.iter().rev().take(8) {
             out.push_str(&format!(
                 "- {}: {}\n",
