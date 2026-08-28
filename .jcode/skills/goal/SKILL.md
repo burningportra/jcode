@@ -25,14 +25,58 @@ later passes polish and subtract. Stop when the plan converges.
 Open a todolist with one entry per phase so the loop is visible in autonomous
 runs:
 
-1. Seed
-2. Draft
-3. Refine loop
-4. Converge
-5. Handoff
-6. Distill
+1. Elicit
+2. Seed
+3. Draft
+4. Refine loop
+5. Converge
+6. Handoff
+7. Distill
 
-## Phase 1: Seed
+## Phase 1: Elicit
+
+**A plan can only be as good as your understanding of what the user wants.** The
+most expensive failure in this whole loop is converging a beautiful plan for the
+wrong goal, and no number of adversarial passes fixes a misread intent. So before
+drafting, interview the user grill-me style: ask the questions whose answers would
+most change the plan, not a generic questionnaire.
+
+Judge first whether you need this, and how much:
+
+- **Underspecified goal + user is present** (the normal `/goal` case): run a short
+  grilling before drafting. Draw the technique from the bundled `grill-me` skill
+  (a relentless interview to sharpen a plan): surface the assumptions, the
+  ambiguities, and the decisions that fork the design, and make the user commit to
+  answers. Prefer a small batch of high-leverage questions over a long list.
+- **Already well-specified** (a detailed spec, a pasted plan, or a precise
+  request): skip or shrink this. Confirm the one or two riskiest assumptions in a
+  single question rather than interrogating what is already clear.
+- **Autonomous / unattended run** (no human to answer): do NOT block on the human.
+  Write down the open questions and the assumption you are proceeding under for
+  each, put them in the initiative's `why`/description, and mark them as
+  assumptions the refine loop must stress-test. Never stall a headless run waiting
+  for input.
+
+Aim your questions at what actually forks the plan:
+
+- **Outcome and definition of done.** What does success look like concretely, and
+  how will the user know it worked? This becomes `success_criteria`.
+- **Scope boundaries.** What is explicitly out of scope? What is the smallest
+  version that would still be worth shipping?
+- **Constraints.** Deadlines, compatibility, performance, security, things that
+  must not change or break.
+- **Users and workflow.** Who uses this and how; what is the real acceptance path.
+- **Tradeoffs.** When two goals conflict (speed vs. safety, scope vs. time), which
+  wins? Make the user rank, do not guess.
+- **Prior context.** Has this been attempted before, and what went wrong?
+
+Batch the questions, get answers, then reflect them back in one or two lines the
+user can correct ("So the goal is X, done when Y, explicitly not Z") before you
+draft. If the interview reveals the real goal is different from the opening
+request, that is the interview working. Update your understanding via the `todo`
+tool's `user_intention` and proceed from the corrected goal.
+
+## Phase 2: Seed
 
 Load prior knowledge so you do not re-derive known rules or repeat past mistakes.
 
@@ -40,13 +84,13 @@ Load prior knowledge so you do not re-derive known rules or repeat past mistakes
   If recall returns nothing relevant, note that in one line and move on. Do not
   manufacture rules to fill the section; an empty seed is a valid outcome.
 - If a plan/spec already exists (an initiative, a `docs/plans/*.md`, or pasted
-  text), load it as the starting draft. Otherwise draft fresh in Phase 2.
+  text), load it as the starting draft. Otherwise draft fresh in Phase 3.
 - **Ground in the real artifact.** Before reviewing, read the actual code,
   interfaces, and data model the plan touches (not the draft's mental model of
   them). Most high-value gaps surface only when the plan is checked against how
   the system truly works. Re-ground whenever a pass reaches into a new area.
 
-## Phase 2: Draft
+## Phase 3: Draft
 
 Capture the plan as a durable `initiative` (jcode's plan artifact):
 
@@ -82,7 +126,7 @@ study's plan anatomy; use to judge completeness, not every plan needs all):
 - Theory-first, concrete examples throughout: explain the why, then show a real
   example, then implementation notes.
 
-## Phase 3: Refine loop
+## Phase 4: Refine loop
 
 Run up to 6 passes. Each pass: (a) review with fresh eyes through one lens,
 (b) score against the rubric, (c) revise the initiative via `initiative update`,
@@ -187,7 +231,7 @@ strongest convergence signal available here.
 Do not stop early just because one pass found nothing; confirm with the next
 lens. Do not keep looping past rubric completion just to chase a round number.
 
-## Phase 4: Converge
+## Phase 5: Converge
 
 **First, rewrite the plan body.** `initiative update` APPENDS to the update log;
 it does not revise `description`, `success_criteria`, or `milestones`. If you
@@ -206,7 +250,7 @@ Then emit a short convergence report:
 - Residual risks and explicit open questions.
 - Any rubric items intentionally deferred, with justification.
 
-## Phase 5: Handoff
+## Phase 6: Handoff
 
 Turn the converged plan into executable work. The case study's flow is
 plan -> structured tasks -> parallel swarm ("planning is 80% of the work; a
@@ -218,7 +262,7 @@ detailed plan makes agent execution predictable and fast"):
   dependency-ordered tasks so multiple agents can work without collisions, and
   start from the highest-ROI / unblocking tasks first.
 
-## Phase 6: Distill
+## Phase 7: Distill
 
 Compound the learning: `memory remember` any new reusable rules or anti-patterns
 discovered during refinement (category: architecture/testing/security/etc.),
