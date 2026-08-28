@@ -1,6 +1,13 @@
 # Remote Handoff (design sketch)
 
-Status: exploration. Nothing here is implemented yet.
+Status: exploration. The SSH migration/attach layers below are not implemented.
+
+Shipped so far: the **any host → phone** attach slice, via the existing WebSocket
+gateway rather than a new transport. `/remote handoff` in the TUI mints a pairing
+QR/code that embeds the current session id (`jcode://pair?...&session=S`); the iOS
+app pairs and `subscribe`s straight to that session. See `docs/IOS_APP.md` and
+`crates/jcode-base/src/gateway/control.rs`. This is "attach over the relay/gateway,"
+not migration: ownership stays on the host and the phone is just another client.
 
 ## The idea
 
