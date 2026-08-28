@@ -183,3 +183,63 @@ fn test_asset_server_never_shadows_api_paths() {
     assert!(super::web_assets::serve_asset("/service-worker.js").is_some());
     assert!(super::web_assets::serve_asset("/manifest.webmanifest").is_some());
 }
+
+/// End-to-end HTTP: bind an ephemeral port, run the real connection router, and
+/// make real TCP requests. Proves the gateway actually serves the PWA over the
+/// wire AND that adding asset routes did not regress /health or the 404 path.
+#[tokio::test]
+async fn test_gateway_http_serves_pwa_and_preserves_api() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::{TcpListener, TcpStream};
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    let (client_tx, _client_rx) = tokio::sync::mpsc::unbounded_channel::<super::GatewayClient>();
+    let registry = std::sync::Arc::new(tokio::sync::RwLock::new(DeviceRegistry::default()));
+
+    // Accept loop: one connection per request (each request uses Connection: close).
+    tokio::spawn(async move {
+        loop {
+            let Ok((stream, peer)) = listener.accept().await else {
+                break;
+            };
+            let registry = std::sync::Arc::clone(&registry);
+            let client_tx = client_tx.clone();
+            tokio::spawn(async move {
+                let _ = super::handle_connection(stream, peer, registry, client_tx).await;
+            });
+        }
+    });
+
+    async fn request(addr: std::net::SocketAddr, raw: &str) -> String {
+        let mut stream = TcpStream::connect(addr).await.expect("connect");
+        stream.write_all(raw.as_bytes()).await.expect("write");
+        stream.flush().await.expect("flush");
+        let mut buf = Vec::new();
+        stream.read_to_end(&mut buf).await.expect("read");
+        String::from_utf8_lossy(&buf).into_owned()
+    }
+
+    // GET / serves the PWA shell as HTML.
+    let root = request(addr, "GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n").await;
+    assert!(root.starts_with("HTTP/1.1 200 OK"), "root status: {root:.40}");
+    assert!(root.contains("Content-Type: text/html"));
+    assert!(root.contains("<!DOCTYPE html>"));
+
+    // GET /app.js serves JavaScript, not JSON, in the header.
+    let js = request(addr, "GET /app.js HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n").await;
+    let js_header = js.split("\r\n\r\n").next().unwrap_or_default();
+    assert!(js_header.contains("Content-Type: text/javascript"));
+
+    // GET /health is UNCHANGED: still JSON with status ok.
+    let health =
+        request(addr, "GET /health HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n").await;
+    assert!(health.starts_with("HTTP/1.1 200 OK"));
+    assert!(health.contains("Content-Type: application/json"));
+    assert!(health.contains("\"status\":\"ok\""));
+
+    // An unknown path still 404s.
+    let missing =
+        request(addr, "GET /nope HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n").await;
+    assert!(missing.starts_with("HTTP/1.1 404"));
+}
