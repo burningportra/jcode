@@ -1573,6 +1573,11 @@ async fn init_provider_with_options(
         ProviderChoice::XaiOauth => {
             disable_subscription_runtime_mode();
             init_notice("Using xAI Grok via OAuth device-code login (use /model to switch)");
+            if !auth::xai::has_cached_auth() {
+                init_notice(
+                    "No xAI Grok OAuth login is stored; run `jcode login --provider xai-oauth`. Falling back to another available provider until you do.",
+                );
+            }
             crate::env::set_var("JCODE_RUNTIME_PROVIDER", "xai-oauth");
             crate::env::set_var("JCODE_ACTIVE_PROVIDER", "openrouter");
             crate::env::set_var("JCODE_OPENROUTER_TRANSPORT_STATE", "direct-api-key");
