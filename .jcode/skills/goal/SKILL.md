@@ -1,14 +1,15 @@
 ---
-name: plan-refine
-description: "Drive a plan through adversarial review passes with typed underspecification checks until quality converges, before implementing. Use for /plan-refine, 'refine this plan', 'operate in plan space', APR-style plan review, or hardening a spec/initiative prior to writing code."
+name: goal
+description: "Set a goal as a durable initiative and let its plan converge through adversarial review passes with typed underspecification checks before implementing. Use for /goal, 'set a goal', 'plan this', 'refine this plan', 'operate in plan space', or APR-style plan review/hardening prior to writing code."
 ---
 
-# Plan Refine (APR-style)
+# Goal (plan-space refinement)
 
-Operate in **plan space**. Revising a plan is ~10x cheaper than debugging an
-implementation, so drive the plan through repeated adversarial review passes with
-typed checks until quality converges, then hand off to implementation. Adapted
-from the Agent Flywheel / APR (Automated Plan Reviser) methodology.
+You are setting a **goal** (a durable initiative) and converging its plan before
+building. Revising a plan is ~10x cheaper than debugging an implementation, so
+drive the plan through repeated adversarial review passes with typed checks until
+quality converges, then hand off to implementation. Adapted from the Agent
+Flywheel / APR (Automated Plan Reviser) methodology.
 
 ## Core principle
 

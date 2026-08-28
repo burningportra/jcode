@@ -208,7 +208,7 @@ evidence-count gate, cascading config).
 4. Coordination tools (Agent Mail + file reservations) prevent collisions.
 5. A dedicated commit agent keeps history clean.
 
-### What was folded into jcode's plan-refine
+### What was folded into jcode's goal skill (`/goal`)
 
 - Phase 2: optional multi-model synthesis (spawn 2-3 swarm agents on different
   models to propose, then synthesize with attribution) for high-stakes plans,

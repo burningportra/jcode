@@ -30,7 +30,7 @@ underspecification checks until quality converges, BEFORE implementing.
 
 ## Two-phase plan (recommended)
 
-### Phase 1 — `/plan-refine` skill (no Rust changes, fully reversible)
+### Phase 1 — `/goal` skill (no Rust changes, fully reversible)
 
 A native jcode skill that runs the APR loop by orchestrating existing tools.
 Fast to ship, proves the loop end-to-end, easy to iterate on the rubric.
@@ -100,7 +100,7 @@ model than the implementer (GPT Pro reviews, Claude Code implements).
 
 jcode reproduces that natively with `swarm`, which already routes workers to
 different models (review -> claude-fable-5, implement -> gpt-5.5 per the swarm
-routing prompt). The `plan-refine` skill now instructs the agent to spawn a
+routing prompt). The the `goal` skill skill now instructs the agent to spawn a
 cross-model reviewer at least once (architecture pass + near convergence),
 different from the session model, and fold its findings back into the
 initiative. This is the faithful adaptation of APR's core insight without the
