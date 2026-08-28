@@ -44,15 +44,19 @@ public struct Gateway: Hashable, Sendable {
     }
 }
 
-/// Parses `jcode://pair?host=H&port=P&code=C` URIs from QR codes.
+/// Parses `jcode://pair?host=H&port=P&code=C[&session=S]` URIs from QR codes.
 public enum PairURI {
     public struct Payload: Equatable, Sendable {
         public var gateway: Gateway
         public var code: String
+        /// Session to resume immediately after pairing, set when the QR is a
+        /// session handoff (`jcode://pair?...&session=...`).
+        public var sessionID: String?
 
-        public init(gateway: Gateway, code: String) {
+        public init(gateway: Gateway, code: String, sessionID: String? = nil) {
             self.gateway = gateway
             self.code = code
+            self.sessionID = sessionID
         }
     }
 
@@ -70,6 +74,11 @@ public enum PairURI {
             let code = value("code"), !code.isEmpty
         else { return nil }
         let port = value("port").flatMap(UInt16.init) ?? Gateway.defaultPort
-        return Payload(gateway: Gateway(host: host, port: port), code: code)
+        let session = value("session").flatMap { $0.isEmpty ? nil : $0 }
+        return Payload(
+            gateway: Gateway(host: host, port: port),
+            code: code,
+            sessionID: session
+        )
     }
 }

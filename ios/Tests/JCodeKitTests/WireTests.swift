@@ -17,6 +17,14 @@ import Testing
     #expect(payload?.gateway.host == "mybox.ts.net")
     #expect(payload?.gateway.port == 7643)
     #expect(payload?.code == "123456")
+    #expect(payload?.sessionID == nil)
+}
+
+@Test func pairURIParsesHandoffSession() {
+    let payload = PairURI.parse(
+        "jcode://pair?host=mybox.ts.net&port=7643&code=123456&session=sess_abc")
+    #expect(payload?.code == "123456")
+    #expect(payload?.sessionID == "sess_abc")
 }
 
 @Test func pairURIDefaultsPort() {

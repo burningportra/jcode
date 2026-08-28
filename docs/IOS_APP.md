@@ -66,6 +66,10 @@ Server side (already shipped, unchanged):
 
 - `jcode pair` CLI generates a 6-digit code (5 min TTL) and QR with
   `jcode://pair?host=H&port=P&code=C`.
+- `/remote handoff` in the TUI hands the current session to the phone: it mints
+  the same pairing code but appends `&session=S`, so scanning it pairs the
+  device and subscribes straight to that session (`subscribe` with
+  `target_session_id=S`).
 - `POST http://host:7643/pair` with `{code, device_id, device_name}` returns
   `{token, server_name, server_version}`. Token is stored hashed server-side.
 - `GET /health` for reachability checks.

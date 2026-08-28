@@ -33,7 +33,7 @@ use auth::{
 pub(crate) use auth::{is_valid_hex_token, parse_bearer_token, parse_query_token};
 pub use control::{
     PairingInvite, RemoteCommand, RemoteStatus, ToggleOutcome, create_pairing_invite,
-    parse_remote_command, revoke_device, set_gateway_enabled,
+    create_pairing_invite_for_session, parse_remote_command, revoke_device, set_gateway_enabled,
 };
 pub use jcode_gateway_types::{PairedDevice, PairingCode};
 pub use registry::DeviceRegistry;

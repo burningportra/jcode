@@ -23,6 +23,11 @@ pub enum RemoteCommand {
     Off,
     /// Mint a pairing code for a new device.
     Pair,
+    /// Mint a pairing code that also hands the current session to the device.
+    ///
+    /// Carries the session id the phone should resume immediately after
+    /// pairing, so the handoff lands on this exact conversation.
+    Handoff(Option<String>),
     /// Remove a paired device by id or name.
     Revoke(String),
     /// Usage text.
@@ -51,6 +56,15 @@ pub fn parse_remote_command(input: &str) -> Option<Result<RemoteCommand, String>
         "off" | "disable" => RemoteCommand::Off,
         "pair" => RemoteCommand::Pair,
         "help" => RemoteCommand::Help,
+        "handoff" | "handeoff" | "send" => {
+            let target = parts.clone().collect::<Vec<_>>().join(" ");
+            let session = if target.trim().is_empty() {
+                None
+            } else {
+                Some(target.trim().to_string())
+            };
+            RemoteCommand::Handoff(session)
+        }
         "revoke" | "unpair" => {
             let target = parts.clone().collect::<Vec<_>>().join(" ");
             if target.trim().is_empty() {
@@ -60,15 +74,17 @@ pub fn parse_remote_command(input: &str) -> Option<Result<RemoteCommand, String>
         }
         other => {
             return Some(Err(format!(
-                "Unknown /remote subcommand: {other}\nUsage: /remote [cloud|status|on|off|pair|revoke <device>]"
+                "Unknown /remote subcommand: {other}\nUsage: /remote [cloud|status|on|off|pair|handoff|revoke <device>]"
             )));
         }
     };
 
-    // Only `revoke` takes an argument.
-    if !matches!(command, RemoteCommand::Revoke(_)) && parts.next().is_some() {
+    // Only `revoke` and `handoff` take an argument.
+    if !matches!(command, RemoteCommand::Revoke(_) | RemoteCommand::Handoff(_))
+        && parts.next().is_some()
+    {
         return Some(Err(format!(
-            "/remote {sub} takes no arguments\nUsage: /remote [cloud|status|on|off|pair|revoke <device>]"
+            "/remote {sub} takes no arguments\nUsage: /remote [cloud|status|on|off|pair|handoff|revoke <device>]"
         )));
     }
 
@@ -252,6 +268,9 @@ pub struct PairingInvite {
     pub dial_address: String,
     pub uri: String,
     pub gateway_enabled: bool,
+    /// Session the device should resume immediately after pairing, when this
+    /// invite is a handoff of the current conversation.
+    pub session_id: Option<String>,
 }
 
 impl PairingInvite {
@@ -267,18 +286,33 @@ impl PairingInvite {
 
 /// Mint a pairing code valid for five minutes.
 pub fn create_pairing_invite() -> Result<PairingInvite> {
+    create_pairing_invite_for_session(None)
+}
+
+/// Mint a pairing code that optionally hands off a session to the device.
+///
+/// When `session_id` is set, the pairing URI carries a `session=` parameter so
+/// the phone can subscribe straight to that conversation after pairing.
+pub fn create_pairing_invite_for_session(session_id: Option<String>) -> Result<PairingInvite> {
     let status = RemoteStatus::load();
     let mut registry = DeviceRegistry::load();
     let code = registry.generate_pairing_code();
     registry.save()?;
 
+    let mut uri = format!(
+        "jcode://pair?host={}&port={}&code={}",
+        status.connect_host, status.port, code
+    );
+    if let Some(session) = session_id.as_deref() {
+        uri.push_str("&session=");
+        uri.push_str(session);
+    }
+
     Ok(PairingInvite {
-        uri: format!(
-            "jcode://pair?host={}&port={}&code={}",
-            status.connect_host, status.port, code
-        ),
+        uri,
         dial_address: status.dial_address(),
         gateway_enabled: status.enabled,
+        session_id,
         code,
     })
 }
@@ -335,6 +369,35 @@ mod tests {
         ] {
             assert_eq!(parse_remote_command(input), Some(Ok(expected)), "{input}");
         }
+    }
+
+    #[test]
+    fn handoff_parses_with_and_without_session() {
+        assert_eq!(
+            parse_remote_command("/remote handoff"),
+            Some(Ok(RemoteCommand::Handoff(None)))
+        );
+        assert_eq!(
+            parse_remote_command("/remote handoff sess_abc"),
+            Some(Ok(RemoteCommand::Handoff(Some("sess_abc".to_string()))))
+        );
+        assert_eq!(
+            parse_remote_command("/remote send sess_abc"),
+            Some(Ok(RemoteCommand::Handoff(Some("sess_abc".to_string()))))
+        );
+    }
+
+    #[test]
+    fn handoff_invite_uri_carries_session() {
+        let invite = PairingInvite {
+            code: "123456".to_string(),
+            dial_address: "box:7643".to_string(),
+            uri: "jcode://pair?host=box&port=7643&code=123456&session=sess_abc".to_string(),
+            gateway_enabled: true,
+            session_id: Some("sess_abc".to_string()),
+        };
+        assert!(invite.uri.contains("session=sess_abc"));
+        assert_eq!(invite.session_id.as_deref(), Some("sess_abc"));
     }
 
     #[test]
@@ -431,6 +494,7 @@ mod tests {
             dial_address: "host:7643".to_string(),
             uri: String::new(),
             gateway_enabled: true,
+            session_id: None,
         };
         assert_eq!(invite.spaced_code(), "082 641");
     }
