@@ -13,6 +13,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 const SCHEMA_VERSION: u32 = 1;
 const DEFAULT_SESSION_LIMIT: usize = 100;
@@ -39,6 +40,10 @@ struct DiscoveryState {
     schema_version: u32,
     dismissed_suggestion_ids: HashSet<String>,
     suppressed_pattern_ids: HashSet<String>,
+    #[serde(default)]
+    last_automatic_scan_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    last_surfaced_suggestion_id: Option<String>,
 }
 
 #[derive(Debug)]
@@ -164,7 +169,7 @@ pub fn review(suggestion_id: &str) -> Result<Suggestion> {
     Ok(suggestion)
 }
 
-fn load_suggestion(suggestion_id: &str) -> Result<Suggestion> {
+pub(crate) fn load_suggestion(suggestion_id: &str) -> Result<Suggestion> {
     validate_digest("suggestion_id", suggestion_id)?;
     let path = suggestions_dir()?.join(format!("{suggestion_id}.json"));
     let bytes = read_bounded(&path)?;
@@ -192,6 +197,81 @@ pub fn suppress(suggestion_id: &str) -> Result<Suggestion> {
         .insert(suggestion.pattern_id.clone());
     save_state(&state)?;
     Ok(suggestion)
+}
+
+pub fn latest_pending() -> Result<Option<Suggestion>> {
+    let state = load_state()?;
+    let dir = suggestions_dir()?;
+    if !dir.exists() {
+        return Ok(None);
+    }
+    let mut suggestions = fs::read_dir(dir)?
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.extension()
+                .is_some_and(|extension| extension == "json")
+        })
+        .filter_map(|path| {
+            let bytes = read_bounded(&path).ok()?;
+            let suggestion: Suggestion = serde_json::from_slice(&bytes).ok()?;
+            validate_suggestion(&suggestion, &suggestion.suggestion_id).ok()?;
+            if state
+                .dismissed_suggestion_ids
+                .contains(&suggestion.suggestion_id)
+                || state
+                    .suppressed_pattern_ids
+                    .contains(&suggestion.pattern_id)
+            {
+                return None;
+            }
+            Some(suggestion)
+        })
+        .collect::<Vec<_>>();
+    suggestions.sort_by(|a, b| {
+        b.created_at
+            .cmp(&a.created_at)
+            .then_with(|| a.suggestion_id.cmp(&b.suggestion_id))
+    });
+    Ok(suggestions.into_iter().next())
+}
+
+pub enum AutomaticRefresh {
+    RateLimited,
+    Empty,
+    Unchanged(Suggestion),
+    New(Suggestion),
+}
+
+pub fn refresh_automatic(interval: Duration) -> Result<AutomaticRefresh> {
+    let now = Utc::now();
+    let state = load_state()?;
+    if state.last_automatic_scan_at.is_some_and(|last| {
+        now.signed_duration_since(last)
+            < chrono::Duration::from_std(interval).unwrap_or(chrono::Duration::MAX)
+    }) {
+        return Ok(AutomaticRefresh::RateLimited);
+    }
+    let suggestion = discover()?;
+    let mut state = load_state()?;
+    state.last_automatic_scan_at = Some(now);
+    let Some(suggestion) = suggestion else {
+        save_state(&state)?;
+        return Ok(AutomaticRefresh::Empty);
+    };
+    if state.last_surfaced_suggestion_id.as_deref() == Some(&suggestion.suggestion_id) {
+        save_state(&state)?;
+        return Ok(AutomaticRefresh::Unchanged(suggestion));
+    }
+    save_state(&state)?;
+    Ok(AutomaticRefresh::New(suggestion))
+}
+
+pub fn mark_surfaced(suggestion_id: &str) -> Result<()> {
+    let suggestion = load_suggestion(suggestion_id)?;
+    let mut state = load_state()?;
+    state.last_surfaced_suggestion_id = Some(suggestion.suggestion_id);
+    save_state(&state)
 }
 
 pub fn no_suggestion_output() -> ToolOutput {
@@ -429,13 +509,16 @@ fn save_state(state: &DiscoveryState) -> Result<()> {
     let dir = discovery_dir()?;
     create_private_dir_all(&dir)?;
     let path = state_path()?;
-    let temporary = dir.join(format!(".state-{}.tmp", std::process::id()));
     let bytes = serde_json::to_vec_pretty(state)?;
     if bytes.len() as u64 > MAX_STATE_BYTES {
         bail!("Discovery state exceeds its bounded size limit");
     }
-    fs::write(&temporary, bytes)?;
-    fs::rename(&temporary, &path)?;
+    let mut temporary = tempfile::NamedTempFile::new_in(&dir)?;
+    temporary.write_all(&bytes)?;
+    temporary.as_file().sync_all()?;
+    temporary
+        .persist(&path)
+        .map_err(|error| anyhow::Error::new(error.error))?;
     Ok(())
 }
 

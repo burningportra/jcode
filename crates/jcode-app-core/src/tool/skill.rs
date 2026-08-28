@@ -9,8 +9,8 @@ use serde_json::{Value, json};
 use std::sync::{Arc, OnceLock};
 use tokio::sync::RwLock;
 
-mod crystallization;
-mod discovery;
+pub(crate) mod crystallization;
+pub(crate) mod discovery;
 
 use crystallization::EvidenceReference;
 

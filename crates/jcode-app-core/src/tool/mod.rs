@@ -33,7 +33,7 @@ pub(crate) mod serde_coerce;
 mod session_search;
 pub(crate) mod session_search_index;
 mod side_panel;
-mod skill;
+pub(crate) mod skill;
 mod todo;
 mod webfetch;
 mod websearch;

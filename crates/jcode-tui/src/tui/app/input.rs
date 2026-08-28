@@ -3961,36 +3961,34 @@ impl App {
             self.is_processing = true;
             self.status = ProcessingStatus::Sending;
 
-            match self
+            let turn_succeeded = match self
                 .run_turn_interactive(terminal, event_stream, None)
                 .await
             {
                 Ok(()) => {
                     self.last_stream_error = None;
                     self.last_submitted_input = None;
+                    true
                 }
                 Err(e) => {
                     let err_str = crate::util::format_error_chain(&e);
-                    if is_request_payload_too_large_error(&err_str) {
-                        if !self
-                            .try_recover_payload_too_large_and_retry(terminal, event_stream)
+                    let recovered = if is_request_payload_too_large_error(&err_str) {
+                        self.try_recover_payload_too_large_and_retry(terminal, event_stream)
                             .await
-                        {
-                            self.handle_turn_error(err_str);
-                        }
                     } else if is_context_limit_error(&err_str) {
-                        if self
-                            .try_auto_compact_and_retry(terminal, event_stream)
+                        self.try_auto_compact_and_retry(terminal, event_stream)
                             .await
-                        {
-                            // Successfully recovered
-                        } else {
-                            self.handle_turn_error(err_str);
-                        }
                     } else {
+                        false
+                    };
+                    if !recovered {
                         self.handle_turn_error(err_str);
                     }
+                    recovered
                 }
+            };
+            if turn_succeeded {
+                self.refresh_learning_inbox_after_turn();
             }
             self.current_turn_system_reminder = None;
             // Loop will check if more messages were queued during this turn
