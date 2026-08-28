@@ -88,3 +88,21 @@ Once the loop is proven, harden the parts that benefit from being first-class:
 - No reimplementation of beads/`br` as a separate tracker; the swarm task-graph
   + initiative cover decomposition and execution.
 - No separate `apr` binary; the loop lives inside the agent.
+
+## Cross-model review (added after reading the real APR repo)
+
+The upstream APR (github.com/Dicklesworthstone/automated_plan_reviser_pro) is a
+Bash CLI that bundles docs and sends them to ONE external heavyweight model
+(GPT Pro Extended Reasoning via steipete/oracle browser automation), once per
+round. Its "adversarial" property is not a multi-model debate; it is (a)
+iteration across fresh rounds and (b) the reviewer being a *different, stronger*
+model than the implementer (GPT Pro reviews, Claude Code implements).
+
+jcode reproduces that natively with `swarm`, which already routes workers to
+different models (review -> claude-fable-5, implement -> gpt-5.5 per the swarm
+routing prompt). The `plan-refine` skill now instructs the agent to spawn a
+cross-model reviewer at least once (architecture pass + near convergence),
+different from the session model, and fold its findings back into the
+initiative. This is the faithful adaptation of APR's core insight without the
+oracle/browser dependency. Rejected the external-`apr`-bridge option (needs a
+ChatGPT browser login, Bash-only, duplicates swarm).

@@ -84,6 +84,30 @@ so contradictions introduced earlier get caught later; that is the point.
 > What would break in production? Diagnose root causes with first-principle
 > analysis, then revise the plan to fix what you find.
 
+**Cross-model review (APR's key move).** APR's real leverage is that a
+*different, heavyweight* model reviews the plan than the one that will implement
+it: a fresh reviewer with no attachment to the draft catches what the author is
+blind to. Reproduce that with `swarm` rather than reviewing only in your own
+head:
+
+- At least once during the loop (ideally the architecture pass, and again near
+  convergence), spawn a `swarm` reviewer on a **different model than this
+  session**. Run `swarm list_models` to see routes; for design/review work
+  prefer a strong reasoning model (e.g. the `claude-fable-5` review route per the
+  swarm routing guidance) distinct from your implementation model.
+- Hand the reviewer the current initiative text plus the rubric, and ask for
+  concrete gaps, wrong assumptions, and risks, not a rewrite. Prompt shape:
+  > You are an adversarial plan reviewer. Here is a plan and a rubric. With fresh
+  > eyes and first-principles analysis, list concrete underspecifications, wrong
+  > assumptions, missing edge/failure cases, and risks. Be specific; cite the
+  > part of the plan. Do not rewrite it; find what is wrong.
+- Fold the reviewer's findings back into the initiative via `initiative update`,
+  and note in the pass log which findings came from the cross-model reviewer
+  (e.g. `pass 1 (architecture) [+swarm review claude-fable-5]: ...`).
+- If `swarm` is unavailable, degrade gracefully: do the fresh-eyes pass yourself
+  and note that no independent reviewer model was used. A single-model loop is
+  still useful; it just lacks the cross-model check.
+
 **Typed underspecification rubric** (check every pass; a plan is not done while
 any relevant box is unchecked):
 
@@ -113,6 +137,13 @@ Stop the loop when the PRIMARY condition holds:
 Secondary conditions (use as backstops, not the main gate):
 - all 6 passes done, or
 - score delta < 3 across two consecutive passes with no new gaps found.
+
+APR measures convergence mechanically (shrinking review output, slowing change
+velocity, rising round-to-round similarity). You are approximating the same
+signal by hand: when a fresh pass (including the cross-model reviewer) surfaces
+only minor, already-known nits rather than new structural gaps, the plan has
+converged. A cross-model reviewer that returns "no significant issues" is the
+strongest convergence signal available here.
 
 Do not stop early just because one pass found nothing; confirm with the next
 lens. Do not keep looping past rubric completion just to chase a round number.
