@@ -564,6 +564,9 @@ impl App {
             crate::provider_catalog::LoginProviderTarget::GrokBuild => {
                 self.start_grok_build_login()
             }
+            crate::provider_catalog::LoginProviderTarget::XaiOauth => {
+                self.start_xai_oauth_login()
+            }
             crate::provider_catalog::LoginProviderTarget::Copilot => self.start_copilot_login(),
             crate::provider_catalog::LoginProviderTarget::Gemini => self.start_gemini_login(),
             crate::provider_catalog::LoginProviderTarget::Antigravity => {
@@ -1850,6 +1853,76 @@ impl App {
         });
     }
 
+    fn start_xai_oauth_login(&mut self) {
+        self.set_status_notice("xAI Grok: preparing sign-in...");
+        self.begin_pending_login(PendingLogin::XaiOauth);
+        self.push_display_message(DisplayMessage::system(
+            "xAI Grok OAuth Login\n\nSigning in with your SuperGrok / X Premium+ subscription (not an xAI API key). The verification URL and device code will appear here.\n\nType /cancel to dismiss this login."
+                .to_string(),
+        ));
+
+        let session_id = self.session.id.clone();
+        let Ok(handle) = tokio::runtime::Handle::try_current() else {
+            Bus::global().publish(BusEvent::LoginCompleted(LoginCompleted {
+                provider: "xai-oauth".to_string(),
+                success: false,
+                message: "xAI Grok login requires the async runtime.".to_string(),
+            }));
+            return;
+        };
+        handle.spawn(async move {
+            let publish_progress = |message: String, status: &'static str| {
+                Bus::global().publish(BusEvent::UiActivity(crate::bus::UiActivity::auth(
+                    Some(session_id.clone()),
+                    message,
+                    Some(status),
+                )));
+            };
+
+            let device = match crate::auth::xai::initiate_device_login().await {
+                Ok(device) => device,
+                Err(error) => {
+                    Bus::global().publish(BusEvent::LoginCompleted(LoginCompleted {
+                        provider: "xai-oauth".to_string(),
+                        success: false,
+                        message: format!("Failed to start xAI Grok login: {error:#}"),
+                    }));
+                    return;
+                }
+            };
+            let url = device
+                .verification_uri_complete
+                .as_deref()
+                .unwrap_or(&device.verification_uri);
+            let _ = Self::open_auth_browser(url);
+            publish_progress(
+                format!(
+                    "xAI Grok OAuth Login\n\nOpen: {}\n\nConfirm code: {}\n\nWaiting for authorization...",
+                    device.verification_uri, device.user_code
+                ),
+                "xAI Grok: waiting for browser approval",
+            );
+
+            match crate::auth::xai::complete_device_login(&device).await {
+                Ok(_) => {
+                    Bus::global().publish(BusEvent::LoginCompleted(LoginCompleted {
+                        provider: "xai-oauth".to_string(),
+                        success: true,
+                        message: "xAI Grok login complete. Jcode is refreshing the provider and model list."
+                            .to_string(),
+                    }));
+                }
+                Err(error) => {
+                    Bus::global().publish(BusEvent::LoginCompleted(LoginCompleted {
+                        provider: "xai-oauth".to_string(),
+                        success: false,
+                        message: format!("xAI Grok login failed: {error}"),
+                    }));
+                }
+            }
+        });
+    }
+
     fn start_antigravity_login(&mut self) {
         let (verifier, challenge) = crate::auth::oauth::generate_pkce_public();
         let expected_state = crate::auth::oauth::generate_state_public();
@@ -2679,6 +2752,13 @@ impl App {
                         .to_string(),
                 ));
                 self.pending_login = Some(PendingLogin::GrokBuild);
+            }
+            PendingLogin::XaiOauth => {
+                self.push_display_message(DisplayMessage::system(
+                    "xAI Grok login is waiting for browser authorization. Complete the xAI login in your browser, or type /cancel to dismiss."
+                        .to_string(),
+                ));
+                self.pending_login = Some(PendingLogin::XaiOauth);
             }
             PendingLogin::AutoImportSelection { candidates } => {
                 let selected = match crate::external_auth::parse_external_auth_review_selection(

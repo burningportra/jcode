@@ -249,6 +249,49 @@ Use `--no-tool-smoke` if you only want the auth/simple-runtime checks.
 
 For Gmail/Google it verifies credential discovery and token refresh, but skips model smoke because it is not a model provider.
 
+## xAI Grok OAuth (SuperGrok / X Premium+)
+
+The `xai-oauth` provider signs in to xAI Grok with your **SuperGrok or X
+Premium+ subscription** using the OAuth 2.0 device-code flow (RFC 8628). It is
+distinct from the API-key `xai` provider (which bills a paid xAI API key) and
+from the Jcode-managed `grok-build` provider. Use `xai-oauth` when you want to
+use your Grok subscription instead of a metered API key.
+
+### Login steps
+1. Run `jcode login --provider xai-oauth` or `/login xai-oauth` inside the TUI.
+   - Aliases: `grok-oauth`, `x-ai-oauth`, `xai-grok-oauth`.
+   - For headless / SSH use: `jcode login --provider xai-oauth --no-browser`
+2. jcode requests a device code from `https://auth.x.ai/oauth2/device/code` and
+   shows a verification URL (`https://accounts.x.ai/oauth2/device`) plus a short
+   user code. It opens your browser unless you pass `--no-browser`.
+3. Approve the request in the browser and enter the code if prompted. jcode
+   polls the token endpoint until approval completes (up to ~30 minutes).
+4. Tokens are saved to `~/.jcode/xai_oauth.json` with `0600` permissions.
+
+### Runtime notes
+- Requests reuse the OpenAI-compatible transport pointed at
+  `https://api.x.ai/v1`, but the `Authorization: Bearer` header is a
+  short-lived OAuth access token refreshed at request time (the same seam Azure
+  Entra uses), never a static API key.
+- Access tokens live ~6 hours; jcode refreshes them ahead of expiry using the
+  stored refresh token. Permanent rejections (`invalid_grant`, revoked) are
+  quarantined so background sweeps stop retrying, and jcode prompts you to run
+  `jcode login --provider xai-oauth` again.
+- `XAI_OAUTH_CLIENT_ID` and `XAI_OAUTH_SCOPE` can override the built-in public
+  Grok-CLI client id and scope if xAI rotates them.
+
+### Logout
+- `jcode` best-effort revokes the token at `https://auth.x.ai/oauth2/revoke`
+  and then clears `~/.jcode/xai_oauth.json`.
+
+### Troubleshooting
+- If browser launch fails, use `--no-browser` and open the printed URL / code
+  manually.
+- If login succeeds but requests fail later, re-run
+  `jcode login --provider xai-oauth` to refresh the stored session.
+- `jcode --provider xai-oauth auth-test` verifies credential discovery, token
+  refresh, and a real provider smoke prompt.
+
 ## OpenAI-compatible API-key providers
 
 J-Code also ships first-class provider presets for many OpenAI-compatible APIs.

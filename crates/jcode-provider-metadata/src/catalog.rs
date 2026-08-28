@@ -1031,6 +1031,23 @@ pub const GROK_BUILD_LOGIN_PROVIDER: LoginProviderDescriptor = LoginProviderDesc
     order: LoginProviderSurfaceOrder::new(Some(100), Some(100), Some(100), Some(100), Some(100)),
 };
 
+/// xAI Grok OAuth (SuperGrok / X Premium+) subscription login via the device
+/// code flow. Distinct from the API-key `xai` provider (which consumes
+/// `XAI_API_KEY`) and from `grok-build`. Aliases are chosen to not collide with
+/// `xai`'s aliases (x.ai/x-ai/grok).
+pub const XAI_OAUTH_LOGIN_PROVIDER: LoginProviderDescriptor = LoginProviderDescriptor {
+    id: "xai-oauth",
+    display_name: "xAI Grok OAuth (SuperGrok / X Premium+)",
+    auth_kind: LoginProviderAuthKind::OAuth,
+    auth_state_key: LoginProviderAuthStateKey::XaiOauth,
+    auth_status_method: "SuperGrok / X Premium+ OAuth",
+    aliases: &["grok-oauth", "x-ai-oauth", "xai-grok-oauth"],
+    menu_detail: "SuperGrok / X Premium+ subscription login",
+    recommended: false,
+    target: LoginProviderTarget::XaiOauth,
+    order: LoginProviderSurfaceOrder::new(Some(33), Some(33), Some(33), Some(33), Some(33)),
+};
+
 pub const NVIDIA_NIM_LOGIN_PROVIDER: LoginProviderDescriptor = LoginProviderDescriptor {
     id: "nvidia-nim",
     display_name: "NVIDIA NIM",
@@ -1205,7 +1222,7 @@ pub const GOOGLE_LOGIN_PROVIDER: LoginProviderDescriptor = LoginProviderDescript
     order: LoginProviderSurfaceOrder::new(Some(13), None, None, None, None),
 };
 
-pub(crate) const LOGIN_PROVIDERS: [LoginProviderDescriptor; 52] = [
+pub(crate) const LOGIN_PROVIDERS: [LoginProviderDescriptor; 53] = [
     AUTO_IMPORT_LOGIN_PROVIDER,
     CLAUDE_LOGIN_PROVIDER,
     ANTHROPIC_API_LOGIN_PROVIDER,
@@ -1245,6 +1262,7 @@ pub(crate) const LOGIN_PROVIDERS: [LoginProviderDescriptor; 52] = [
     MINIMAX_LOGIN_PROVIDER,
     XAI_LOGIN_PROVIDER,
     GROK_BUILD_LOGIN_PROVIDER,
+    XAI_OAUTH_LOGIN_PROVIDER,
     NVIDIA_NIM_LOGIN_PROVIDER,
     XIAOMI_MIMO_LOGIN_PROVIDER,
     META_MUSE_LOGIN_PROVIDER,

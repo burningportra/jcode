@@ -95,6 +95,9 @@ pub enum ProviderChoice {
     /// Grok Build subscription via the authenticated Grok CLI ACP transport.
     #[value(name = "grok-build")]
     GrokBuild,
+    /// xAI Grok via native OAuth device-code login (SuperGrok / X Premium+).
+    #[value(name = "xai-oauth", alias = "grok-oauth", alias = "x-ai-oauth", alias = "xai-grok-oauth")]
+    XaiOauth,
     #[value(alias = "nvidia", alias = "nim")]
     NvidiaNim,
     #[value(alias = "xiaomi", alias = "mimo", alias = "xiaomi-mimo-api")]
@@ -178,6 +181,7 @@ impl ProviderChoice {
             Self::Minimax => "minimax",
             Self::Xai => "xai",
             Self::GrokBuild => "grok-build",
+            Self::XaiOauth => "xai-oauth",
             Self::NvidiaNim => "nvidia-nim",
             Self::XiaomiMimo => "xiaomi-mimo",
             Self::MetaMuse => "meta-muse",
@@ -340,6 +344,10 @@ const PROVIDER_CHOICE_LOGIN_PROVIDERS: &[(ProviderChoice, LoginProviderDescripto
     (
         ProviderChoice::GrokBuild,
         crate::provider_catalog::GROK_BUILD_LOGIN_PROVIDER,
+    ),
+    (
+        ProviderChoice::XaiOauth,
+        crate::provider_catalog::XAI_OAUTH_LOGIN_PROVIDER,
     ),
     (
         ProviderChoice::NvidiaNim,
@@ -1307,6 +1315,17 @@ pub async fn login_and_bootstrap_provider(
             )
             .ok_or_else(|| anyhow::anyhow!("Grok Build runtime is not registered"))?
         }
+        LoginProviderTarget::XaiOauth => {
+            disable_subscription_runtime_mode();
+            // Reuse the OpenAI-compatible transport pointed at api.x.ai, but with a
+            // refreshable OAuth bearer resolved at request time (mirrors Azure Entra).
+            crate::env::set_var("JCODE_RUNTIME_PROVIDER", "xai-oauth");
+            crate::env::set_var("JCODE_ACTIVE_PROVIDER", "openrouter");
+            crate::env::set_var("JCODE_OPENROUTER_TRANSPORT_STATE", "direct-api-key");
+            crate::env::set_var("JCODE_OPENROUTER_API_BASE", "https://api.x.ai/v1");
+            crate::env::set_var("JCODE_OPENROUTER_DYNAMIC_BEARER_PROVIDER", "xai-oauth");
+            Arc::new(provider::MultiProvider::new())
+        }
         LoginProviderTarget::OpenAiApiKey => {
             disable_subscription_runtime_mode();
             select_initial_model_provider("openai");
@@ -1533,6 +1552,16 @@ async fn init_provider_with_options(
                 crate::provider::external::GROK_BUILD_RUNTIME,
             )
             .ok_or_else(|| anyhow::anyhow!("Grok Build runtime is not registered"))?
+        }
+        ProviderChoice::XaiOauth => {
+            disable_subscription_runtime_mode();
+            init_notice("Using xAI Grok via OAuth device-code login (use /model to switch)");
+            crate::env::set_var("JCODE_RUNTIME_PROVIDER", "xai-oauth");
+            crate::env::set_var("JCODE_ACTIVE_PROVIDER", "openrouter");
+            crate::env::set_var("JCODE_OPENROUTER_TRANSPORT_STATE", "direct-api-key");
+            crate::env::set_var("JCODE_OPENROUTER_API_BASE", "https://api.x.ai/v1");
+            crate::env::set_var("JCODE_OPENROUTER_DYNAMIC_BEARER_PROVIDER", "xai-oauth");
+            Arc::new(provider::MultiProvider::new_fast())
         }
         ProviderChoice::Openrouter => {
             disable_subscription_runtime_mode();

@@ -35,6 +35,7 @@ pub enum LoginProviderTarget {
     OpenAiCompatible(OpenAiCompatibleProfile),
     Cursor,
     GrokBuild,
+    XaiOauth,
     Copilot,
     Gemini,
     Antigravity,
@@ -55,6 +56,7 @@ pub enum LoginProviderAuthStateKey {
     Antigravity,
     Cursor,
     GrokBuild,
+    XaiOauth,
     Google,
 }
 
@@ -635,6 +637,20 @@ mod tests {
         assert_eq!(
             resolve_login_provider("grok").map(|provider| provider.id),
             Some("xai")
+        );
+        // The OAuth device-code provider is distinct from the API-key `xai`
+        // provider; its aliases must never collapse onto `xai`.
+        assert_eq!(
+            resolve_login_provider("xai-oauth").map(|provider| provider.id),
+            Some("xai-oauth")
+        );
+        assert_eq!(
+            resolve_login_provider("grok-oauth").map(|provider| provider.id),
+            Some("xai-oauth")
+        );
+        assert_eq!(
+            resolve_login_provider("xai-grok-oauth").map(|provider| provider.id),
+            Some("xai-oauth")
         );
         assert_eq!(
             resolve_login_provider("lm-studio").map(|provider| provider.id),
