@@ -36,8 +36,14 @@ runs:
 Load prior knowledge so you do not re-derive known rules or repeat past mistakes.
 
 - `memory recall` relevant rules and anti-patterns for this goal (scope: all).
+  If recall returns nothing relevant, note that in one line and move on. Do not
+  manufacture rules to fill the section; an empty seed is a valid outcome.
 - If a plan/spec already exists (an initiative, a `docs/plans/*.md`, or pasted
   text), load it as the starting draft. Otherwise draft fresh in Phase 2.
+- **Ground in the real artifact.** Before reviewing, read the actual code,
+  interfaces, and data model the plan touches (not the draft's mental model of
+  them). Most high-value gaps surface only when the plan is checked against how
+  the system truly works. Re-ground whenever a pass reaches into a new area.
 
 ## Phase 2: Draft
 
@@ -54,6 +60,12 @@ Capture the plan as a durable `initiative` (jcode's plan artifact):
 Run up to 6 passes. Each pass: (a) review with fresh eyes through one lens,
 (b) score against the rubric, (c) revise the initiative via `initiative update`
 (this appends to the initiative's update log, giving you a diff trail).
+
+A pass need not force a revision. If a lens genuinely does not apply (e.g.
+performance for a tiny internal helper), record it as `pass N (<lens>): score X
+— not applicable: <one-line reason>` and move on. Do not pad the log with
+invented changes. Each pass reviews the *previous* pass's output with fresh eyes,
+so contradictions introduced earlier get caught later; that is the point.
 
 **Pass ladder** (one lens per pass):
 
@@ -88,15 +100,22 @@ any relevant box is unchecked):
 - [ ] Simplicity: anything to subtract before adding?
 
 **Scoring and convergence.** After each pass, score the plan 0-100 (roughly:
-% of relevant rubric items satisfied, weighted by risk). Record the pass in the
-initiative update as `pass N (<lens>): score X/100 — <gaps found> / <resolved>`.
+% of relevant rubric items satisfied, weighted by risk). The score is a judgment
+signal, not a computed metric; use it to see direction of travel, not as the
+authority on when to stop. Record the pass in the initiative update as
+`pass N (<lens>): score X/100 — <gaps found> / <resolved>`.
 
-Stop the loop when any holds:
-- score >= 90, or
-- score delta < 3 across two consecutive passes (converged), or
-- all 6 passes done.
+Stop the loop when the PRIMARY condition holds:
+- **Primary (rubric completion):** every rubric item relevant to this plan is
+  satisfied or explicitly, justifiably deferred. This is the real convergence
+  test.
 
-Do not stop early just because a pass found nothing; confirm with the next lens.
+Secondary conditions (use as backstops, not the main gate):
+- all 6 passes done, or
+- score delta < 3 across two consecutive passes with no new gaps found.
+
+Do not stop early just because one pass found nothing; confirm with the next
+lens. Do not keep looping past rubric completion just to chase a round number.
 
 ## Phase 4: Converge
 
