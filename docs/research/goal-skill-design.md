@@ -1,4 +1,4 @@
-# jcode Plan Refinement (APR-style) — Design
+# jcode `/goal` Skill (APR-style plan refinement) — Design
 
 Goal: bring dicklesworthstone's "plan space" methodology into jcode planning.
 The heart is APR: drive a plan through N adversarial review passes with typed
@@ -100,7 +100,7 @@ model than the implementer (GPT Pro reviews, Claude Code implements).
 
 jcode reproduces that natively with `swarm`, which already routes workers to
 different models (review -> claude-fable-5, implement -> gpt-5.5 per the swarm
-routing prompt). The the `goal` skill skill now instructs the agent to spawn a
+routing prompt). The `goal` skill now instructs the agent to spawn a
 cross-model reviewer at least once (architecture pass + near convergence),
 different from the session model, and fold its findings back into the
 initiative. This is the faithful adaptation of APR's core insight without the
