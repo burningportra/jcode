@@ -150,6 +150,11 @@ fn show_pairing_invite(app: &mut App) {
                 invite.dial_address
             ));
 
+            body.push_str(&format!(
+                "\nOpen in any browser (no app needed):\n\n{}\n",
+                invite.browser_url()
+            ));
+
             if let Ok(qr) = crate::login_qr::render_unicode_qr(&invite.uri) {
                 body.push_str("\n```\n");
                 body.push_str(&qr);
@@ -194,6 +199,11 @@ fn show_handoff_invite(app: &mut App, session_override: Option<String>) {
                 invite.spaced_code(),
                 invite.dial_address,
                 session_id,
+            ));
+
+            body.push_str(&format!(
+                "\nOr open in any browser (no app needed):\n\n{}\n",
+                invite.browser_url()
             ));
 
             if let Ok(qr) = crate::login_qr::render_unicode_qr(&invite.uri) {

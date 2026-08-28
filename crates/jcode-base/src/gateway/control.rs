@@ -282,6 +282,21 @@ impl PairingInvite {
             self.code.clone()
         }
     }
+
+    /// Browser-openable handoff URL for the PWA served by the gateway.
+    ///
+    /// Unlike the `jcode://` deep link (which only the iOS app understands),
+    /// this is a plain `http://host:port/?code=...[&session=...]` URL any
+    /// browser can open. The PWA reads `code`/`session` from the query, does the
+    /// `POST /pair` exchange, then strips them from the address bar.
+    pub fn browser_url(&self) -> String {
+        let mut url = format!("http://{}/?code={}", self.dial_address, self.code);
+        if let Some(session) = self.session_id.as_deref() {
+            url.push_str("&session=");
+            url.push_str(session);
+        }
+        url
+    }
 }
 
 /// Mint a pairing code valid for five minutes.
@@ -398,6 +413,30 @@ mod tests {
         };
         assert!(invite.uri.contains("session=sess_abc"));
         assert_eq!(invite.session_id.as_deref(), Some("sess_abc"));
+    }
+
+    #[test]
+    fn browser_url_is_openable_http_with_code_and_session() {
+        let invite = PairingInvite {
+            code: "123456".to_string(),
+            dial_address: "box:7643".to_string(),
+            uri: "jcode://pair?host=box&port=7643&code=123456&session=sess_abc".to_string(),
+            gateway_enabled: true,
+            session_id: Some("sess_abc".to_string()),
+        };
+        assert_eq!(
+            invite.browser_url(),
+            "http://box:7643/?code=123456&session=sess_abc"
+        );
+
+        let no_session = PairingInvite {
+            code: "654321".to_string(),
+            dial_address: "box:7643".to_string(),
+            uri: "jcode://pair?host=box&port=7643&code=654321".to_string(),
+            gateway_enabled: true,
+            session_id: None,
+        };
+        assert_eq!(no_session.browser_url(), "http://box:7643/?code=654321");
     }
 
     #[test]

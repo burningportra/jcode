@@ -168,3 +168,18 @@ fn test_authorize_ws_device_rejects_unknown_and_revoked_with_401() {
         auth::authorize_ws_device(&registry, &token).expect_err("revoked token must be rejected");
     assert_eq!(err.status(), 401);
 }
+
+/// The PWA asset server must never capture the API/WS paths, or serving the web
+/// app would silently break pairing, health, and the WebSocket upgrade. This is
+/// the load-bearing non-regression guarantee for M2.
+#[test]
+fn test_asset_server_never_shadows_api_paths() {
+    assert!(super::web_assets::serve_asset("/health").is_none());
+    assert!(super::web_assets::serve_asset("/pair").is_none());
+    assert!(super::web_assets::serve_asset("/ws").is_none());
+    // But it does serve the app shell and its assets.
+    assert!(super::web_assets::serve_asset("/").is_some());
+    assert!(super::web_assets::serve_asset("/app.js").is_some());
+    assert!(super::web_assets::serve_asset("/service-worker.js").is_some());
+    assert!(super::web_assets::serve_asset("/manifest.webmanifest").is_some());
+}

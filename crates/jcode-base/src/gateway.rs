@@ -26,6 +26,7 @@ use crate::logging;
 mod auth;
 pub mod control;
 mod registry;
+mod web_assets;
 use auth::{
     AuthorizedDevice, WsAuth, WsAuthSource, authorize_ws_device, extract_ws_auth, ws_error_response,
 };
@@ -437,8 +438,20 @@ async fn handle_http(
         }
 
         _ => {
-            let body = serde_json::json!({"error": "Not found"});
-            http_response(404, "Not Found", &body.to_string())
+            // Serve the embedded PWA for GET/HEAD of a known asset path.
+            // serve_asset returns None for /health, /pair, /ws, and unknowns,
+            // so those keep their existing behavior below.
+            if matches!(method, "GET" | "HEAD") {
+                if let Some(asset) = web_assets::serve_asset(path_base) {
+                    asset.bytes
+                } else {
+                    let body = serde_json::json!({"error": "Not found"});
+                    http_response(404, "Not Found", &body.to_string())
+                }
+            } else {
+                let body = serde_json::json!({"error": "Not found"});
+                http_response(404, "Not Found", &body.to_string())
+            }
         }
     };
 
