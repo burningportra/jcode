@@ -1245,6 +1245,22 @@ fn disable_subscription_runtime_mode() {
     crate::subscription_catalog::clear_runtime_env();
 }
 
+/// Point the reused OpenRouter transport at xAI's model catalog when the
+/// `xai-oauth` login provider is active. Without this the runtime falls back to
+/// its OpenRouter `DEFAULT_MODEL` (an Anthropic id), which `api.x.ai` rejects
+/// with "model not found". We only set defaults when the user has not already
+/// pinned a model via `JCODE_OPENROUTER_MODEL`/`JCODE_OPENROUTER_STATIC_MODELS`.
+fn apply_xai_oauth_model_defaults() {
+    const DEFAULT_MODEL: &str = "grok-4.6";
+    const STATIC_MODELS: &str = "grok-4.6\ngrok-4.5\ngrok-4.3";
+    if std::env::var_os("JCODE_OPENROUTER_MODEL").is_none() {
+        crate::env::set_var("JCODE_OPENROUTER_MODEL", DEFAULT_MODEL);
+    }
+    if std::env::var_os("JCODE_OPENROUTER_STATIC_MODELS").is_none() {
+        crate::env::set_var("JCODE_OPENROUTER_STATIC_MODELS", STATIC_MODELS);
+    }
+}
+
 fn disable_subscription_runtime_mode_preserving_active_provider_profile() {
     if std::env::var_os("JCODE_PROVIDER_PROFILE_ACTIVE").is_some()
         || std::env::var_os("JCODE_NAMED_PROVIDER_PROFILE").is_some()
@@ -1324,6 +1340,7 @@ pub async fn login_and_bootstrap_provider(
             crate::env::set_var("JCODE_OPENROUTER_TRANSPORT_STATE", "direct-api-key");
             crate::env::set_var("JCODE_OPENROUTER_API_BASE", "https://api.x.ai/v1");
             crate::env::set_var("JCODE_OPENROUTER_DYNAMIC_BEARER_PROVIDER", "xai-oauth");
+            apply_xai_oauth_model_defaults();
             Arc::new(provider::MultiProvider::new())
         }
         LoginProviderTarget::OpenAiApiKey => {
@@ -1561,6 +1578,7 @@ async fn init_provider_with_options(
             crate::env::set_var("JCODE_OPENROUTER_TRANSPORT_STATE", "direct-api-key");
             crate::env::set_var("JCODE_OPENROUTER_API_BASE", "https://api.x.ai/v1");
             crate::env::set_var("JCODE_OPENROUTER_DYNAMIC_BEARER_PROVIDER", "xai-oauth");
+            apply_xai_oauth_model_defaults();
             Arc::new(provider::MultiProvider::new_fast())
         }
         ProviderChoice::Openrouter => {
