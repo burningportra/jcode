@@ -15,9 +15,13 @@ control plane is currently in early access.
 - `/remote` or `/remote cloud` - activate or manage Jcode Cloud
 - `/remote status` - local gateway state, dial address, paired devices
 - `/remote on` / `/remote off` - enable or disable the gateway
-- `/remote pair` - show a pairing code and QR for a new device
-- `/remote handoff` - hand this session to your phone (pairs + resumes it)
+- `/remote pair` - show a pairing code, QR, and a browser link for a new device
+- `/remote handoff` - hand this session to your phone or a browser (pairs + resumes it)
 - `/remote revoke <device>` - remove a paired device
+
+`pair` and `handoff` also print a plain `http://host:port/?code=...` link that
+opens the browser client (a small installable PWA), so no app install is needed.
+Keep the gateway on a trusted network such as Tailscale, not the public internet.
 
 For self-hosting, run `/remote on`, restart the server, then `/remote pair`.
 ";
