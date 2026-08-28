@@ -428,10 +428,18 @@ async fn handle_http(
 
     let response = match (method, path_base) {
         ("GET", "/health") => {
+            // Report the server home so the browser client can send it as its
+            // subscribe working_dir. The server's home-dir guard then ignores it
+            // when attaching to a session with its own cwd, so a browser attach
+            // never re-pins a live session's directory.
+            let home = dirs::home_dir()
+                .map(|p| p.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "/".to_string());
             let body = serde_json::json!({
                 "status": "ok",
                 "version": jcode_build_meta::version(),
                 "gateway": true,
+                "home": home,
             });
             http_response(200, "OK", &body.to_string())
         }

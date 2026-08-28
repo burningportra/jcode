@@ -22,6 +22,7 @@ const state = {
   token: localStorage.getItem(LS_TOKEN) || null,
   sessionId: null,        // target session from URL/handoff
   connSessionId: null,    // session id reported by server
+  serverHome: "/",        // server home dir (from /health), used as subscribe cwd
   backoff: 500,
   reconnectTimer: null,
   live: false,
@@ -146,7 +147,10 @@ function connect() {
     // in-flight delta buffer so a mid-turn reconnect never double-renders.
     clearLiveBuffers();
     els.transcript.replaceChildren();
-    ws.send(Req.subscribe(state.sessionId));
+    // The server requires an absolute working_dir on subscribe. We report the
+    // server home (learned from /health); the server's home-dir guard ignores
+    // it for an already-attached session, so it never re-pins the cwd.
+    ws.send(Req.subscribe(state.sessionId, state.serverHome));
     ws.send(Req.getHistory());
     setStatus("live", "live");
     state.live = true;
@@ -300,8 +304,19 @@ function renderHistory(e) {
     const role = m.role || "assistant";
     if (m.tool_data) {
       const td = m.tool_data;
-      const el = ensureTool(td.id || Math.random().toString(36), td.name);
+      ensureTool(td.id || Math.random().toString(36), td.name);
       finishTool(td.id, td.name, td.output || "", td.error);
+    } else if (role === "tool") {
+      // History "tool" rows carry the tool output as content; render them so the
+      // transcript is not full of gaps where tools ran.
+      if ((m.content || "").trim()) {
+        const el = document.createElement("div");
+        el.className = "tool";
+        el.innerHTML = `<span class="name"></span><div class="out"></div>`;
+        el.querySelector(".name").textContent = "tool";
+        el.querySelector(".out").textContent = m.content;
+        els.transcript.appendChild(el);
+      }
     } else if (role === "user" || role === "assistant") {
       if ((m.content || "").trim()) addMessage(role, m.content);
     }
@@ -388,6 +403,17 @@ async function boot() {
     notice("No pairing code. Open the handoff link from `/remote handoff` on your desktop.", true);
     return;
   }
+
+  // Learn the server home so subscribe carries a valid absolute working_dir.
+  try {
+    const health = await fetch("/health").then((r) => r.json());
+    if (health && typeof health.home === "string" && health.home.startsWith("/")) {
+      state.serverHome = health.home;
+    }
+  } catch {
+    // Fall back to "/"; subscribe still succeeds, it just reports root.
+  }
+
   connect();
 }
 

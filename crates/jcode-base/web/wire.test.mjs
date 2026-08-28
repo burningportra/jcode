@@ -14,17 +14,22 @@ function ok(cond, msg) {
 }
 
 // Requests encode to a single JSON line with the tags the server expects.
-const sub = JSON.parse(Req.subscribe("sess_abc"));
+const sub = JSON.parse(Req.subscribe("sess_abc", "/Users/me"));
 ok(
   sub.type === "subscribe" &&
     sub.target_session_id === "sess_abc" &&
+    sub.working_dir === "/Users/me" &&
     typeof sub.id === "number",
-  "subscribe carries target_session_id"
+  "subscribe carries target_session_id and working_dir"
 );
 const subNull = JSON.parse(Req.subscribe(null));
 ok(
   subNull.type === "subscribe" && !("target_session_id" in subNull),
   "subscribe omits a null session"
+);
+ok(
+  subNull.working_dir === "/",
+  "subscribe always sends an absolute working_dir (server requires it)"
 );
 ok(JSON.parse(Req.message("hi")).content === "hi", "message content");
 ok(JSON.parse(Req.cancel()).type === "cancel", "cancel");

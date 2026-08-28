@@ -9,9 +9,15 @@ export function newId() {
 
 // --- Requests (client -> server). Each returns a single JSON line string. ---
 export const Req = {
-  subscribe(targetSessionId) {
+  subscribe(targetSessionId, workingDir) {
     const o = { id: newId(), type: "subscribe" };
     if (targetSessionId) o.target_session_id = targetSessionId;
+    // The server rejects a subscribe without an absolute working_dir. The
+    // browser learns the server home from /health and passes it here; the
+    // server's home-dir guard ignores that value when the attached session
+    // already has its own cwd, so this never re-pins a live session. "/" is a
+    // safe absolute fallback that also keeps a brand-new session valid.
+    o.working_dir = workingDir && workingDir.startsWith("/") ? workingDir : "/";
     return JSON.stringify(o);
   },
   getHistory() {
