@@ -829,6 +829,31 @@ fn initial_subscribe_requires_an_absolute_client_working_dir() {
     assert!(error.contains("must Subscribe"));
 }
 
+/// Regression: the browser/PWA client must send a subscribe the real server
+/// accepts. A `?token=`/subprotocol WS attach that omitted `working_dir` shipped
+/// once and left the browser with no data ("Subscribe requires the client's
+/// working directory"). Decode the exact JSON line the PWA emits and run it
+/// through the real handler so a client-shape drift is caught here, not by a
+/// user staring at an empty screen.
+#[test]
+fn pwa_shaped_subscribe_json_is_accepted_by_the_real_handler() {
+    // Mirrors crates/jcode-base/web/wire.js `Req.subscribe(sessionId, home)`.
+    let line = r#"{"id":1,"type":"subscribe","target_session_id":"sess_abc","working_dir":"/Users/me"}"#;
+    let request: Request = serde_json::from_str(line).expect("PWA subscribe must deserialize");
+    let dir = initial_subscribe_working_dir(&request)
+        .expect("PWA subscribe with working_dir must be accepted");
+    assert_eq!(dir, "/Users/me");
+
+    // And the failure mode that shipped: a subscribe without working_dir is
+    // rejected, which is exactly what the client must never send.
+    let bad = r#"{"id":1,"type":"subscribe","target_session_id":"sess_abc"}"#;
+    let bad_request: Request = serde_json::from_str(bad).expect("deserialize");
+    assert!(
+        initial_subscribe_working_dir(&bad_request).is_err(),
+        "a working_dir-less subscribe must be rejected (the bug we fixed)"
+    );
+}
+
 #[tokio::test]
 async fn new_client_agent_stamps_client_cwd_into_initial_context() {
     let provider: Arc<dyn Provider> = Arc::new(CompleteImmediatelyProvider);
