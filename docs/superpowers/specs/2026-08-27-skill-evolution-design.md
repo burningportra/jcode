@@ -9,7 +9,7 @@ Jcode should learn whether installed global skills help in real work and propose
 Included:
 
 - Canonical global skills stored under `~/.jcode/skills/<name>/SKILL.md`.
-- Explicit `skill_manage load` calls from agent turns.
+- Explicit ordinary `skill_manage load` calls from agent turns whose nested tool call is durably persisted. Batch subcalls, provider-native synthetic calls, direct/debug execution, and slash-only activation are excluded from evidence in this slice because their invocation identity is not universally durable.
 - Model-scored outcomes recorded through a constrained `skill_manage record_skill_outcome` action.
 - Evidence-backed refine, merge, and retire suggestions.
 - Learning Inbox Review, Dismiss, and Never controls.
@@ -29,7 +29,7 @@ Excluded:
 1. The model explicitly loads a canonical global skill.
 2. The load output includes a bounded usage ID and instructs the model to report one outcome after applying the skill.
 3. The model calls `record_skill_outcome` with `helped`, `corrected`, `replaced`, or `unused`, a confidence score, a concise rationale, and an optional related skill.
-4. Jcode verifies the usage record, session identity, original load tool call, skill fingerprint, and outcome tool call before persisting the outcome.
+4. Jcode verifies the usage record, session identity, original persisted load tool call, exact canonical loaded path, complete normalized `SKILL.md` fingerprint including frontmatter, and a later persisted outcome tool call before accepting the outcome. Load or outcome calls made through batch subcalls, provider-native synthetic IDs, direct/debug execution, or the same assistant message are not eligible evidence.
 5. Automatic Learning Inbox refresh aggregates recent verified outcomes.
 6. Repeated high-confidence evidence creates one immutable suggestion:
    - **Refine**: at least three `corrected` outcomes from distinct sessions for one skill.
@@ -52,7 +52,7 @@ A usage record contains:
 - load tool-call ID
 - skill name
 - canonical skill path
-- complete normalized skill-content fingerprint
+- complete normalized raw `SKILL.md` fingerprint, including frontmatter
 - creation timestamp
 
 A usage record is accepted only when:
@@ -60,7 +60,8 @@ A usage record is accepted only when:
 - session and tool-call identifiers are bounded safe components
 - the persisted session ID matches the requested session
 - the session contains a `skill_manage load` tool use with the recorded tool-call ID and skill name
-- the current canonical skill fingerprint matches the record at creation
+- the exact loaded path is the canonical `~/.jcode/skills/<name>/SKILL.md`, with no project, plugin, or `~/.agents` shadow taking precedence
+- the complete normalized raw `SKILL.md`, including frontmatter, matches the recorded fingerprint
 
 ### Outcome record
 
@@ -73,7 +74,7 @@ An outcome contains:
 - rationale bounded to 500 characters
 - optional related canonical skill name
 - outcome tool-call ID
-- digests of the bounded persisted conversation messages between load and outcome calls
+- digests of the bounded persisted conversation messages strictly after the load assistant message and through the later outcome assistant message
 - creation timestamp
 
 Only confidence `>= 0.80` contributes to suggestions. Lower-confidence outcomes remain available for diagnostics but never trigger proposals. Outcome recording is best effort and must never fail the user turn merely because the ledger is unavailable.
@@ -82,7 +83,9 @@ The evaluator is the active model itself. The load result gives it a narrow repo
 
 ### Tamper resistance
 
-Review and approval reload the referenced session, verify its identity, locate the recorded tool calls, recompute every message digest, and recompute current skill fingerprints. Changed, missing, copied, renamed, oversized, malformed, or unsafe evidence fails closed.
+Review and approval reload the referenced session, verify its identity, locate the recorded tool calls in distinct assistant messages with the outcome later than the load, recompute every message digest, and recompute exact canonical raw-file fingerprints. Changed, missing, copied, renamed, shadowed, oversized, malformed, unsafe, batched, native-synthetic, or same-message evidence fails closed.
+
+The local owner of `JCODE_HOME` is the trust boundary. Content-addressed hashes detect accidental edits and stale evidence, not a malicious local process that can rewrite records and recompute hashes.
 
 ## Suggestion model
 
@@ -95,7 +98,7 @@ Evolution suggestions are stored separately from repeated-workflow suggestions u
 - concise summary
 - creation timestamp
 
-The Learning Inbox application boundary returns a tagged item so the TUI remains independent of storage details. It selects the newest pending item across workflow and evolution sources. Dismiss suppresses only the exact suggestion. Never suppresses the stable action-and-target pattern until the evidence fingerprint changes materially.
+The Learning Inbox application boundary returns a tagged source and kind so the TUI remains independent of storage details. Every command result carries the backend-resolved suggestion ID, including Review with an omitted ID. It selects the newest pending item across workflow and evolution sources. Dismiss suppresses only the exact suggestion. Never suppresses the stable action-and-target pattern until the evidence fingerprint changes materially.
 
 ## Review and proposal flow
 
@@ -107,17 +110,17 @@ Review does not ask the TUI to edit files. It queues an agent instruction specif
 
 The agent calls `propose_skill_evolution`. The proposal is immutable and content-addressed. It includes exact before fingerprints, exact proposed content where applicable, all verified evidence, and the requested mutation.
 
-`approve_skill_evolution` requires `confirmed=true` and persisted approval evidence whose message explicitly contains the proposal ID. The approval action is the only public operation that mutates skill files.
+`approve_skill_evolution` requires `confirmed=true` and persisted approval evidence whose normalized text exactly equals `I approve skill evolution proposal <proposal-id>.` The approval action is the only public operation that mutates skill files.
 
 ## Mutation semantics
 
-All mutation operations share the existing cross-process crystallization lock and the injected `Arc<RwLock<SkillRegistry>>`.
+All mutation operations have one outer owner for the existing cross-process crystallization lock and the injected `Arc<RwLock<SkillRegistry>>`; nested helpers never reacquire the flock. Each approval persists a transaction record before the first rename. The record advances through staged, sources-archived, destination-installed, registry-verified, and finalized phases. Approval and startup recovery finish or roll back an incomplete transaction deterministically.
 
 - **Refine**: write candidate content to a private temporary file, archive the old skill, atomically persist the new file, load a fresh global registry, verify the new fingerprint, then swap the injected registry.
 - **Merge**: validate both source fingerprints and destination non-conflict, stage the destination, archive both sources, persist the destination, load and verify a fresh registry, then swap.
 - **Retire**: archive the source, load a fresh registry, verify absence, then swap.
 
-Every operation is retry-safe. Existing identical artifacts are accepted. Conflicting artifacts fail closed. If registry verification fails after filesystem installation, the output reports an explicit incomplete state with recovery paths rather than claiming success.
+Every operation is retry-safe. Existing identical artifacts are accepted. Conflicting artifacts fail closed. If any pre-verification step fails, the persisted transaction rolls back renamed sources before returning. If a crash interrupts the operation, the next evolution operation recovers the transaction before doing new work. Registry verification failure triggers rollback and a fresh registry load; only a failure of both forward progress and rollback returns an explicit incomplete state with recovery paths.
 
 ## Failure behavior
 
@@ -132,7 +135,7 @@ Every operation is retry-safe. Existing identical artifacts are accepted. Confli
 
 Requirements map to checks:
 
-1. Explicit canonical load records usage; project and external skills do not.
+1. Explicit ordinary canonical load records usage; project, shadowed, external, batch, native-synthetic, direct/debug, slash-only, and same-message outcome paths do not become eligible evidence.
 2. Valid high-confidence model outcomes persist; invalid classes, confidence, related skills, identifiers, and stale fingerprints fail.
 3. Session/tool-call/message tampering is detected.
 4. Thresholds create refine, merge, and retire suggestions only across distinct sessions.
@@ -144,6 +147,8 @@ Requirements map to checks:
 10. Refine, merge, and retire mutations are atomic, retry-safe, registry-transactional, and recoverable.
 11. No-default builds and packaged TUI builds pass.
 12. The active packaged TUI visibly shows an evolution suggestion in an isolated acceptance home and exercises Review, Dismiss, and Never without mutating the real user home.
+13. Concurrent discovery, dismissal, and approval serialize under one lock owner; one corrupt inbox source does not hide a valid item from the other source.
+14. Transaction recovery is exercised after each filesystem and registry phase, including symlink rejection and platform rename constraints.
 
 ## Complexity limits
 
