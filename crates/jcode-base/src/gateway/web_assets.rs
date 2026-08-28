@@ -66,17 +66,30 @@ pub(super) struct AssetResponse {
 /// response carries `Service-Worker-Allowed: /`.
 pub(super) fn serve_asset(path_base: &str) -> Option<AssetResponse> {
     let asset = ASSETS.iter().find(|a| a.path == path_base)?;
+
+    // The service worker embeds a __JCODE_VERSION__ token that must be replaced
+    // with the running build version, so a new server build produces a new
+    // cache name and the old app-shell cache is discarded. Everything else is
+    // served verbatim from the embedded bytes.
+    let body: std::borrow::Cow<'static, [u8]> = if asset.path == "/service-worker.js" {
+        let text = String::from_utf8_lossy(asset.body)
+            .replace("__JCODE_VERSION__", jcode_build_meta::version());
+        std::borrow::Cow::Owned(text.into_bytes())
+    } else {
+        std::borrow::Cow::Borrowed(asset.body)
+    };
+
     let mut head = format!(
         "HTTP/1.1 200 OK\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\nCache-Control: no-cache\r\n",
         asset.content_type,
-        asset.body.len()
+        body.len()
     );
     if asset.path == "/service-worker.js" {
         head.push_str("Service-Worker-Allowed: /\r\n");
     }
     head.push_str("\r\n");
     let mut bytes = head.into_bytes();
-    bytes.extend_from_slice(asset.body);
+    bytes.extend_from_slice(&body);
     Some(AssetResponse { bytes })
 }
 
@@ -112,6 +125,32 @@ mod tests {
     }
 
     #[test]
+    fn service_worker_version_token_is_substituted() {
+        let r = serve_asset("/service-worker.js").expect("sw");
+        let text = String::from_utf8_lossy(&r.bytes);
+        // The placeholder must be replaced with the real build version so a new
+        // build gets a fresh cache name (fixes the stale-app-shell footgun).
+        assert!(
+            !text.contains("__JCODE_VERSION__"),
+            "version placeholder should be substituted"
+        );
+        assert!(
+            text.contains(jcode_build_meta::version()),
+            "service worker should embed the build version"
+        );
+        // Content-Length must reflect the substituted body, not the template.
+        let (head, body) = text
+            .split_once("\r\n\r\n")
+            .expect("response has head and body");
+        let declared: usize = head
+            .lines()
+            .find_map(|l| l.strip_prefix("Content-Length: "))
+            .and_then(|v| v.trim().parse().ok())
+            .expect("content-length present");
+        assert_eq!(declared, body.len(), "content-length matches substituted body");
+    }
+
+    #[test]
     fn manifest_has_manifest_mime() {
         let r = serve_asset("/manifest.webmanifest").expect("manifest");
         let text = String::from_utf8_lossy(&r.bytes);
@@ -132,9 +171,19 @@ mod tests {
         for a in ASSETS {
             let r = serve_asset(a.path).expect(a.path);
             let text = String::from_utf8_lossy(&r.bytes);
-            let needle = format!("Content-Length: {}\r\n", a.body.len());
-            assert!(
-                text.contains(&needle),
+            let (head, body) = text
+                .split_once("\r\n\r\n")
+                .unwrap_or_else(|| panic!("response for {} has head and body", a.path));
+            let declared: usize = head
+                .lines()
+                .find_map(|l| l.strip_prefix("Content-Length: "))
+                .and_then(|v| v.trim().parse().ok())
+                .unwrap_or_else(|| panic!("content-length present for {}", a.path));
+            // Compare against the ACTUAL served body length, which differs from
+            // the embedded bytes for the version-substituted service worker.
+            assert_eq!(
+                declared,
+                body.len(),
                 "content-length mismatch for {}",
                 a.path
             );
