@@ -409,3 +409,126 @@ async fn initiative_delete_leaves_other_session_attachment() {
         crate::env::remove_var("JCODE_HOME");
     }
 }
+
+#[tokio::test]
+async fn initiative_review_records_pass_and_renders_progression() {
+    let _guard = crate::storage::lock_test_env();
+    let temp = tempfile::tempdir().expect("tempdir");
+    let project = temp.path().join("repo");
+    std::fs::create_dir_all(&project).expect("project dir");
+    let prev_home = std::env::var_os("JCODE_HOME");
+    crate::env::set_var("JCODE_HOME", temp.path());
+
+    let tool = InitiativeTool::new();
+    let ctx = delete_test_ctx("ses_review", project.clone());
+
+    tool.execute(
+        json!({"action": "create", "title": "Reviewed goal", "scope": "project"}),
+        ctx.clone(),
+    )
+    .await
+    .expect("create goal");
+
+    // First pass: architecture, self-review.
+    tool.execute(
+        json!({
+            "action": "review",
+            "id": "reviewed-goal",
+            "lens": "architecture",
+            "score": 35,
+            "gaps": ["missing data model", "no error handling"]
+        }),
+        ctx.clone(),
+    )
+    .await
+    .expect("first review");
+
+    // Second pass: cross-model reviewer, higher score.
+    let out = tool
+        .execute(
+            json!({
+                "action": "review",
+                "id": "reviewed-goal",
+                "lens": "security",
+                "score": 90,
+                "resolved": ["missing data model", "no error handling"],
+                "reviewer_model": "claude-fable-5"
+            }),
+            ctx.clone(),
+        )
+        .await
+        .expect("second review");
+    assert!(out.output.contains("Recorded review"));
+    assert!(out.output.contains("pass 2 (security) 90/100"));
+
+    let goal = crate::goal::load_goal("reviewed-goal", None, Some(project.as_path()))
+        .expect("load")
+        .expect("goal exists");
+    assert_eq!(goal.reviews.len(), 2);
+    assert_eq!(goal.reviews[0].pass, 1);
+    assert_eq!(goal.reviews[1].pass, 2);
+    assert_eq!(
+        goal.reviews[1].reviewer_model.as_deref(),
+        Some("claude-fable-5")
+    );
+
+    // The detail render shows a quality progression.
+    let detail = crate::goal::render_goal_detail(&goal);
+    assert!(detail.contains("## Plan review"), "detail = {detail}");
+    assert!(detail.contains("35 → 90"), "detail = {detail}");
+    assert!(
+        detail.contains("[+review claude-fable-5]"),
+        "detail = {detail}"
+    );
+
+    if let Some(prev_home) = prev_home {
+        crate::env::set_var("JCODE_HOME", prev_home);
+    } else {
+        crate::env::remove_var("JCODE_HOME");
+    }
+}
+
+#[tokio::test]
+async fn initiative_review_requires_lens_and_existing_goal() {
+    let _guard = crate::storage::lock_test_env();
+    let temp = tempfile::tempdir().expect("tempdir");
+    let project = temp.path().join("repo");
+    std::fs::create_dir_all(&project).expect("project dir");
+    let prev_home = std::env::var_os("JCODE_HOME");
+    crate::env::set_var("JCODE_HOME", temp.path());
+
+    let tool = InitiativeTool::new();
+    let ctx = delete_test_ctx("ses_review_err", project.clone());
+
+    // Missing lens.
+    tool.execute(
+        json!({"action": "create", "title": "Goal", "scope": "project"}),
+        ctx.clone(),
+    )
+    .await
+    .expect("create goal");
+    let err = tool
+        .execute(
+            json!({"action": "review", "id": "goal", "score": 50}),
+            ctx.clone(),
+        )
+        .await
+        .expect_err("missing lens should error");
+    assert!(err.to_string().contains("lens is required"));
+
+    // Unknown goal.
+    let err = tool
+        .execute(
+            json!({"action": "review", "id": "nope", "lens": "architecture", "score": 50}),
+            ctx,
+        )
+        .await
+        .expect_err("unknown goal should error");
+    assert!(err.to_string().contains("initiative not found"));
+
+    if let Some(prev_home) = prev_home {
+        crate::env::set_var("JCODE_HOME", prev_home);
+    } else {
+        crate::env::remove_var("JCODE_HOME");
+    }
+}

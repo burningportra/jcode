@@ -157,6 +157,86 @@ pub fn update_goal(
     Ok(Some(goal))
 }
 
+/// Input for recording an APR-style plan-refinement pass against a goal.
+#[derive(Debug, Clone, Default)]
+pub struct GoalReviewInput {
+    pub pass: Option<u32>,
+    pub lens: String,
+    pub score: u8,
+    pub gaps: Vec<String>,
+    pub resolved: Vec<String>,
+    pub reviewer_model: Option<String>,
+    /// Optional free-text summary; also appended to the update log so the pass
+    /// shows up in the existing "Recent updates" trail.
+    pub summary: Option<String>,
+}
+
+/// Record a plan-refinement review pass on a goal. Appends a `PlanReview` (and a
+/// mirrored update-log line) and persists. Returns `None` if the goal does not
+/// exist. The pass number auto-increments from existing reviews when not given.
+pub fn record_review(
+    id: &str,
+    scope_hint: Option<GoalScope>,
+    working_dir: Option<&Path>,
+    review: GoalReviewInput,
+) -> Result<Option<Goal>> {
+    let Some(mut goal) = load_goal(id, scope_hint, working_dir)? else {
+        return Ok(None);
+    };
+
+    let lens = review.lens.trim();
+    if lens.is_empty() {
+        anyhow::bail!("review lens cannot be empty");
+    }
+    let pass = review.pass.unwrap_or_else(|| goal.reviews.len() as u32 + 1);
+    let score = review.score.min(100);
+    let now = Utc::now();
+
+    // Mirror the pass into the free-text update log so it appears in the
+    // existing "Recent updates" render, matching how the skill logs passes.
+    let reviewer = review
+        .reviewer_model
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let summary = review
+        .summary
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| {
+            let attribution = reviewer
+                .map(|m| format!(" [+review {}]", m))
+                .unwrap_or_default();
+            format!(
+                "pass {} ({}){}: score {}/100 — {} gap(s) found / {} resolved",
+                pass,
+                lens,
+                attribution,
+                score,
+                review.gaps.len(),
+                review.resolved.len()
+            )
+        });
+    goal.updates.push(GoalUpdate { at: now, summary });
+
+    goal.reviews.push(jcode_task_types::PlanReview {
+        at: now,
+        pass,
+        lens: lens.to_string(),
+        score,
+        gaps: trim_vec(review.gaps),
+        resolved: trim_vec(review.resolved),
+        reviewer_model: reviewer.map(str::to_string),
+    });
+
+    goal.updated_at = now;
+    save_goal(&goal, working_dir)?;
+    sync_goal_memory(&goal, working_dir)?;
+    Ok(Some(goal))
+}
+
 pub fn load_goal(
     id: &str,
     scope_hint: Option<GoalScope>,
@@ -479,6 +559,34 @@ pub fn render_goal_detail(goal: &Goal) -> String {
         out.push_str("## Blockers\n");
         for blocker in &goal.blockers {
             out.push_str(&format!("- {}\n", blocker));
+        }
+        out.push('\n');
+    }
+    if !goal.reviews.is_empty() {
+        out.push_str("## Plan review\n");
+        let scores: Vec<String> = goal.reviews.iter().map(|r| r.score.to_string()).collect();
+        out.push_str(&format!(
+            "Quality: {} (latest {}/100 after {} pass{})\n\n",
+            scores.join(" → "),
+            goal.reviews.last().map(|r| r.score).unwrap_or(0),
+            goal.reviews.len(),
+            if goal.reviews.len() == 1 { "" } else { "es" }
+        ));
+        for review in goal.reviews.iter().rev().take(8) {
+            let attribution = review
+                .reviewer_model
+                .as_deref()
+                .map(|m| format!(" [+review {}]", m))
+                .unwrap_or_default();
+            out.push_str(&format!(
+                "- pass {} ({}){}: {}/100 — {} gap(s), {} resolved\n",
+                review.pass,
+                review.lens,
+                attribution,
+                review.score,
+                review.gaps.len(),
+                review.resolved.len()
+            ));
         }
         out.push('\n');
     }
