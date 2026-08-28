@@ -55,11 +55,41 @@ Capture the plan as a durable `initiative` (jcode's plan artifact):
   reasoning, and how it serves the over-arching goal. A stranger with no context
   should be able to act on it.
 
+**Optional: multi-model synthesis for high-stakes plans.** The cass-memory case
+study (a 5,600-line plan, zero-to-85% in one day) started not from a single
+draft but from *competing proposals by different frontier models* synthesized
+into one hybrid ("take the best parts of each"). For a large or high-risk goal,
+reproduce this: spawn 2-3 `swarm` agents on **different models** with the same
+prompt to each propose an approach, then synthesize the strongest ideas into the
+initiative and note in the plan which idea came from which proposal (a
+comparison table is ideal). For small goals a single draft is fine; do not
+over-invest.
+
+**What a strong plan contains** (structural checklist, drawn from the case
+study's plan anatomy; use to judge completeness, not every plan needs all):
+
+- Executive summary: problem + solution in one screen.
+- Data models / core types: concrete schemas, not prose ("validate inputs" ->
+  the actual type and constraints).
+- Interface/CLI/API surface: every command or entry point with example I/O.
+- Architecture sketch: how data flows between the pieces (an ASCII diagram is
+  fine).
+- Error handling and edge cases anticipated *before* implementation.
+- Implementation roadmap: phased, dependency-ordered, with rough effort/impact
+  so the highest-ROI work goes first.
+- Comparison table: why this approach over the alternatives considered.
+- Theory-first, concrete examples throughout: explain the why, then show a real
+  example, then implementation notes.
+
 ## Phase 3: Refine loop
 
 Run up to 6 passes. Each pass: (a) review with fresh eyes through one lens,
-(b) score against the rubric, (c) revise the initiative via `initiative update`
-(this appends to the initiative's update log, giving you a diff trail).
+(b) score against the rubric, (c) revise the initiative via `initiative update`,
+and (d) record the pass durably with `initiative review` (id, lens, score, and
+optional gaps/resolved/reviewer_model). `initiative update` keeps the free-text
+diff trail; `initiative review` stores the structured convergence history
+(quality progression) that renders in the goal's "Plan review" section. When a
+cross-model reviewer produced the pass, pass its model as `reviewer_model`.
 
 A pass need not force a revision. If a lens genuinely does not apply (e.g.
 performance for a tiny internal helper), record it as `pass N (<lens>): score X
@@ -157,10 +187,15 @@ Emit a short convergence report:
 
 ## Phase 5: Handoff
 
-Turn the converged plan into executable work:
+Turn the converged plan into executable work. The case study's flow is
+plan -> structured tasks -> parallel swarm ("planning is 80% of the work; a
+detailed plan makes agent execution predictable and fast"):
+
 - Seed a `todo` list from the milestones/steps for a single-session build, or
 - Seed a `swarm` task-graph (explore/implement/verify/fix nodes with
-  dependencies) for parallel execution.
+  dependencies) for parallel execution. Break large plans into many small,
+  dependency-ordered tasks so multiple agents can work without collisions, and
+  start from the highest-ROI / unblocking tasks first.
 
 ## Phase 6: Distill
 

@@ -154,3 +154,65 @@ The flywheel's planning DNA that jcode currently lacks:
    planning; distill new ones after.
 7. **The Plan Review prompt** — bake the "are you sure? is it optimal? revise in
    plan space" metacognition into the planning flow.
+
+## Case study: cass-memory (lesson: real-world-case-study + the actual plan)
+
+Source: https://agent-flywheel.com/learn/real-world-case-study and the real
+5,677-line plan at github.com/Dicklesworthstone/cass_memory_system
+(docs/planning/PLAN_FOR_CASS_MEMORY_SYSTEM.md). Day-1 result: 693 beads, 282
+commits, 151 tests, ~85% complete in ~5 hours with 25+ agents.
+
+### The planning method (Phases 1-3 before any swarm)
+
+1. **Multi-model competing proposals.** The same goal was given to several
+   frontier models (GPT Pro, Gemini, Grok, Claude Opus) with minimal guidance
+   ("design a memory system that works for ALL coding agents, not just Claude").
+   Each produced an independent plan; each was saved as markdown.
+2. **Synthesis into one hybrid.** One model was asked to read all proposals and
+   "create a hybrid plan that takes the best parts of each," written to a single
+   PLAN_FOR_*.md. Result: 5,600+ lines, 11 sections. Key innovations are
+   explicitly attributed to their source model in a table.
+3. **Plan -> beads.** An agent transformed each section/feature into individual
+   beads (14 epics, 350+ tasks) with dependencies and P0-P4 priorities.
+4. **Swarm execution** only then, coordinated by bv triage + Agent Mail file
+   reservations, with a dedicated commit agent every 15-20 min.
+
+### Anatomy of the actual plan (structural template)
+
+11 sections: Executive Summary (problem + 3-layer solution + key-innovations
+table) / Core Architecture (cognitive model + ACE pipeline + 7 design
+principles + ASCII data-flow diagram) / Data Models (concrete TS schemas +
+decay algorithm + validation) / CLI Commands (15+ with usage + JSON outputs) /
+Reflection Pipeline / Integration / LLM Integration (provider abstraction + Zod
+schemas + prompt templates) / Storage & Persistence / Agent Integration
+(AGENTS.md template + MCP design) / Implementation Roadmap (ROI priority table:
+rank, feature, effort, impact, phase; then phased checklists) / Comparison
+Matrix (feature checklist vs each competing proposal).
+
+Patterns that make it effective: theory-first (schema -> algorithm -> examples
+-> impl notes, never code before the why); progressive elaboration (concept ->
+state machine -> transition/decay rules); concrete examples throughout (real
+interfaces, JSON, bash, ASCII diagrams); edge cases anticipated before impl
+(timeouts, toxic-bullet blocking, stale detection, secret sanitization);
+comparison tables contextualizing decisions; distinctive innovations spelled out
+with full algorithms (confidence decay half-life, anti-pattern inversion,
+evidence-count gate, cascading config).
+
+### Key lessons (their own list)
+
+1. Planning is 80% of the work; a detailed plan makes agent execution
+   predictable and fast.
+2. Multi-model synthesis beats single-model planning.
+3. Beads enable parallelism (structured tasks + deps let many agents work
+   without conflicts).
+4. Coordination tools (Agent Mail + file reservations) prevent collisions.
+5. A dedicated commit agent keeps history clean.
+
+### What was folded into jcode's plan-refine
+
+- Phase 2: optional multi-model synthesis (spawn 2-3 swarm agents on different
+  models to propose, then synthesize with attribution) for high-stakes plans,
+  plus a "what a strong plan contains" structural checklist from the anatomy.
+- Phase 3: record each pass durably via the new `initiative review` action
+  (structured quality progression), alongside the free-text update log.
+- Phase 5: plan -> small dependency-ordered tasks -> swarm, highest-ROI first.
