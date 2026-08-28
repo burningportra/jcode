@@ -93,6 +93,8 @@ struct GoalInput {
     resolved: Option<Vec<String>>,
     #[serde(default)]
     reviewer_model: Option<String>,
+    #[serde(default)]
+    format: Option<String>,
 }
 
 fn goal_step_schema() -> Value {
@@ -154,7 +156,8 @@ impl Tool for InitiativeTool {
                 "pass": {"type": "integer", "description": "1-based pass number for `review`; auto-increments when omitted."},
                 "gaps": {"type": "array", "items": {"type": "string"}, "description": "Gaps found in this review pass."},
                 "resolved": {"type": "array", "items": {"type": "string"}, "description": "Gaps resolved in this review pass."},
-                "reviewer_model": {"type": "string", "description": "Model that produced a cross-model review pass, if any."}
+                "reviewer_model": {"type": "string", "description": "Model that produced a cross-model review pass, if any."},
+                "format": {"type": "string", "enum": ["markdown", "json"], "description": "Output format for the `list` action. Default markdown; `json` returns the goals as an in-band JSON array (same shape as list metadata) so models/scripts get structured data."}
             }
         })
     }
@@ -172,6 +175,18 @@ impl Tool for InitiativeTool {
 
         match params.action.as_str() {
             "list" => {
+                // Resolve the output format up front so an invalid value errors
+                // before any side effects. markdown (default) keeps the output
+                // byte-identical to before; json puts structured data in-band so
+                // the model/scripts can consume it (metadata is not forwarded to
+                // the model transcript).
+                let as_json = match params.format.as_deref().map(str::trim) {
+                    None | Some("") | Some("markdown") => false,
+                    Some("json") => true,
+                    Some(other) => {
+                        anyhow::bail!("unknown format: {} (expected markdown or json)", other)
+                    }
+                };
                 let goals = crate::goal::list_relevant_goals(working_dir)?;
                 if display != crate::goal::GoalDisplayMode::None {
                     let focus = display != crate::goal::GoalDisplayMode::UpdateOnly;
@@ -182,9 +197,15 @@ impl Tool for InitiativeTool {
                     )?;
                     publish_side_panel_snapshot(&ctx.session_id, &snapshot);
                 }
-                Ok(ToolOutput::new(crate::goal::render_goals_overview(&goals))
+                let goals_json = serde_json::to_value(&goals)?;
+                let body = if as_json {
+                    serde_json::to_string_pretty(&goals_json)?
+                } else {
+                    crate::goal::render_goals_overview(&goals)
+                };
+                Ok(ToolOutput::new(body)
                     .with_title(format!("{} goals", goals.len()))
-                    .with_metadata(serde_json::to_value(&goals)?))
+                    .with_metadata(goals_json))
             }
             "create" => {
                 let title = params

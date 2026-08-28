@@ -532,3 +532,111 @@ async fn initiative_review_requires_lens_and_existing_goal() {
         crate::env::remove_var("JCODE_HOME");
     }
 }
+
+#[tokio::test]
+async fn initiative_list_json_returns_structured_and_markdown_default_unchanged() {
+    let _guard = crate::storage::lock_test_env();
+    let temp = tempfile::tempdir().expect("tempdir");
+    let project = temp.path().join("repo");
+    std::fs::create_dir_all(&project).expect("project dir");
+    let prev_home = std::env::var_os("JCODE_HOME");
+    crate::env::set_var("JCODE_HOME", temp.path());
+
+    let tool = InitiativeTool::new();
+    let ctx = delete_test_ctx("ses_list_json", project.clone());
+
+    tool.execute(
+        json!({"action": "create", "title": "Listed goal", "scope": "project"}),
+        ctx.clone(),
+    )
+    .await
+    .expect("create goal");
+
+    // Default (markdown) output must be byte-identical to render_goals_overview.
+    let default_out = tool
+        .execute(json!({"action": "list"}), ctx.clone())
+        .await
+        .expect("list default");
+    let goals = crate::goal::list_relevant_goals(Some(project.as_path())).expect("goals");
+    assert_eq!(
+        default_out.output,
+        crate::goal::render_goals_overview(&goals)
+    );
+
+    // Explicit markdown must equal default.
+    let md_out = tool
+        .execute(json!({"action": "list", "format": "markdown"}), ctx.clone())
+        .await
+        .expect("list markdown");
+    assert_eq!(md_out.output, default_out.output);
+
+    // json format returns a parseable JSON array whose body equals the metadata.
+    let json_out = tool
+        .execute(json!({"action": "list", "format": "json"}), ctx.clone())
+        .await
+        .expect("list json");
+    let parsed: serde_json::Value =
+        serde_json::from_str(&json_out.output).expect("json body parses");
+    assert!(parsed.is_array(), "json body should be an array");
+    assert_eq!(parsed.as_array().unwrap().len(), 1);
+    assert_eq!(parsed[0]["title"], "Listed goal");
+    // Body matches the attached metadata (same shape).
+    assert_eq!(parsed, json_out.metadata.clone().unwrap());
+
+    if let Some(prev_home) = prev_home {
+        crate::env::set_var("JCODE_HOME", prev_home);
+    } else {
+        crate::env::remove_var("JCODE_HOME");
+    }
+}
+
+#[tokio::test]
+async fn initiative_list_json_empty_is_empty_array() {
+    let _guard = crate::storage::lock_test_env();
+    let temp = tempfile::tempdir().expect("tempdir");
+    let project = temp.path().join("repo");
+    std::fs::create_dir_all(&project).expect("project dir");
+    let prev_home = std::env::var_os("JCODE_HOME");
+    crate::env::set_var("JCODE_HOME", temp.path());
+
+    let tool = InitiativeTool::new();
+    let ctx = delete_test_ctx("ses_list_json_empty", project.clone());
+
+    let out = tool
+        .execute(json!({"action": "list", "format": "json"}), ctx)
+        .await
+        .expect("list json empty");
+    let parsed: serde_json::Value = serde_json::from_str(&out.output).expect("parses");
+    assert_eq!(parsed, serde_json::json!([]));
+
+    if let Some(prev_home) = prev_home {
+        crate::env::set_var("JCODE_HOME", prev_home);
+    } else {
+        crate::env::remove_var("JCODE_HOME");
+    }
+}
+
+#[tokio::test]
+async fn initiative_list_invalid_format_errors() {
+    let _guard = crate::storage::lock_test_env();
+    let temp = tempfile::tempdir().expect("tempdir");
+    let project = temp.path().join("repo");
+    std::fs::create_dir_all(&project).expect("project dir");
+    let prev_home = std::env::var_os("JCODE_HOME");
+    crate::env::set_var("JCODE_HOME", temp.path());
+
+    let tool = InitiativeTool::new();
+    let ctx = delete_test_ctx("ses_list_bad_format", project.clone());
+
+    let err = tool
+        .execute(json!({"action": "list", "format": "yaml"}), ctx)
+        .await
+        .expect_err("invalid format should error");
+    assert!(err.to_string().contains("unknown format"));
+
+    if let Some(prev_home) = prev_home {
+        crate::env::set_var("JCODE_HOME", prev_home);
+    } else {
+        crate::env::remove_var("JCODE_HOME");
+    }
+}
