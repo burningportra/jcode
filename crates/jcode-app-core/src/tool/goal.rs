@@ -121,7 +121,7 @@ impl Tool for InitiativeTool {
                 "intent": super::intent_schema_property(),
                 "action": {
                     "type": "string",
-                    "enum": ["create", "list", "show", "resume", "update", "checkpoint", "focus"],
+                    "enum": ["create", "list", "show", "resume", "update", "checkpoint", "delete", "focus"],
                     "description": "Action."
                 },
                 "id": {"type": "string"},
@@ -347,6 +347,33 @@ impl Tool for InitiativeTool {
                         .with_title(goal.title.clone())
                         .with_metadata(serde_json::to_value(&goal)?),
                 )
+            }
+            "delete" => {
+                let id = params
+                    .id
+                    .as_deref()
+                    .ok_or_else(|| anyhow::anyhow!("id is required for delete"))?;
+                let scope_hint = params
+                    .scope
+                    .as_deref()
+                    .and_then(crate::goal::GoalScope::parse);
+                let Some(goal) = crate::goal::delete_goal(
+                    id,
+                    scope_hint,
+                    working_dir,
+                    Some(ctx.session_id.as_str()),
+                )?
+                else {
+                    anyhow::bail!("initiative not found: {}", id);
+                };
+                Ok(ToolOutput::new(format!(
+                    "Deleted initiative `{}` ({}) [was {}]",
+                    goal.id,
+                    goal.title,
+                    goal.status.as_str()
+                ))
+                .with_title(goal.title.clone())
+                .with_metadata(serde_json::to_value(&goal)?))
             }
             other => anyhow::bail!("unknown goal action: {}", other),
         }

@@ -510,6 +510,83 @@ fn save_goal(goal: &Goal, working_dir: Option<&Path>) -> Result<()> {
     crate::storage::write_json_fast(&path, goal)
 }
 
+/// Delete a goal and all of its derived artifacts.
+///
+/// A goal is not a single file: creating/updating one also mirrors it into the
+/// memory graph (`goal:<id>`), a session may hold an attachment pointing at it,
+/// and the side panel may show a page for it. Deletion removes all of these.
+///
+/// Ordering is deliberate: the derived/cosmetic mirrors (side-panel page, memory
+/// entry, session attachment) are removed first on a best-effort basis, and the
+/// goal JSON file (the source of truth) is removed LAST. This gives exactly one
+/// point of no return: until the JSON is gone the goal is still loadable, so a
+/// failure in an earlier best-effort step never leaves a half-deleted goal that
+/// cannot be retried.
+///
+/// Idempotent: missing artifacts at any step are ignored. Returns `Ok(Some)`
+/// with the deleted goal, or `Ok(None)` if no goal with `id` existed.
+pub fn delete_goal(
+    id: &str,
+    scope_hint: Option<GoalScope>,
+    working_dir: Option<&Path>,
+    session_id: Option<&str>,
+) -> Result<Option<Goal>> {
+    let Some(goal) = load_goal(id, scope_hint, working_dir)? else {
+        return Ok(None);
+    };
+
+    // 1. Best-effort: remove the side-panel page for this goal (if any session
+    //    is showing one). delete_page errors when the page is absent, so only
+    //    call it when the page exists in that session's snapshot.
+    if let Some(session_id) = session_id {
+        let page_id = goal_page_id(&goal.id);
+        if let Ok(snapshot) = crate::side_panel::snapshot_for_session(session_id)
+            && snapshot.pages.iter().any(|page| page.id == page_id)
+        {
+            let _ = crate::side_panel::delete_page(session_id, &page_id);
+        }
+        let _ = refresh_goals_overview_for_session(session_id, working_dir);
+    }
+
+    // 2. Best-effort: forget the mirrored memory entry, on the scope-matched
+    //    manager (mirror of sync_goal_memory).
+    {
+        use crate::memory::MemoryManager;
+        let manager = match goal.scope {
+            GoalScope::Project => working_dir.map(|dir| MemoryManager::new().with_project_dir(dir)),
+            GoalScope::Global => Some(MemoryManager::new()),
+        };
+        if let Some(manager) = manager {
+            let _ = manager.forget(&goal_memory_id(&goal));
+        }
+    }
+
+    // 3. Best-effort: clear the CURRENT session's attachment iff it points at
+    //    this goal. Never touch other sessions' attachments; they resolve to
+    //    None via load_attached_goal once the JSON is gone.
+    if let Some(session_id) = session_id
+        && let Ok(path) = session_attachment_path(session_id)
+        && path.exists()
+        && let Ok(attachment) = crate::storage::read_json::<GoalAttachment>(&path)
+        && attachment.goal_id == goal.id
+    {
+        let _ = std::fs::remove_file(&path);
+    }
+
+    // 4. Point of no return: remove the goal JSON file (source of truth) last.
+    let path = goal_file(&goal, working_dir)?;
+    match std::fs::remove_file(&path) {
+        Ok(()) => {}
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+        Err(err) => {
+            return Err(err)
+                .with_context(|| format!("failed to delete goal file {}", path.display()));
+        }
+    }
+
+    Ok(Some(goal))
+}
+
 fn goal_file(goal: &Goal, working_dir: Option<&Path>) -> Result<PathBuf> {
     let dir = match goal.scope {
         GoalScope::Global => global_goals_dir()?,
