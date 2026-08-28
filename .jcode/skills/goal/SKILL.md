@@ -135,6 +135,14 @@ head:
 - Fold the reviewer's findings back into the initiative via `initiative update`,
   and note in the pass log which findings came from the cross-model reviewer
   (e.g. `pass 1 (architecture) [+swarm review claude-fable-5]: ...`).
+- **Verify the reviewer actually ran a different model before claiming it did.**
+  When `agents.swarm_model` is unpinned, workers inherit the coordinator's model
+  and the per-spawn `model` parameter is silently ignored, so a pass can look
+  cross-model while being same-model. Read the worker's actual model from its
+  session (`~/.jcode/sessions/<id>.json`, field `model`) and compare it to yours.
+  If they match, record the pass as a same-model fresh-eyes review and say the
+  plan still lacks a cross-model check. A same-model reviewer still finds real
+  defects; it just cannot supply the independence the convergence signal claims.
 - If `swarm` is unavailable, degrade gracefully: do the fresh-eyes pass yourself
   and note that no independent reviewer model was used. A single-model loop is
   still useful; it just lacks the cross-model check.
