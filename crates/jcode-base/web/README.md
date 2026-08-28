@@ -38,8 +38,10 @@ gateway, so there is nothing to deploy.
   which is what lets the browser open a `ws://` connection (an `https` page
   cannot, due to mixed-content rules).
 - Auth: the browser cannot set an `Authorization` header on a WebSocket, so the
-  token rides the `?token=` query parameter. This is why the gateway must stay
-  on a trusted network.
+  token is sent via `Sec-WebSocket-Protocol` (`jcode.bearer.<token>`, offered
+  alongside the non-secret `jcode.v1` protocol the server echoes). This keeps the
+  token out of the URL, so it does not land in server/proxy logs or browser
+  history. The legacy `?token=` query parameter still works for older clients.
 
 ## Security
 
@@ -48,8 +50,10 @@ gateway, so there is nothing to deploy.
   token like a shell on the machine.
 - Keep the gateway on Tailscale or a LAN. Do **not** expose port 7643 to the
   public internet without putting TLS and additional authentication in front.
-- The token is plaintext on the wire (no TLS in v1) and appears in server logs
-  via `?token=`. Revoke a device any time with `/remote revoke <name>`.
+- The token is plaintext on the wire (no TLS in v1). The browser sends it via
+  `Sec-WebSocket-Protocol` rather than the URL, so it stays out of logs and
+  history, but on an untrusted network it is still observable. Revoke a device
+  any time with `/remote revoke <name>`.
 
 ## Scope (v1)
 

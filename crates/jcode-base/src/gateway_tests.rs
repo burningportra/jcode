@@ -75,6 +75,52 @@ fn test_parse_query_token() {
 }
 
 #[test]
+fn test_parse_subprotocol_token() {
+    use super::auth::parse_subprotocol_token;
+    assert_eq!(
+        parse_subprotocol_token("jcode.bearer.abc123"),
+        Some("abc123")
+    );
+    // Real browser form: bearer protocol plus the echo protocol, comma-separated.
+    assert_eq!(
+        parse_subprotocol_token("jcode.bearer.deadbeef, jcode.v1"),
+        Some("deadbeef")
+    );
+    assert_eq!(parse_subprotocol_token("jcode.v1"), None);
+    assert_eq!(parse_subprotocol_token("jcode.bearer."), None);
+    assert_eq!(parse_subprotocol_token(""), None);
+}
+
+#[test]
+fn test_extract_ws_auth_accepts_subprotocol_bearer_and_selects_echo() {
+    let token = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    let request = Request::builder()
+        .uri("ws://example.com/ws")
+        .header(
+            "sec-websocket-protocol",
+            format!("jcode.bearer.{token}, jcode.v1"),
+        )
+        .body(())
+        .expect("request");
+    let auth = extract_ws_auth(&request).expect("subprotocol auth");
+    assert_eq!(auth.token, token);
+    assert_eq!(auth.source, super::auth::WsAuthSource::Subprotocol);
+    // The server must echo the non-secret protocol, never the bearer token one.
+    assert_eq!(
+        auth.selected_protocol.as_deref(),
+        Some(super::auth::WS_ECHO_PROTOCOL)
+    );
+    assert!(
+        !auth
+            .selected_protocol
+            .as_deref()
+            .unwrap_or_default()
+            .contains(token),
+        "the echoed protocol must never contain the secret token"
+    );
+}
+
+#[test]
 fn test_hex_token_validation() {
     assert!(is_valid_hex_token(
         "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
@@ -290,9 +336,23 @@ async fn test_gateway_ws_token_auth_bridges_browser_subscribe() {
         }
     });
 
-    // Connect exactly like the browser: token in the query string, path /ws.
-    let url = format!("ws://{addr}/ws?token={token}");
-    let (mut ws, _resp) = connect_async(&url).await.expect("ws handshake accepted");
+    // Connect exactly like the browser: token carried in Sec-WebSocket-Protocol
+    // (not the URL), with the echo protocol offered so the server can accept.
+    use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+    let mut req = format!("ws://{addr}/ws").into_client_request().expect("req");
+    req.headers_mut().insert(
+        "sec-websocket-protocol",
+        format!("jcode.bearer.{token}, jcode.v1").parse().unwrap(),
+    );
+    let (mut ws, resp) = connect_async(req).await.expect("ws handshake accepted");
+    // The server must echo the non-secret protocol so the browser accepts it.
+    assert_eq!(
+        resp.headers()
+            .get("sec-websocket-protocol")
+            .and_then(|v| v.to_str().ok()),
+        Some("jcode.v1"),
+        "server should echo the safe subprotocol, not the bearer token"
+    );
 
     // The gateway hands a server-side bridge stream to handle_client via the
     // channel as soon as the handshake completes.

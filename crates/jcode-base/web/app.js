@@ -112,8 +112,13 @@ async function pair(code) {
 // ---- websocket lifecycle ----
 function wsUrl() {
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
-  // Browsers cannot set Authorization on WebSocket; token rides the query param.
-  return `${proto}//${location.host}/ws?token=${encodeURIComponent(state.token)}`;
+  return `${proto}//${location.host}/ws`;
+}
+// The token rides Sec-WebSocket-Protocol (via the WebSocket subprotocol
+// argument) instead of the URL, so it does not land in server/proxy logs or
+// browser history. `jcode.v1` is the non-secret protocol the server echoes.
+function wsProtocols() {
+  return [`jcode.bearer.${state.token}`, "jcode.v1"];
 }
 function clearLiveBuffers() {
   state.liveEl = null;
@@ -128,7 +133,7 @@ function connect() {
   state.intentionalClose = false;
   let ws;
   try {
-    ws = new WebSocket(wsUrl());
+    ws = new WebSocket(wsUrl(), wsProtocols());
   } catch (e) {
     scheduleReconnect();
     return;

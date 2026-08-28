@@ -161,7 +161,7 @@ async fn handle_ws_connection(
     let ws_stream = tokio_tungstenite::accept_hdr_async(
         tcp_stream,
         |request: &tokio_tungstenite::tungstenite::handshake::server::Request,
-         response: tokio_tungstenite::tungstenite::handshake::server::Response| {
+         mut response: tokio_tungstenite::tungstenite::handshake::server::Response| {
             if request.uri().path() != "/ws" {
                 return Err(ws_error_response(
                     404,
@@ -173,6 +173,17 @@ async fn handle_ws_connection(
             let ws_auth = extract_ws_auth(request)?;
             // Reload from disk to pick up newly paired or revoked devices.
             let device = authorize_ws_device(&DeviceRegistry::load(), &ws_auth.token)?;
+            // When the browser authenticated via Sec-WebSocket-Protocol, echo the
+            // agreed non-secret subprotocol back, or the browser rejects the
+            // upgrade. The bearer token protocol itself is never echoed, so the
+            // secret stays out of the response.
+            if let Some(proto) = ws_auth.selected_protocol.as_deref()
+                && let Ok(value) = proto.parse()
+            {
+                response
+                    .headers_mut()
+                    .insert("sec-websocket-protocol", value);
+            }
             let mut guard = auth_cb
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
