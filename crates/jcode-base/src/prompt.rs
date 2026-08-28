@@ -380,6 +380,26 @@ pub fn build_system_prompt(skill_prompt: Option<&str>, available_skills: &[Skill
     build_system_prompt_with_selfdev(skill_prompt, available_skills, false)
 }
 
+/// Frame the active skill as an imperative directive, not passive reference.
+///
+/// A skill is only injected here because the user explicitly invoked it (via a
+/// `/skill` slash command or the Skill tool). Injecting it under a bare
+/// heading let the model treat multi-step protocol skills (e.g. `/goal`) as
+/// background reading and skip straight to the task. The directive makes the
+/// activation actionable: follow the skill now, starting at its first step.
+pub(crate) fn format_active_skill_section(skill_prompt: &str) -> String {
+    format!(
+        "# Active Skill\n\n\
+         The user invoked the skill below. Follow it now as your active \
+         operating instructions for this request, starting at its first step. \
+         Treat it as a directive to execute, not reference material to \
+         consult: work through its phases in order and do not skip to the \
+         task until the skill tells you to. If the skill defines a protocol \
+         (interview, planning, review), run that protocol.\n\n\
+         {skill_prompt}"
+    )
+}
+
 /// Build the full system prompt with optional self-dev tools
 pub fn build_system_prompt_with_selfdev(
     skill_prompt: Option<&str>,
@@ -494,7 +514,7 @@ pub fn build_system_prompt_full_with_capabilities(
 
     // Add active skill prompt
     if let Some(skill) = skill_prompt {
-        parts.push(format!("# Active Skill\n\n{}", skill));
+        parts.push(format_active_skill_section(skill));
     }
 
     let prompt = parts.join("\n\n");
@@ -633,7 +653,7 @@ fn build_system_prompt_split_with_capabilities_and_agents_md(
 
     // Active skill prompt (changes per skill invocation)
     if let Some(skill) = skill_prompt {
-        dynamic_parts.push(format!("# Active Skill\n\n{}", skill));
+        dynamic_parts.push(format_active_skill_section(skill));
     }
 
     let static_part = static_parts.join("\n\n");
