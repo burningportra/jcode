@@ -243,3 +243,119 @@ async fn test_gateway_http_serves_pwa_and_preserves_api() {
         request(addr, "GET /nope HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n").await;
     assert!(missing.starts_with("HTTP/1.1 404"));
 }
+
+/// The browser client authenticates the WebSocket via `?token=` (it cannot set
+/// an Authorization header). This test proves that path end to end: pair a
+/// device, open a real `ws://.../ws?token=<hex>` connection, send a `subscribe`
+/// line the way the PWA does, and confirm it arrives on the server-side bridge
+/// stream that `handle_client` would consume. This is the WS half that the
+/// HTTP-only asset test does not cover.
+#[tokio::test]
+async fn test_gateway_ws_token_auth_bridges_browser_subscribe() {
+    use tokio::io::AsyncReadExt;
+    use tokio::net::TcpListener;
+    use tokio_tungstenite::connect_async;
+    use tokio_tungstenite::tungstenite::Message;
+    use futures::SinkExt;
+
+    // Isolate devices.json under a temp JCODE_HOME so we never touch the real
+    // registry. The gateway reloads DeviceRegistry from disk at handshake time,
+    // so the paired device must be persisted there.
+    let _env = crate::storage::lock_test_env();
+    let temp = tempfile::tempdir().expect("tempdir");
+    let prev_home = std::env::var_os("JCODE_HOME");
+    // SAFETY: guarded by lock_test_env so no other test mutates env concurrently.
+    unsafe {
+        std::env::set_var("JCODE_HOME", temp.path());
+    }
+
+    // Pair a device and persist it to the isolated registry on disk.
+    let token = {
+        let mut reg = DeviceRegistry::load();
+        let t = reg.pair_device("web-test".to_string(), "Web browser".to_string(), None);
+        reg.save().expect("save registry");
+        t
+    };
+    assert_eq!(token.len(), 64, "pair token should be 64 hex chars");
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    let (client_tx, mut client_rx) =
+        tokio::sync::mpsc::unbounded_channel::<super::GatewayClient>();
+    let registry = std::sync::Arc::new(tokio::sync::RwLock::new(DeviceRegistry::load()));
+
+    tokio::spawn(async move {
+        if let Ok((stream, peer)) = listener.accept().await {
+            let _ = super::handle_connection(stream, peer, registry, client_tx).await;
+        }
+    });
+
+    // Connect exactly like the browser: token in the query string, path /ws.
+    let url = format!("ws://{addr}/ws?token={token}");
+    let (mut ws, _resp) = connect_async(&url).await.expect("ws handshake accepted");
+
+    // The gateway hands a server-side bridge stream to handle_client via the
+    // channel as soon as the handshake completes.
+    let mut client = tokio::time::timeout(std::time::Duration::from_secs(5), client_rx.recv())
+        .await
+        .expect("gateway produced a client before timeout")
+        .expect("client present");
+    assert_eq!(client.device_name, "Web browser");
+
+    // Send a subscribe request the way wire.js does (single JSON line).
+    let subscribe = r#"{"id":1,"type":"subscribe"}"#;
+    ws.send(Message::Text(subscribe.to_string()))
+        .await
+        .expect("send subscribe");
+
+    // Read it off the server-side bridge stream: the browser's bytes must arrive
+    // as a newline-delimited line, proving the WS<->protocol bridge works.
+    let mut buf = [0u8; 256];
+    let n = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        client.stream.read(&mut buf),
+    )
+    .await
+    .expect("read before timeout")
+    .expect("read ok");
+    let got = String::from_utf8_lossy(&buf[..n]);
+    assert!(
+        got.contains("\"type\":\"subscribe\""),
+        "bridge should deliver the subscribe line, got: {got:?}"
+    );
+    assert!(got.ends_with('\n'), "bridge should newline-delimit, got: {got:?}");
+
+    // Restore env.
+    // SAFETY: still under lock_test_env.
+    unsafe {
+        match prev_home {
+            Some(v) => std::env::set_var("JCODE_HOME", v),
+            None => std::env::remove_var("JCODE_HOME"),
+        }
+    }
+}
+
+/// A revoked/unknown token must be rejected at the WS handshake with a 401, so
+/// the browser sees an auth failure it can react to rather than a silent drop.
+#[tokio::test]
+async fn test_gateway_ws_rejects_bad_token_at_handshake() {
+    use tokio::net::TcpListener;
+    use tokio_tungstenite::connect_async;
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    let (client_tx, _client_rx) = tokio::sync::mpsc::unbounded_channel::<super::GatewayClient>();
+    let registry = std::sync::Arc::new(tokio::sync::RwLock::new(DeviceRegistry::default()));
+
+    tokio::spawn(async move {
+        if let Ok((stream, peer)) = listener.accept().await {
+            let _ = super::handle_connection(stream, peer, registry, client_tx).await;
+        }
+    });
+
+    // 64 hex chars but never paired -> unknown token.
+    let bogus = "a".repeat(64);
+    let url = format!("ws://{addr}/ws?token={bogus}");
+    let result = connect_async(&url).await;
+    assert!(result.is_err(), "unknown token must fail the handshake");
+}
