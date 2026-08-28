@@ -341,12 +341,21 @@ impl Tool for SkillTool {
                     "description": "Content-addressed proactive discovery suggestion ID."
                 },
                 "usage_id": {"type": "string", "description": "Content-addressed eligible skill usage ID."},
-                "outcome": {"type": "string", "enum": ["helped", "corrected", "replaced", "unused"]},
+                "outcome": {"anyOf": [
+                    {"type": "string", "enum": ["helped", "corrected", "replaced", "unused"]},
+                    {"type": "null"}
+                ]},
                 "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0},
                 "rationale": {"type": "string", "minLength": 1, "maxLength": 500},
                 "related_skill": {"type": "string", "description": "Canonical related skill, allowed only for replaced."},
-                "evolution_kind": {"type": "string", "enum": ["refine", "merge", "retire"]},
-                "source_names": {"type": "array", "minItems": 1, "maxItems": 2, "items": {"type": "string"}},
+                "evolution_kind": {"anyOf": [
+                    {"type": "string", "enum": ["refine", "merge", "retire"]},
+                    {"type": "null"}
+                ]},
+                "source_names": {"anyOf": [
+                    {"type": "array", "minItems": 1, "maxItems": 2, "items": {"type": "string"}},
+                    {"type": "null"}
+                ]},
                 "destination_name": {"type": "string"},
                 "proposed_content": {"type": "string", "description": "Exact raw replacement SKILL.md including frontmatter."}
             }
@@ -1078,6 +1087,23 @@ mod tests {
         assert_eq!(schema["type"], "object");
         assert!(schema["properties"]["action"].is_object());
         assert!(schema["properties"]["name"].is_object());
+        for field in ["outcome", "evolution_kind", "source_names"] {
+            assert!(
+                schema["properties"][field]["anyOf"]
+                    .as_array()
+                    .is_some_and(|variants| variants.iter().any(|value| value["type"] == "null")),
+                "{field} must remain optional for unrelated actions"
+            );
+        }
+        let ordinary: SkillInput = serde_json::from_value(json!({
+            "action": "load",
+            "name": "demo",
+            "outcome": null,
+            "evolution_kind": null,
+            "source_names": null
+        }))
+        .unwrap();
+        validate_action_fields(&ordinary).unwrap();
     }
 
     #[tokio::test]
