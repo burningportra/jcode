@@ -326,6 +326,7 @@ use self::state::ProviderState;
 pub use self::state::{ProviderModelSelectionSource, ProviderRuntimeState, ProviderStateEvent};
 
 pub(crate) const GROK_BUILD_PROFILE_ID: &str = "grok-build";
+pub(crate) const XAI_OAUTH_PROFILE_ID: &str = external::XAI_OAUTH_RUNTIME;
 
 /// MultiProvider wraps multiple providers and allows seamless model switching
 pub struct MultiProvider {
@@ -1522,6 +1523,26 @@ impl MultiProvider {
             registry.install_compatible_profile(GROK_BUILD_PROFILE_ID, grok);
         }
 
+        // xAI Grok OAuth reuses the OpenRouter transport but is its own runtime
+        // identity. Install it as a compatible profile so its grok models are
+        // offered by the picker even when another provider is currently active,
+        // mirroring Grok Build above.
+        if crate::auth::xai::has_cached_auth()
+            && registry.compatible_profile(XAI_OAUTH_PROFILE_ID).is_none()
+        {
+            match external::instantiate_openrouter_runtime(external::OpenRouterRuntimeSpec::XaiOauth)
+            {
+                Ok(xai) => {
+                    crate::logging::info("Hot-initialized xAI Grok OAuth provider after login");
+                    registry.install_compatible_profile(XAI_OAUTH_PROFILE_ID, xai);
+                }
+                Err(error) => crate::logging::warn(&format!(
+                    "xAI Grok OAuth credentials are available but the runtime failed to \
+                     initialize: {error}"
+                )),
+            }
+        }
+
         if let Some(anthropic) = self.anthropic_provider() {
             self.spawn_post_auth_model_refresh(anthropic, "Anthropic");
         }
@@ -1994,6 +2015,30 @@ impl Provider for MultiProvider {
             provider.set_model(target_model)?;
             registry.install_compatible_profile(GROK_BUILD_PROFILE_ID, provider);
             registry.set_active_compatible_profile(GROK_BUILD_PROFILE_ID);
+            self.set_active_provider(ActiveProvider::OpenRouter);
+            return Ok(());
+        }
+
+        // xAI Grok OAuth: the picker emits `xai-oauth:<model>` specs (its route
+        // api_method is `openai-compatible:xai-oauth`). Bind the dedicated OAuth
+        // runtime, which reuses the OpenRouter transport but resolves its bearer
+        // from ~/.jcode/xai_oauth.json at request time. Distinct from the
+        // API-key `xai` profile and from `grok-build`.
+        if let Some(target_model) = requested_model.strip_prefix("xai-oauth:") {
+            let target_model = target_model.trim();
+            if target_model.is_empty() {
+                anyhow::bail!("xAI Grok OAuth model cannot be empty");
+            }
+            let registry = ProviderRegistry::new(self);
+            let provider = match registry.compatible_profile(XAI_OAUTH_PROFILE_ID) {
+                Some(provider) => provider,
+                None => external::instantiate_openrouter_runtime(
+                    external::OpenRouterRuntimeSpec::XaiOauth,
+                )?,
+            };
+            provider.set_model(target_model)?;
+            registry.install_compatible_profile(XAI_OAUTH_PROFILE_ID, provider);
+            registry.set_active_compatible_profile(XAI_OAUTH_PROFILE_ID);
             self.set_active_provider(ActiveProvider::OpenRouter);
             return Ok(());
         }

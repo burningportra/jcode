@@ -37,6 +37,9 @@ input = ["text"]
                 OpenRouterRuntimeSpec::CompatibleProfile(profile) => Arc::new(
                     OpenRouterProvider::new_openai_compatible_profile_runtime(profile)?,
                 ),
+                OpenRouterRuntimeSpec::XaiOauth => {
+                    anyhow::bail!("xAI Grok OAuth runtime is not used in this test")
+                }
                 OpenRouterRuntimeSpec::NamedProfile { name, config } => Arc::new(
                     OpenRouterProvider::new_named_openai_compatible(&name, &config)?,
                 ),

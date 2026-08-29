@@ -212,6 +212,60 @@ fn test_vercel_ai_gateway_has_immediate_profile_scoped_model_routes() {
 }
 
 #[test]
+fn test_xai_oauth_grok_models_surface_in_picker_when_another_provider_is_active() {
+    with_clean_provider_test_env(|| {
+        let runtime = enter_test_runtime();
+        runtime.block_on(async {
+            // Simulate a stored xai-oauth login (JCODE_HOME is isolated by the
+            // test env), while OpenAI is the active provider.
+            crate::env::set_var("OPENAI_API_KEY", "sk-openai-test");
+            let now_ms = chrono::Utc::now().timestamp_millis();
+            let tokens = crate::auth::xai::XaiTokens {
+                access_token: "xai-access-test".to_string(),
+                refresh_token: Some("xai-refresh-test".to_string()),
+                // Far future so the runtime accepts the login without refresh.
+                expires_at: now_ms + 86_400_000,
+                token_type: "Bearer".to_string(),
+                scope: None,
+                id_token: None,
+                obtained_at: now_ms,
+            };
+            crate::auth::xai::save_tokens(&tokens).expect("save xai-oauth tokens");
+            assert!(crate::auth::xai::has_cached_auth());
+
+            let provider = MultiProvider::new_fast();
+            let routes = provider.model_routes();
+            // Every default grok model must be offered with the dedicated xAI
+            // Grok OAuth identity and a switchable api_method, even though
+            // xai-oauth is not the active provider (the bug: they were absent).
+            for model in crate::auth::xai::XAI_OAUTH_STATIC_MODELS {
+                let route = routes
+                    .iter()
+                    .find(|route| route.model == *model && route.provider == "xAI Grok OAuth")
+                    .unwrap_or_else(|| {
+                        panic!("xai-oauth grok model '{model}' missing from picker: {routes:?}")
+                    });
+                assert_eq!(route.api_method, "openai-compatible:xai-oauth");
+                assert!(
+                    route.available,
+                    "xai-oauth route should be available: {route:?}"
+                );
+                // The picker converts this route into a switch spec that the
+                // set_model prefix branch understands.
+                assert_eq!(
+                    MultiProvider::model_switch_request_for_session_route(
+                        &route.model,
+                        Some(&route.provider),
+                        Some(&route.api_method),
+                    ),
+                    format!("xai-oauth:{model}")
+                );
+            }
+        })
+    });
+}
+
+#[test]
 fn test_direct_chutes_ignores_legacy_openrouter_catalog_cache() {
     with_clean_provider_test_env(|| {
         let temp_home = tempfile::tempdir().expect("temp HOME");

@@ -988,6 +988,9 @@ fn register_test_external_runtimes() {
             OpenRouterRuntimeSpec::CompatibleProfile(profile) => Arc::new(
                 OpenRouterProvider::new_openai_compatible_profile_runtime(profile)?,
             ),
+            OpenRouterRuntimeSpec::XaiOauth => {
+                Arc::new(OpenRouterProvider::new_xai_oauth_runtime()?)
+            }
             OpenRouterRuntimeSpec::NamedProfile { name, config } => Arc::new(
                 OpenRouterProvider::new_named_openai_compatible(&name, &config)?,
             ),

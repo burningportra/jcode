@@ -58,6 +58,17 @@ const XAI_REFRESH_SKEW_MS: i64 = 3_600_000;
 /// Provider id used for refresh-state bookkeeping and single-flight keys.
 pub const XAI_OAUTH_PROVIDER_ID: &str = "xai-oauth";
 
+/// xAI inference endpoint the OAuth bearer routes through (OpenAI-compatible).
+pub const XAI_OAUTH_API_BASE: &str = "https://api.x.ai/v1";
+
+/// Default model selected when `xai-oauth` becomes the active provider.
+pub const XAI_OAUTH_DEFAULT_MODEL: &str = "grok-4.6";
+
+/// Grok models offered in the picker for `xai-oauth` before the live catalog
+/// hydrates. Kept in sync with the models `https://api.x.ai/v1/models` serves
+/// under a SuperGrok / X Premium+ bearer.
+pub const XAI_OAUTH_STATIC_MODELS: &[&str] = &["grok-4.6", "grok-4.5", "grok-4.3"];
+
 /// Hint shown when a refresh is permanently rejected.
 const RELOGIN_HINT: &str = "Run `jcode login --provider xai-oauth` to sign in again.";
 

@@ -42,6 +42,13 @@ pub const OPENAI_RUNTIME: &str = "openai";
 /// Registry key for Grok Build's Grok CLI ACP runtime.
 pub const GROK_BUILD_RUNTIME: &str = "grok-build";
 
+/// Registry key / compatible-profile id for the xAI Grok OAuth runtime.
+///
+/// xAI Grok OAuth reuses the OpenRouter/OpenAI-compatible transport against
+/// `https://api.x.ai/v1` with a device-code bearer, but it is a distinct
+/// runtime identity from both the API-key `xai` profile and `grok-build`.
+pub const XAI_OAUTH_RUNTIME: &str = "xai-oauth";
+
 /// Construction spec for the OpenRouter / OpenAI-compatible runtime family.
 /// Unlike the other providers, one concrete runtime type serves several
 /// distinct identities (the real OpenRouter aggregator, a pinned OpenRouter
@@ -56,6 +63,10 @@ pub enum OpenRouterRuntimeSpec {
     OpenRouterApiKey,
     /// Direct OpenAI-compatible profile endpoint (DeepSeek, NVIDIA NIM, ...).
     CompatibleProfile(crate::provider_catalog::OpenAiCompatibleProfile),
+    /// xAI Grok OAuth (device-code) runtime: OpenAI-compatible transport
+    /// against `https://api.x.ai/v1` with a bearer refreshed from
+    /// ~/.jcode/xai_oauth.json at request time.
+    XaiOauth,
     /// User-defined named OpenAI-compatible provider from config
     /// (`[providers.<name>]` in config.toml).
     NamedProfile {

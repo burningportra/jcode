@@ -1251,13 +1251,13 @@ fn disable_subscription_runtime_mode() {
 /// with "model not found". We only set defaults when the user has not already
 /// pinned a model via `JCODE_OPENROUTER_MODEL`/`JCODE_OPENROUTER_STATIC_MODELS`.
 fn apply_xai_oauth_model_defaults() {
-    const DEFAULT_MODEL: &str = "grok-4.6";
-    const STATIC_MODELS: &str = "grok-4.6\ngrok-4.5\ngrok-4.3";
+    let default_model = auth::xai::XAI_OAUTH_DEFAULT_MODEL;
+    let static_models = auth::xai::XAI_OAUTH_STATIC_MODELS.join("\n");
     if std::env::var_os("JCODE_OPENROUTER_MODEL").is_none() {
-        crate::env::set_var("JCODE_OPENROUTER_MODEL", DEFAULT_MODEL);
+        crate::env::set_var("JCODE_OPENROUTER_MODEL", default_model);
     }
     if std::env::var_os("JCODE_OPENROUTER_STATIC_MODELS").is_none() {
-        crate::env::set_var("JCODE_OPENROUTER_STATIC_MODELS", STATIC_MODELS);
+        crate::env::set_var("JCODE_OPENROUTER_STATIC_MODELS", static_models);
     }
 }
 

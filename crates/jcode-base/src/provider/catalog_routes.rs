@@ -3,7 +3,8 @@ use crate::auth::{AuthState, AuthStatus};
 use super::pricing::cheapness_for_route;
 use super::{
     ALL_OPENAI_MODELS, AccountModelAvailabilityState, CHATGPT_WEB_MODEL, GROK_BUILD_PROFILE_ID,
-    ModelRoute, MultiProvider, Provider, ProviderRegistry, anthropic_api_key_route_availability,
+    ModelRoute, MultiProvider, Provider, ProviderRegistry, XAI_OAUTH_PROFILE_ID,
+    anthropic_api_key_route_availability,
     anthropic_oauth_route_availability, bedrock, build_anthropic_oauth_route,
     build_chatgpt_web_route, build_copilot_route, build_openai_api_key_route,
     build_openai_oauth_route, build_openrouter_auto_route, build_openrouter_endpoint_route,
@@ -308,6 +309,21 @@ pub(super) fn multiprovider_model_routes(provider: &MultiProvider) -> Vec<ModelR
             route.model = format!("grok-build:{}", route.model);
             route.provider = "Grok Build".to_string();
             route.api_method = "grok-build-acp".to_string();
+            if !routes.iter().any(|existing| {
+                existing.model == route.model && existing.api_method == route.api_method
+            }) {
+                routes.push(route);
+            }
+        }
+    }
+
+    // xAI Grok OAuth reuses the OpenRouter transport but is installed as a
+    // dedicated compatible profile (bearer refreshed from ~/.jcode/xai_oauth.json).
+    // Its models must appear in the picker even when another provider is active,
+    // just like Grok Build above. The profile's own routes already carry the
+    // `openai-compatible:xai-oauth` api_method, so `/model` can switch to them.
+    if let Some(xai) = ProviderRegistry::new(provider).compatible_profile(XAI_OAUTH_PROFILE_ID) {
+        for route in xai.model_routes() {
             if !routes.iter().any(|existing| {
                 existing.model == route.model && existing.api_method == route.api_method
             }) {
