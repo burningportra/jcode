@@ -388,13 +388,21 @@ async function boot() {
     history.replaceState(null, "", location.pathname);
   }
 
-  if (code) {
+  // Only exchange the pairing code when we do NOT already have a token. A code
+  // is single-use and expires in ~5 minutes, so re-pairing on a reload (the URL
+  // still carried ?code=) would hit "invalid or expired pairing code" even
+  // though we are already paired. If we have a token, skip pairing entirely.
+  if (code && !state.token) {
     try {
       await pair(code);
     } catch (e) {
-      setStatus("pairing failed", "error");
-      notice(e.message || "pairing failed", true);
-      return;
+      // If pairing failed but we somehow already have a token, keep going;
+      // only surface the error when we have no way to connect.
+      if (!state.token) {
+        setStatus("pairing failed", "error");
+        notice(e.message || "pairing failed", true);
+        return;
+      }
     }
   }
 
