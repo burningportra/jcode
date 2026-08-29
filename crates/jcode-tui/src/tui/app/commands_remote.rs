@@ -155,11 +155,14 @@ fn show_pairing_invite(app: &mut App) {
             ));
 
             body.push_str(&format!(
-                "\nOpen in any browser (no app needed):\n\n{}\n",
+                "\nOpen in any browser (no app needed) or scan the QR below:\n\n{}\n",
                 invite.browser_url()
             ));
 
-            if let Ok(qr) = crate::login_qr::render_unicode_qr(&invite.uri) {
+            // Encode the browser URL in the QR so a phone camera opens it
+            // directly. The `jcode://` deep link only works for the iOS app and
+            // makes a plain camera report "no usable data".
+            if let Ok(qr) = crate::login_qr::render_unicode_qr(&invite.browser_url()) {
                 body.push_str("\n```\n");
                 body.push_str(&qr);
                 body.push_str("\n```\n");
@@ -197,8 +200,9 @@ fn show_handoff_invite(app: &mut App, session_override: Option<String>) {
             }
 
             body.push_str(&format!(
-                "Scan with the jcode iOS app to pair and jump straight into this \
-                 conversation.\n\n- Pairing code: **{}** (expires in 5 minutes)\n\
+                "Scan the QR below with your phone camera to open this \
+                 conversation in the browser, or pair with the jcode iOS \
+                 app.\n\n- Pairing code: **{}** (expires in 5 minutes)\n\
                  - Connect to: `{}`\n- Session: `{}`\n",
                 invite.spaced_code(),
                 invite.dial_address,
@@ -210,7 +214,10 @@ fn show_handoff_invite(app: &mut App, session_override: Option<String>) {
                 invite.browser_url()
             ));
 
-            if let Ok(qr) = crate::login_qr::render_unicode_qr(&invite.uri) {
+            // Encode the browser URL in the QR so a phone camera opens it
+            // directly, instead of the `jcode://` deep link that a plain camera
+            // reports as "no usable data".
+            if let Ok(qr) = crate::login_qr::render_unicode_qr(&invite.browser_url()) {
                 body.push_str("\n```\n");
                 body.push_str(&qr);
                 body.push_str("\n```\n");
