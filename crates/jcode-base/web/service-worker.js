@@ -34,6 +34,27 @@ self.addEventListener("activate", (e) => {
 
 self.addEventListener("fetch", (e) => {
   const url = new URL(e.request.url);
+
+  // Navigations (opening the app / the handoff link with ?code=&session=) must
+  // ALWAYS resolve to the app shell, and a non-OK response (e.g. a stale 404
+  // cached from before the app existed) must never be cached or returned. This
+  // makes the client self-heal instead of a browser pinning an old 404.
+  if (e.request.mode === "navigate") {
+    e.respondWith(
+      fetch("/index.html")
+        .then((resp) => {
+          if (resp && resp.ok) {
+            const copy = resp.clone();
+            caches.open(CACHE).then((c) => c.put("/index.html", copy)).catch(() => {});
+            return resp;
+          }
+          return caches.match("/index.html").then((hit) => hit || resp);
+        })
+        .catch(() => caches.match("/index.html"))
+    );
+    return;
+  }
+
   // Only handle the static app shell. Everything else (API, WS upgrades,
   // cross-origin) bypasses the SW entirely.
   const isShell =
@@ -43,13 +64,15 @@ self.addEventListener("fetch", (e) => {
   if (!isShell) return; // do not intercept /pair, /health, /ws, etc.
 
   // Network-first: always try to fetch the latest shell so a new build lands
-  // immediately; fall back to cache only when offline. Refresh the cache on
-  // every successful fetch.
+  // immediately; fall back to cache only when offline. Only cache OK responses
+  // so an error is never persisted.
   e.respondWith(
     fetch(e.request)
       .then((resp) => {
-        const copy = resp.clone();
-        caches.open(CACHE).then((c) => c.put(e.request, copy)).catch(() => {});
+        if (resp && resp.ok) {
+          const copy = resp.clone();
+          caches.open(CACHE).then((c) => c.put(e.request, copy)).catch(() => {});
+        }
         return resp;
       })
       .catch(() => caches.match(e.request))

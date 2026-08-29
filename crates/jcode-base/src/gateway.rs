@@ -341,8 +341,10 @@ fn find_header_end(data: &[u8]) -> Option<usize> {
 }
 
 fn http_response(status: u16, status_text: &str, body: &str) -> Vec<u8> {
+    // `no-store` on every JSON response (notably 404s) so a browser can never
+    // pin a stale error, e.g. a 404 cached from before the PWA route existed.
     format!(
-        "HTTP/1.1 {} {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Headers: Content-Type\r\n\r\n{}",
+        "HTTP/1.1 {} {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Headers: Content-Type\r\n\r\n{}",
         status, status_text, body.len(), body
     ).into_bytes()
 }
