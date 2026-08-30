@@ -370,6 +370,8 @@ impl WsTestClient {
             client_has_local_history: false,
             allow_session_takeover: false,
             terminal_env: Vec::new(),
+            prompt_suggestions: false,
+            prompt_suggestion_generation: None,
         })
         .await
     }
