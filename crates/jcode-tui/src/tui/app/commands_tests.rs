@@ -133,6 +133,57 @@ fn openai_usage_limit_reached_is_non_retryable() {
     ));
 }
 
+/// Agreement corpus: the agent recovery classifier, the TUI helper, and the
+/// auto-poke classifier must agree on every error class that matters, since
+/// they all now delegate to the single classifier in jcode-compaction-core.
+/// This test exists because the three lists drifted: the auto-poke list knew
+/// `context_length_exceeded` while the agent's recovery classifier did not, so
+/// context-limit errors burned retries instead of auto-compacting (Cerebras
+/// gemma-4 400, 2026-08-30).
+#[test]
+fn classifier_copies_agree_on_shared_error_corpus() {
+    use super::is_non_retryable_auto_poke_error;
+
+    let context_limit_errors = [
+        // The exact Cerebras failure that motivated unification.
+        "OpenAI-compatible chat request failed\n  endpoint: https://api.cerebras.ai/v1/chat/completions\n  model: gemma-4-31b\n  status: 400 Bad Request\n  response: {\"message\":\"Please reduce the length of the messages or completion. Current length is 131121 while limit is 131072\",\"type\":\"invalid_request_error\",\"code\":\"context_length_exceeded\"}",
+        // Bare mid-stream message.
+        "Please reduce the length of the messages or completion. Current length is 131121 while limit is 131072",
+        // Pre-existing phrasings that must keep matching.
+        "prompt is too long: 200000 tokens > 131072 maximum",
+        "This model's maximum context length is 131072 tokens. However, you requested 200000 tokens",
+    ];
+    for error in context_limit_errors {
+        assert!(
+            super::super::helpers::is_context_limit_error(error),
+            "TUI helper should match: {error}"
+        );
+        assert!(
+            crate::compaction::is_context_limit_error(error),
+            "core classifier should match: {error}"
+        );
+        assert!(
+            is_non_retryable_auto_poke_error(error),
+            "auto-poke classifier should treat as non-retryable: {error}"
+        );
+    }
+
+    let not_context_limit = [
+        "402 payment required: out of credits",
+        "rate limit exceeded, retry after 20s",
+        "status: 503 Service Unavailable",
+        "model version 4130 is unavailable",
+    ];
+    for error in not_context_limit {
+        // The core classifier must not match these; the auto-poke classifier
+        // is allowed to match some of them (billing, etc.) via its own list.
+        assert!(
+            !crate::compaction::is_context_limit_error(error),
+            "core classifier should not match: {error}"
+        );
+    }
+}
+
 #[test]
 fn volcengine_ark_unsupported_model_is_fatal_model_endpoint_error() {
     use super::{is_fatal_model_endpoint_error, is_non_retryable_auto_poke_error};

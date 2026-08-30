@@ -88,19 +88,10 @@ impl Agent {
     }
 
     fn is_context_limit_error(error: &str) -> bool {
-        let lower = error.to_lowercase();
-        lower.contains("context length")
-            || lower.contains("context window")
-            || lower.contains("maximum context")
-            || lower.contains("max context")
-            || lower.contains("token limit")
-            || lower.contains("too many tokens")
-            || lower.contains("prompt is too long")
-            || lower.contains("input is too long")
-            || lower.contains("request too large")
-            || lower.contains("length limit")
-            || lower.contains("maximum tokens")
-            || (lower.contains("exceeded") && lower.contains("tokens"))
+        // Single source of truth in jcode-compaction-core; the TUI helper and
+        // the auto-poke list delegate to the same fn so the marker lists
+        // cannot drift apart again (three copies existed and had).
+        crate::compaction::is_context_limit_error(error)
     }
 
     /// Best-effort emergency recovery after a context-limit error.

@@ -624,6 +624,128 @@ fn contains_independent_status_code(haystack: &str, code: &str) -> bool {
     })
 }
 
+/// Numbers parsed out of a provider context-limit error body.
+///
+/// Providers state the *authoritative* enforcement numbers in the error text
+/// (e.g. Cerebras: "Current length is 131121 while limit is 131072"). These can
+/// disagree with jcode's local `context_window()` catalog heuristic, so recovery
+/// uses the provider-reported values when they are present and sane. Both fields
+/// are `Option` because many providers describe the overflow without numbers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ContextLimitViolation {
+    /// The request size the provider rejected (e.g. 131121).
+    pub current_tokens: Option<u64>,
+    /// The enforced context limit reported by the provider (e.g. 131072).
+    pub limit_tokens: Option<u64>,
+}
+
+/// Smallest provider-reported limit we are willing to act on. Error bodies are
+/// untrusted input; a hostile or mis-anchored "limit is 12" must never shrink
+/// the compaction budget to something absurd.
+pub const CONTEXT_LIMIT_PARSE_FLOOR: u64 = 4096;
+
+/// Whether a provider error indicates the request exceeded the model's *token
+/// context window* (as distinct from an HTTP 413 byte-size rejection, which is
+/// classified separately by [`is_request_payload_too_large_error`]).
+///
+/// Matches both human phrasings ("context length exceeded", "prompt is too
+/// long") and the snake_case error codes OpenAI-compatible endpoints emit
+/// (`context_length_exceeded`). Single source of truth shared by the agent
+/// recovery loop, the TUI error paths, and the auto-poke classifier, so the
+/// lists cannot drift apart again.
+pub fn is_context_limit_error(error: &str) -> bool {
+    let lower = error.to_ascii_lowercase();
+    lower.contains("context length")
+        || lower.contains("context window")
+        || lower.contains("context_length")
+        || lower.contains("maximum context")
+        || lower.contains("max context")
+        || lower.contains("token limit")
+        || lower.contains("too many tokens")
+        || lower.contains("prompt is too long")
+        || lower.contains("input is too long")
+        || lower.contains("length limit")
+        || lower.contains("maximum tokens")
+        || lower.contains("reduce the length")
+        || lower.contains("while limit is")
+        // Cerebras/OpenAI-style bodies: "Please reduce the length of the
+        // messages or completion. Current length is X while limit is Y" with
+        // code "context_length_exceeded" — no spaces, no "tokens" word.
+        || (lower.contains("exceeded") && lower.contains("tokens"))
+}
+
+/// Parse the current/limit token numbers a provider embeds in a
+/// context-limit rejection, when the phrasing is one we recognize.
+///
+/// Returns `None` when the numbers cannot be extracted or fail the sanity
+/// checks (limit below [`CONTEXT_LIMIT_PARSE_FLOOR`], or current <= limit,
+/// which would mean the request did not actually overflow). Callers must not
+/// trust these values beyond compaction budgeting: they come from an
+/// untrusted provider response body.
+pub fn parse_context_limit_violation(error: &str) -> Option<ContextLimitViolation> {
+    let lower = error.to_ascii_lowercase();
+
+    // Cerebras: "Current length is 131121 while limit is 131072"
+    if let Some(current) = number_after_marker(&lower, "current length is ")
+        && let Some(limit) = number_after_marker(&lower, " while limit is ")
+    {
+        return validate_violation(current, limit);
+    }
+
+    // OpenAI chat: "This model's maximum context length is 131072 tokens.
+    // However, you requested 200000 tokens..." — limit first, then the
+    // requested size after "requested".
+    if let Some(limit) = number_after_marker(&lower, "maximum context length is ")
+        && let Some(current) = number_after(&lower, "maximum context length is ", "requested")
+    {
+        return validate_violation(current, limit);
+    }
+
+    None
+}
+
+/// Find an ASCII digit run immediately after `marker` and parse it.
+fn number_after_marker(lower: &str, marker: &str) -> Option<u64> {
+    let start = lower.find(marker)? + marker.len();
+    let rest = &lower[start..];
+    let digits: String = rest
+        .chars()
+        .skip_while(|c| !c.is_ascii_digit())
+        .take_while(|c| c.is_ascii_digit())
+        .collect();
+    if digits.is_empty() {
+        return None;
+    }
+    digits.parse::<u64>().ok()
+}
+
+/// Find the digit run that follows `needle` in the text after `after_marker`.
+fn number_after(haystack: &str, after_marker: &str, needle: &str) -> Option<u64> {
+    let anchor = haystack.find(after_marker)? + after_marker.len();
+    let needle_pos = anchor + haystack[anchor..].find(needle)?;
+    let rest = &haystack[needle_pos + needle.len()..];
+    let digits: String = rest
+        .chars()
+        .skip_while(|c| !c.is_ascii_digit())
+        .take_while(|c| c.is_ascii_digit())
+        .collect();
+    if digits.is_empty() {
+        return None;
+    }
+    digits.parse::<u64>().ok()
+}
+
+/// Sanity gate for numbers parsed out of an untrusted error body.
+fn validate_violation(current: u64, limit: u64) -> Option<ContextLimitViolation> {
+    if limit < CONTEXT_LIMIT_PARSE_FLOOR || current <= limit {
+        return None;
+    }
+    Some(ContextLimitViolation {
+        current_tokens: Some(current),
+        limit_tokens: Some(limit),
+    })
+}
+
 /// Strip oversized inline images from `messages`, oldest-first, until the total
 /// remaining base64 image payload fits within `target_total_chars`.
 ///
@@ -976,6 +1098,90 @@ mod tests {
         assert!(!is_request_payload_too_large_error(
             "model version 4130 is unavailable"
         ));
+    }
+
+    /// The exact Cerebras failure that motivated the shared classifier
+    /// (2026-08-30, gemma-4-31b on api.cerebras.ai): snake_case error code,
+    /// no "tokens" word anywhere in the body.
+    const CEREBRAS_CONTEXT_LIMIT_ERROR: &str = "OpenAI-compatible chat request failed\n  endpoint: https://api.cerebras.ai/v1/chat/completions\n  model: gemma-4-31b\n  auth: CEREBRAS_API_KEY\n  status: 400 Bad Request\n  response: {\"message\":\"Please reduce the length of the messages or completion. Current length is 131121 while limit is 131072\",\"type\":\"invalid_request_error\",\"param\":\"messages\",\"code\":\"context_length_exceeded\",\"id\":\"\"}\nHint: check network connectivity, DNS/TLS, that the base URL includes the API version (usually /v1), and that the model exists on the provider.";
+
+    /// Mid-stream variant: OpenRouterStream forwards only error.message, so
+    /// the classifier must match on the phrasing without the wrapper lines.
+    const CEREBRAS_STREAM_MESSAGE: &str = "Please reduce the length of the messages or completion. Current length is 131121 while limit is 131072";
+
+    #[test]
+    fn classifies_cerebras_context_length_exceeded() {
+        assert!(is_context_limit_error(CEREBRAS_CONTEXT_LIMIT_ERROR));
+        assert!(is_context_limit_error(CEREBRAS_STREAM_MESSAGE));
+        assert!(is_context_limit_error(
+            "Upstream error: context_length_exceeded from gemma-4-31b"
+        ));
+    }
+
+    #[test]
+    fn classifies_preexisting_context_limit_phrasings() {
+        // Marker coverage the agent classifier had before unification; these
+        // must keep passing through the shared fn unchanged.
+        for error in [
+            "prompt is too long: 200000 tokens > 131072 maximum",
+            "This model's maximum context length is 131072 tokens. However, you requested 200000 tokens",
+            "your request used too many tokens",
+            "request exceeds the token limit",
+        ] {
+            assert!(is_context_limit_error(error), "should match: {error}");
+        }
+    }
+
+    #[test]
+    fn parses_cerebras_current_and_limit() {
+        let violation = parse_context_limit_violation(CEREBRAS_CONTEXT_LIMIT_ERROR)
+            .expect("Cerebras body should parse");
+        assert_eq!(violation.current_tokens, Some(131_121));
+        assert_eq!(violation.limit_tokens, Some(131_072));
+
+        // Same numbers in the bare mid-stream message.
+        let stream = parse_context_limit_violation(CEREBRAS_STREAM_MESSAGE).expect("stream message should parse");
+        assert_eq!(stream.current_tokens, Some(131_121));
+        assert_eq!(stream.limit_tokens, Some(131_072));
+    }
+
+    #[test]
+    fn parses_openai_maximum_context_phrasing() {
+        let violation = parse_context_limit_violation(
+            "This model's maximum context length is 131072 tokens. However, you requested 200000 tokens in the messages, Please reduce the length of the messages.",
+        )
+        .expect("OpenAI phrasing should parse");
+        assert_eq!(violation.limit_tokens, Some(131_072));
+        assert_eq!(violation.current_tokens, Some(200_000));
+    }
+
+    #[test]
+    fn rejects_unsane_parsed_numbers() {
+        // current <= limit: the request did not actually overflow.
+        assert!(parse_context_limit_violation(
+            "Current length is 100000 while limit is 131072"
+        )
+        .is_none());
+        // Absurd tiny limit: must never shrink a budget to this.
+        assert!(parse_context_limit_violation(
+            "Current length is 13 while limit is 12"
+        )
+        .is_none());
+        // No recognizable phrasing: no numbers scraped.
+        assert!(parse_context_limit_violation("some other error entirely").is_none());
+    }
+
+    #[test]
+    fn negative_corpus_does_not_classify_as_context_limit() {
+        // 413 payload errors classify via the payload path, not here.
+        assert!(!is_context_limit_error(
+            "Anthropic API error (413 Payload Too Large): request_too_large"
+        ));
+        // Billing and rate-limit failures share no markers.
+        assert!(!is_context_limit_error("402 payment required: out of credits"));
+        assert!(!is_context_limit_error("rate limit exceeded, retry after 20s"));
+        // Unrelated "exceeded" without tokens/context words.
+        assert!(!is_context_limit_error("usage_limit_reached: plan quota exceeded"));
     }
 
     fn image_msg(data_len: usize) -> Message {

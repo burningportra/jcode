@@ -3,22 +3,19 @@
 pub(crate) fn is_non_retryable_auto_poke_error(error: &str) -> bool {
     let lower = error.to_ascii_lowercase();
 
+    // Context-limit failures share the single classifier in
+    // jcode-compaction-core (with the agent recovery loop and the TUI helper)
+    // instead of keeping a drifted copy of the marker list.
+    if crate::compaction::is_context_limit_error(error) {
+        return true;
+    }
+
     // These failures are deterministic for the current request/session shape. Retrying the same
     // auto-poke cannot help and can create an infinite spam loop.
     let deterministic_markers = [
-        "400 bad request",
         "invalid_request_error",
         "string_above_max_length",
         "string_too_long",
-        "maximum length",
-        "request too large",
-        "payload too large",
-        "body too large",
-        "input too large",
-        "context length exceeded",
-        "context_length_exceeded",
-        "maximum context length",
-        "token limit exceeded",
         "invalid model",
         "model_not_found",
         "model_not_supported",
