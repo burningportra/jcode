@@ -490,6 +490,43 @@ fn create_real_git_repo_fixture() -> tempfile::TempDir {
 }
 
 #[test]
+fn test_handle_turn_error_context_limit_shows_targeted_recovery_hint() {
+    with_temp_jcode_home(|| {
+        let mut app = create_test_app();
+        // A Cerebras-style context-limit rejection: snake_case code, no
+        // "tokens" word, so this also pins the shared classifier's coverage
+        // of the error shape that used to defeat auto-recovery.
+        let error = "OpenAI-compatible chat request failed\n  endpoint: https://api.cerebras.ai/v1/chat/completions\n  model: gemma-4-31b\n  status: 400 Bad Request\n  response: {\"message\":\"Please reduce the length of the messages or completion. Current length is 131121 while limit is 131072\",\"type\":\"invalid_request_error\",\"code\":\"context_length_exceeded\"}";
+
+        app.handle_turn_error(error);
+
+        // The hint lands in one of the final display messages (auto-poke stop
+        // may append its own after it). Search the tail rather than just the
+        // last message.
+        let tail: String = app
+            .display_messages
+            .iter()
+            .rev()
+            .take(4)
+            .map(|message| message.content.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            tail.contains("Context limit exceeded"),
+            "hint should explain the failure class: {tail}"
+        );
+        assert!(tail.contains("/compact"), "should suggest /compact: {tail}");
+        assert!(tail.contains("/fix"), "should suggest /fix: {tail}");
+        assert!(tail.contains("/model"), "should suggest /model: {tail}");
+        // No misleading network hint for a context-limit failure.
+        assert!(
+            !tail.contains("network connectivity"),
+            "must not show the network troubleshooting hint"
+        );
+    });
+}
+
+#[test]
 fn test_handle_turn_error_failover_prompt_manual_mode_shows_system_notice() {
     with_temp_jcode_home(|| {
         write_test_config("[provider]\ncross_provider_failover = \"manual\"\n");

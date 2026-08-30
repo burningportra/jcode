@@ -815,7 +815,7 @@ impl App {
             let should_stop_auto_poke = recovery.is_none();
             let hint = match recovery {
                 Some(msg) => format!(" {}", msg),
-                None => " Context limit exceeded but auto-recovery failed. Run /fix to try manual recovery.".to_string(),
+                None => " Context limit exceeded but auto-recovery failed. Run /compact (or /fix for emergency recovery), or /model to switch to a larger-context model.".to_string(),
             };
             self.push_display_message(DisplayMessage::error(format!("Error: {}{}", error, hint)));
             if should_stop_auto_poke {

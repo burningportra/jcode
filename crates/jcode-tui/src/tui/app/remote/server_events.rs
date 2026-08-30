@@ -1373,8 +1373,19 @@ pub(in crate::tui::app) fn handle_server_event(
             if app.auto_poke_incomplete_todos
                 && crate::tui::app::commands::is_non_retryable_auto_poke_error(&message)
             {
+                // Context-limit failures are self-healable: the agent layer
+                // already hard-compacted and retried (bounded). A retry that
+                // still hits the limit needs user action, so point at the
+                // right fixes instead of the generic non-retryable wording.
+                let non_retryable_note = if crate::compaction::is_context_limit_error(&message) {
+                    " Context window exceeded; jcode already auto-compacted and retried. Run /compact (or /fix for emergency recovery), or /model to switch to a larger-context model."
+                } else {
+                    " Trying once more anyway."
+                };
                 if app.schedule_pending_remote_retry_with_limit(
-                    "⚠ The request failed in a way a retry probably won't fix. Trying once more anyway.",
+                    &format!(
+                        "⚠ The request failed in a way a retry probably won't fix.{non_retryable_note}"
+                    ),
                     2,
                 ) {
                     return false;
