@@ -1986,7 +1986,7 @@ fn direct_deepseek_profile_uses_static_1m_context_when_catalog_is_absent() {
 
 #[test]
 fn explicit_cached_context_window_precedes_zai_family_fallback() {
-    let model = "glm-5.3-issue-1087";
+    let model = "glm-5.1-issue-1087";
     jcode_base::provider::populate_context_limits(HashMap::from([(model.to_string(), 1_000_000)]));
     let provider = OpenRouterProvider {
         model: Arc::new(RwLock::new(model.to_string())),
