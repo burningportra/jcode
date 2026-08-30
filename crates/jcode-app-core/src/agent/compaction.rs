@@ -119,29 +119,61 @@ impl Agent {
             return false;
         }
 
-        let context_limit = self.provider.context_window() as u64;
+        // The provider's own error body states the enforced limit; trust it
+        // over the local catalog heuristic when it parses (validated: floor,
+        // sanity, checked u64). Reserve 15% headroom for system prompt, tool
+        // schemas, and the completion itself, which the kept-suffix accounting
+        // does not see.
+        let violation = crate::compaction::parse_context_limit_violation(error);
+        let catalog_limit = self.provider.context_window() as u64;
         let compaction = self.registry.compaction();
 
-        let (dropped, usage_pct) = match compaction.try_write() {
+        let (dropped, usage_pct, learned_budget) = match compaction.try_write() {
             Ok(mut manager) => {
-                let (dropped, usage_pct) = {
-                    let all_messages = self.session.provider_messages();
-                    manager.update_observed_input_tokens(context_limit);
-                    let usage_pct = manager.context_usage_with(all_messages) * 100.0;
-                    let dropped = match manager.hard_compact_with(all_messages) {
-                        Ok(dropped) => dropped,
-                        Err(reason) => {
-                            logging::warn(&format!(
-                                "Context-limit auto-recovery failed: hard compact failed ({})",
-                                reason
-                            ));
-                            return false;
-                        }
-                    };
-                    (dropped, usage_pct)
+                // Budget from the provider's own numbers when it reported them:
+                // 85% of the enforced limit (the remaining 15% covers the
+                // system prompt, tool schemas, and the completion, which sit
+                // outside the compaction kept-suffix accounting). Lower-only:
+                // a stricter catalog budget stays authoritative; never drop
+                // below a sane floor.
+                if let Some(limit) = violation.as_ref().and_then(|v| v.limit_tokens) {
+                    let budget = (limit as f64 * 0.85) as usize;
+                    if budget < manager.token_budget() && budget >= 8192 {
+                        manager.set_budget(budget);
+                    }
+                    manager.note_learned_context_limit(limit);
+                }
+                manager.update_observed_input_tokens(
+                    violation
+                        .as_ref()
+                        .and_then(|violation| violation.current_tokens)
+                        .unwrap_or(catalog_limit),
+                );
+
+                let all_messages = self.session.provider_messages();
+                let usage_pct = manager.context_usage_with(all_messages) * 100.0;
+                let dropped = match manager.hard_compact_with(all_messages) {
+                    Ok(dropped) => dropped,
+                    Err(reason) => {
+                        logging::warn(&format!(
+                            "Context-limit auto-recovery failed: hard compact failed ({})",
+                            reason
+                        ));
+                        return false;
+                    }
                 };
+                if dropped == 0 {
+                    // Nothing was dropped: hard compaction cannot make progress
+                    // (the kept turns alone exceed the budget), so a retry
+                    // would resend an identical request and fail identically.
+                    logging::warn(
+                        "Context-limit auto-recovery dropped 0 messages; giving up to avoid an identical retry",
+                    );
+                    return false;
+                }
                 self.sync_session_compaction_state_from_manager(&manager);
-                (dropped, usage_pct)
+                let learned = manager.learned_context_limit();
+                (dropped, usage_pct, learned)
             }
             Err(_) => {
                 logging::warn("Context-limit auto-recovery skipped: compaction manager lock busy");
@@ -154,9 +186,12 @@ impl Agent {
         self.provider_session_id = None;
         self.session.provider_session_id = None;
 
+        let learned_budget_display = learned_budget
+            .map(|limit| limit.to_string())
+            .unwrap_or_else(|| "?".to_string());
         logging::warn(&format!(
-            "Context limit exceeded; auto-compacted and retrying (dropped {} messages, usage was {:.1}%)",
-            dropped, usage_pct
+            "Context limit exceeded; auto-compacted and retrying (dropped {} messages, usage was {:.1}%, learned budget {})",
+            dropped, usage_pct, learned_budget_display
         ));
         crate::runtime_memory_log::emit_event(
             crate::runtime_memory_log::RuntimeMemoryLogEvent::new(
@@ -165,7 +200,9 @@ impl Agent {
             )
             .with_session_id(self.session.id.clone())
             .with_detail(format!(
-                "dropped_messages={dropped},usage_pct={usage_pct:.1}"
+                "dropped_messages={dropped},usage_pct={usage_pct:.1},learned_budget={:?}"
+                ,
+                learned_budget
             ))
             .force_attribution(),
         );
@@ -197,11 +234,14 @@ impl Agent {
 
         // The transcript changed; reseed compaction bookkeeping and reset
         // provider session/cache state so the retry sends the reduced payload.
+        // effective_compaction_budget() applies min(catalog, learned) so a
+        // provider-reported context limit (if one was learned earlier) still
+        // governs the reseeded budget.
         let compaction = self.registry.compaction();
         if let Ok(mut manager) = compaction.try_write() {
             let provider_messages = self.session.messages_for_provider();
             manager.reset();
-            manager.set_budget(self.provider.context_window());
+            manager.set_budget(self.effective_compaction_budget());
             if let Some(state) = self.session.compaction.as_ref() {
                 manager.restore_persisted_state_with(state, &provider_messages);
             } else {

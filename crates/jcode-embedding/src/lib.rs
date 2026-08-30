@@ -366,38 +366,62 @@ pub const fn embedding_dim() -> usize {
     EMBEDDING_DIM
 }
 
+#[inline]
 pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
     if a.len() != b.len() || a.is_empty() {
         return 0.0;
     }
 
-    let dot: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
-    let norm_a: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
-    let norm_b: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
+    let mut dot = 0.0f32;
+    let mut norm_a = 0.0f32;
+    let mut norm_b = 0.0f32;
 
-    if norm_a == 0.0 || norm_b == 0.0 {
+    for (&x, &y) in a.iter().zip(b.iter()) {
+        dot += x * y;
+        norm_a += x * x;
+        norm_b += y * y;
+    }
+
+    let denom = (norm_a * norm_b).sqrt();
+    if denom == 0.0 {
         return 0.0;
     }
 
-    dot / (norm_a * norm_b)
+    dot / denom
 }
 
+#[inline]
 pub fn batch_cosine_similarity(query: &[f32], candidates: &[&[f32]]) -> Vec<f32> {
     let dim = query.len();
     if dim == 0 || candidates.is_empty() {
         return vec![0.0; candidates.len()];
     }
 
-    candidates
-        .iter()
-        .map(|c| {
-            if c.len() != dim {
-                0.0
-            } else {
-                c.iter().zip(query.iter()).map(|(a, b)| a * b).sum()
+    let norm_q = query.iter().map(|x| x * x).sum::<f32>();
+    if norm_q == 0.0 {
+        return vec![0.0; candidates.len()];
+    }
+
+    let mut out = Vec::with_capacity(candidates.len());
+    for c in candidates {
+        if c.len() != dim {
+            out.push(0.0);
+        } else {
+            let mut dot = 0.0f32;
+            let mut norm_c = 0.0f32;
+            for (&a, &b) in query.iter().zip(c.iter()) {
+                dot += a * b;
+                norm_c += b * b;
             }
-        })
-        .collect()
+            let denom = (norm_q * norm_c).sqrt();
+            if denom == 0.0 {
+                out.push(0.0);
+            } else {
+                out.push(dot / denom);
+            }
+        }
+    }
+    out
 }
 
 pub fn find_similar(
@@ -489,18 +513,51 @@ mod tests {
     }
 
     #[test]
+    fn batch_cosine_similarity_matches_cosine_similarity_on_non_unit_vectors() {
+        let query = vec![2.0, 3.0, 6.0]; // non-unit vector
+        let c1 = vec![4.0, 6.0, 12.0]; // parallel, different magnitude
+        let c2 = vec![-2.0, -3.0, -6.0]; // anti-parallel
+        let c3 = vec![0.0, 0.0, 0.0]; // zero vector
+        let c4 = vec![3.0, -2.0, 0.0]; // orthogonal
+        let c5 = vec![1.0, 2.0]; // dimension mismatch
+
+        let candidates: Vec<&[f32]> = vec![&c1, &c2, &c3, &c4, &c5];
+        let batch_results = batch_cosine_similarity(&query, &candidates);
+
+        assert_eq!(batch_results.len(), 5);
+        assert!((batch_results[0] - cosine_similarity(&query, &c1)).abs() < 1e-6);
+        assert!((batch_results[0] - 1.0).abs() < 1e-6);
+
+        assert!((batch_results[1] - cosine_similarity(&query, &c2)).abs() < 1e-6);
+        assert!((batch_results[1] - (-1.0)).abs() < 1e-6);
+
+        assert_eq!(batch_results[2], 0.0);
+        assert_eq!(cosine_similarity(&query, &c3), 0.0);
+
+        assert!((batch_results[3] - cosine_similarity(&query, &c4)).abs() < 1e-6);
+        assert!((batch_results[3] - 0.0).abs() < 1e-6);
+
+        assert_eq!(batch_results[4], 0.0);
+        assert_eq!(cosine_similarity(&query, &c5), 0.0);
+    }
+
+    #[test]
     fn find_similar_returns_only_top_k_sorted_hits() {
         let query = vec![1.0, 0.0, 0.0];
         let candidates = vec![
-            vec![0.2, 0.0, 0.0],
-            vec![0.9, 0.0, 0.0],
-            vec![0.7, 0.0, 0.0],
-            vec![0.8, 0.0, 0.0],
+            vec![1.0, 0.0, 0.0],
+            vec![0.9, 0.43588989, 0.0],
+            vec![0.7, 0.71414284, 0.0],
+            vec![0.8, 0.6, 0.0],
         ];
 
         let hits = find_similar(&query, &candidates, 0.1, 2);
 
-        assert_eq!(hits, vec![(1, 0.9), (3, 0.8)]);
+        assert_eq!(hits.len(), 2);
+        assert_eq!(hits[0].0, 0);
+        assert!((hits[0].1 - 1.0).abs() < 0.001);
+        assert_eq!(hits[1].0, 1);
+        assert!((hits[1].1 - 0.9).abs() < 0.001);
     }
 
     fn related_beats_unrelated(model_dir: &Path) {

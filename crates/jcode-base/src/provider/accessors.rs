@@ -22,6 +22,13 @@ impl MultiProvider {
             .clone()
     }
 
+    pub(super) fn inference_provider(&self) -> Option<Arc<dyn Provider>> {
+        self.inference
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
+    }
+
     pub(super) fn antigravity_provider(&self) -> Option<Arc<dyn Provider>> {
         self.antigravity
             .read()
@@ -90,6 +97,7 @@ impl MultiProvider {
             // then silently rerouted the request to another provider such as
             // OpenAI (issue #358).
             ActiveProvider::OpenRouter => self.active_openrouter_execution_provider().is_some(),
+            ActiveProvider::InferenceNet => self.inference_provider().is_some(),
         }
     }
 

@@ -173,6 +173,17 @@ impl MultiProvider {
                     ))
                 }
             }
+            ActiveProvider::InferenceNet => {
+                if let Some(inference) = self.inference_provider() {
+                    inference
+                        .complete(messages, tools, system, resume_session_id)
+                        .await
+                } else {
+                    Err(anyhow::anyhow!(
+                        "Inference.net credentials not available. Run  to log in."
+                    ))
+                }
+            }
         }
     }
 
@@ -347,6 +358,23 @@ impl MultiProvider {
                 } else {
                     Err(anyhow::anyhow!(
                         "OpenRouter credentials not available. Set OPENROUTER_API_KEY environment variable."
+                    ))
+                }
+            }
+            ActiveProvider::InferenceNet => {
+                if let Some(inference) = self.inference_provider() {
+                    inference
+                        .complete_split(
+                            messages,
+                            tools,
+                            system_static,
+                            system_dynamic,
+                            resume_session_id,
+                        )
+                        .await
+                } else {
+                    Err(anyhow::anyhow!(
+                        "Inference.net credentials not available. Run  to log in."
                     ))
                 }
             }

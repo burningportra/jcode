@@ -466,6 +466,25 @@ impl Agent {
         agent
     }
 
+    /// The compaction token budget to seed a manager with: the provider's
+    /// catalog context window, lowered to a context limit the provider itself
+    /// reported in a `context_length_exceeded` rejection when one has been
+    /// learned (lower-only; the catalog stays authoritative when it is already
+    /// stricter). Cleared on model change, so a limit learned for one model
+    /// never constrains another.
+    pub(super) fn effective_compaction_budget(&self) -> usize {
+        let catalog = self.provider.context_window();
+        match self
+            .session
+            .compaction
+            .as_ref()
+            .and_then(|state| state.learned_context_limit)
+        {
+            Some(learned) => (learned as usize).min(catalog),
+            None => catalog,
+        }
+    }
+
     fn seed_compaction_from_session(&mut self) {
         logging::info(&format!(
             "seed_compaction_from_session: session has {} messages",
@@ -482,7 +501,7 @@ impl Agent {
             }
         };
         manager.reset();
-        let budget = self.provider.context_window();
+        let budget = self.effective_compaction_budget();
         manager.set_budget(budget);
         if let Some(state) = self.session.compaction.as_ref() {
             manager.restore_persisted_stored_state_with(state, &self.session.messages);
@@ -652,12 +671,13 @@ impl Agent {
             covers_up_to_turn: compacted_count,
             original_turn_count: compacted_count,
             compacted_count,
+            learned_context_limit: None,
         };
 
         self.session.compaction = Some(state.clone());
         let compaction = self.registry.compaction();
         if let Ok(mut manager) = compaction.try_write() {
-            manager.set_budget(self.provider.context_window());
+            manager.set_budget(self.effective_compaction_budget());
             manager.restore_persisted_stored_state_with(&state, &self.session.messages);
         }
 

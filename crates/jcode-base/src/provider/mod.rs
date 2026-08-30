@@ -358,6 +358,8 @@ pub struct MultiProvider {
     bedrock: RwLock<Option<Arc<bedrock::BedrockProvider>>>,
     /// OpenRouter API provider
     openrouter: RwLock<Option<Arc<dyn Provider>>>,
+    /// Inference.net provider (downstream runtime, hot-swappable after login)
+    inference: RwLock<Option<Arc<dyn Provider>>>,
     /// Direct OpenAI-compatible runtimes keyed by profile id.
     ///
     /// These use the same wire protocol implementation as OpenRouter, but must
@@ -1271,6 +1273,16 @@ impl MultiProvider {
                 self.set_active_provider(ActiveProvider::OpenRouter);
                 Ok(())
             }
+            ActiveProvider::InferenceNet => {
+                let Some(inference) = self.inference_provider() else {
+                    anyhow::bail!(
+                        "Inference.net credentials not available. Run  to log in."
+                    );
+                };
+                inference.set_model(model)?;
+                self.set_active_provider(ActiveProvider::InferenceNet);
+                Ok(())
+            }
         }
     }
 
@@ -1726,6 +1738,7 @@ impl MultiProvider {
                 }
                 "openrouter"
             }
+            ActiveProvider::InferenceNet => "inference-net",
         };
         format!("{prefix}:{current_model}")
     }
@@ -1786,6 +1799,7 @@ impl Provider for MultiProvider {
             ActiveProvider::Cursor => "Cursor",
             ActiveProvider::Bedrock => "Bedrock",
             ActiveProvider::OpenRouter => "OpenRouter",
+            ActiveProvider::InferenceNet => "Inference.net",
         }
     }
 
@@ -1842,6 +1856,10 @@ impl Provider for MultiProvider {
                 .active_openrouter_execution_provider()
                 .map(|o| o.model())
                 .unwrap_or_else(|| "anthropic/claude-sonnet-4".to_string()),
+            ActiveProvider::InferenceNet => self
+                .inference_provider()
+                .map(|o| o.model())
+                .unwrap_or_else(|| "kimi-k3-fast".to_string()),
         }
     }
 
@@ -1983,6 +2001,10 @@ impl Provider for MultiProvider {
                 .unwrap_or(false),
             ActiveProvider::OpenRouter => self
                 .active_openrouter_execution_provider()
+                .map(|provider| provider.supports_image_input())
+                .unwrap_or(false),
+            ActiveProvider::InferenceNet => self
+                .inference_provider()
                 .map(|provider| provider.supports_image_input())
                 .unwrap_or(false),
         }
@@ -2217,6 +2239,10 @@ impl Provider for MultiProvider {
                 .active_openrouter_execution_provider()
                 .map(|openrouter| openrouter.available_models_for_switching())
                 .unwrap_or_default(),
+            ActiveProvider::InferenceNet => self
+                .inference_provider()
+                .map(|inference| inference.available_models_for_switching())
+                .unwrap_or_default(),
         }
     }
 
@@ -2444,6 +2470,7 @@ impl Provider for MultiProvider {
                 .unwrap_or(false),
             ActiveProvider::Bedrock => false, // jcode executes Bedrock tool calls
             ActiveProvider::OpenRouter => false, // jcode executes tools
+            ActiveProvider::InferenceNet => true,
         }
     }
 
@@ -2635,6 +2662,10 @@ impl Provider for MultiProvider {
                 .active_openrouter_execution_provider()
                 .map(|o| o.supports_compaction())
                 .unwrap_or(false),
+            ActiveProvider::InferenceNet => self
+                .inference_provider()
+                .map(|o| o.supports_compaction())
+                .unwrap_or(false),
         }
     }
 
@@ -2672,6 +2703,10 @@ impl Provider for MultiProvider {
             ActiveProvider::Bedrock => false,
             ActiveProvider::OpenRouter => self
                 .active_openrouter_execution_provider()
+                .map(|o| o.uses_jcode_compaction())
+                .unwrap_or(false),
+            ActiveProvider::InferenceNet => self
+                .inference_provider()
                 .map(|o| o.uses_jcode_compaction())
                 .unwrap_or(false),
         }
@@ -2780,6 +2815,9 @@ impl Provider for MultiProvider {
                     Err(anyhow::anyhow!("OpenRouter provider unavailable"))
                 }
             }
+            ActiveProvider::InferenceNet => Err(anyhow::anyhow!(
+                "Inference.net does not support native compaction"
+            )),
         }
     }
 
@@ -2843,6 +2881,10 @@ impl Provider for MultiProvider {
                 .unwrap_or(DEFAULT_CONTEXT_LIMIT),
             ActiveProvider::OpenRouter => self
                 .active_openrouter_execution_provider()
+                .map(|o| o.context_window())
+                .unwrap_or(DEFAULT_CONTEXT_LIMIT),
+            ActiveProvider::InferenceNet => self
+                .inference_provider()
                 .map(|o| o.context_window())
                 .unwrap_or(DEFAULT_CONTEXT_LIMIT),
         }
@@ -2919,6 +2961,7 @@ impl Provider for MultiProvider {
             cursor: RwLock::new(cursor_provider),
             bedrock: RwLock::new(bedrock_provider),
             openrouter: RwLock::new(openrouter),
+            inference: RwLock::new(None),
             openai_compatible_profiles: RwLock::new(HashMap::new()),
             active_openai_compatible_profile: RwLock::new(None),
             active: RwLock::new(active),
@@ -2980,6 +3023,7 @@ impl Provider for MultiProvider {
             ActiveProvider::Cursor => None,
             ActiveProvider::Bedrock => None,
             ActiveProvider::OpenRouter => None,
+            ActiveProvider::InferenceNet => None,
         }
     }
 

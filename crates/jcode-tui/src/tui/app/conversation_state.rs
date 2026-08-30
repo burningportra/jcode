@@ -303,6 +303,7 @@ impl App {
             covers_up_to_turn: compacted_count,
             original_turn_count: compacted_count,
             compacted_count,
+            learned_context_limit: None,
         };
 
         self.session.compaction = Some(state.clone());

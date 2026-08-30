@@ -343,6 +343,16 @@ impl OpenRouterStream {
                     .and_then(|v| v.as_str())
                     .unwrap_or("OpenRouter error")
                     .to_string();
+                // The message alone often drops the machine-readable error
+                // code (e.g. Cerebras' "context_length_exceeded" only appears
+                // as error.code), which the shared context-limit classifier
+                // keys on. Embed the code so classification works mid-stream.
+                let message = match error.get("code") {
+                    Some(code) if !code.is_null() => {
+                        format!("{message} [code={}]", code)
+                    }
+                    _ => message,
+                };
                 return Some(StreamEvent::Error {
                     message,
                     retry_after_secs: None,

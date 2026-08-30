@@ -2,9 +2,13 @@
 ///
 /// Returns a slice of at most `max_bytes` bytes, ending at a valid char boundary.
 /// This prevents panics when truncating strings that contain multi-byte characters.
+#[inline]
 pub fn truncate_str(s: &str, max_bytes: usize) -> &str {
     if s.len() <= max_bytes {
         return s;
+    }
+    if s.is_char_boundary(max_bytes) {
+        return &s[..max_bytes];
     }
     // Find the largest valid char boundary at or before max_bytes
     let mut end = max_bytes;

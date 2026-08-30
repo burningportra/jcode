@@ -686,8 +686,12 @@ fn default_model_direction() -> i8 {
 }
 
 /// Encode an event as a newline-terminated JSON string
+#[inline]
 pub fn encode_event(event: &ServerEvent) -> String {
-    let mut json = serde_json::to_string(event).unwrap_or_else(|_| "{}".to_string());
+    let mut json = match serde_json::to_string(event) {
+        Ok(s) => s,
+        Err(_) => "{}".to_string(),
+    };
     json.push('\n');
     json
 }

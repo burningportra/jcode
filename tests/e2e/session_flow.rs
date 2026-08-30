@@ -54,6 +54,7 @@ async fn resume_session_restores_persisted_compaction_for_provider_context() -> 
             covers_up_to_turn: 2,
             original_turn_count: 2,
             compacted_count: 2,
+            learned_context_limit: None,
         });
         session.save()?;
 

@@ -90,7 +90,7 @@ members = [
     "crates/jcode-terminal-image",
     "crates/jcode-telemetry-core",
     "crates/jcode-tui-workspace",
-    "crates/jcode-render-core",
+    "crates/jcode-render-core", "crates/jcode-provider-inference-runtime",
 ]
 
 [lib]

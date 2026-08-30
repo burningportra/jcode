@@ -57,10 +57,20 @@ impl Agent {
         Ok(())
     }
 
-    fn refresh_compaction_budget(&self) {
+    fn refresh_compaction_budget(&mut self) {
+        // The learned limit was provider-reported for the *previous* model;
+        // after a model switch it no longer applies, so drop it before
+        // re-seeding. (effective_compaction_budget() at the next session seed
+        // would otherwise min() a stale limit into the new model's budget.)
+        if let Some(state) = self.session.compaction.as_mut() {
+            state.learned_context_limit = None;
+        }
         let compaction = self.registry.compaction();
         match compaction.try_write() {
-            Ok(mut manager) => manager.set_budget(self.provider.context_window()),
+            Ok(mut manager) => {
+                manager.clear_learned_context_limit();
+                manager.set_budget(self.provider.context_window())
+            }
             Err(_) => crate::logging::warn(
                 "Could not refresh compaction token budget after provider change: compaction manager is busy",
             ),

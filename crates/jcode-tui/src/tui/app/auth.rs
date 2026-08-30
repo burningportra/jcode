@@ -564,9 +564,7 @@ impl App {
             crate::provider_catalog::LoginProviderTarget::GrokBuild => {
                 self.start_grok_build_login()
             }
-            crate::provider_catalog::LoginProviderTarget::XaiOauth => {
-                self.start_xai_oauth_login()
-            }
+            crate::provider_catalog::LoginProviderTarget::XaiOauth => self.start_xai_oauth_login(),
             crate::provider_catalog::LoginProviderTarget::Copilot => self.start_copilot_login(),
             crate::provider_catalog::LoginProviderTarget::Gemini => self.start_gemini_login(),
             crate::provider_catalog::LoginProviderTarget::Antigravity => {

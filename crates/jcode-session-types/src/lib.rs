@@ -265,6 +265,15 @@ pub struct StoredCompactionState {
     pub covers_up_to_turn: usize,
     pub original_turn_count: usize,
     pub compacted_count: usize,
+    /// Context limit the provider itself reported in a
+    /// `context_length_exceeded` rejection. Can disagree with (and is more
+    /// authoritative than) jcode's local catalog heuristic; applied as
+    /// `min(catalog, learned)` wherever the compaction budget is seeded so
+    /// recovery and proactive compaction track the endpoint's real limit.
+    /// Cleared when the model changes so one model's limit never strangles
+    /// another. Serde default keeps old session files loadable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub learned_context_limit: Option<u64>,
 }
 
 impl StoredMessage {

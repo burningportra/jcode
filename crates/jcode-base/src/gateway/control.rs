@@ -80,8 +80,10 @@ pub fn parse_remote_command(input: &str) -> Option<Result<RemoteCommand, String>
     };
 
     // Only `revoke` and `handoff` take an argument.
-    if !matches!(command, RemoteCommand::Revoke(_) | RemoteCommand::Handoff(_))
-        && parts.next().is_some()
+    if !matches!(
+        command,
+        RemoteCommand::Revoke(_) | RemoteCommand::Handoff(_)
+    ) && parts.next().is_some()
     {
         return Some(Err(format!(
             "/remote {sub} takes no arguments\nUsage: /remote [cloud|status|on|off|pair|handoff|revoke <device>]"

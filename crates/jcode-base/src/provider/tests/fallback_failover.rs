@@ -190,6 +190,7 @@ fn test_initial_provider_allows_cross_provider_switch_and_reports_target_credent
             initial_provider: Some(ActiveProvider::OpenAI),
             routes_memo: std::sync::Mutex::new(None),
             post_auth_refreshes_pending: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            inference: RwLock::new(None),
         };
 
         let err = provider
@@ -215,6 +216,7 @@ fn test_auto_default_prefers_claude_over_openai_when_both_available() {
         bedrock: false,
         openrouter: false,
         copilot_premium_zero: false,
+        inferencenet: false,
     });
     assert_eq!(active, ActiveProvider::Claude);
 }
@@ -231,6 +233,7 @@ fn test_auto_default_prefers_copilot_when_zero_premium_mode_enabled() {
         bedrock: false,
         openrouter: true,
         copilot_premium_zero: true,
+            inferencenet: false,
     });
     assert_eq!(active, ActiveProvider::Copilot);
 }
@@ -308,6 +311,7 @@ fn test_no_provider_error_mentions_tokens_and_details() {
         initial_provider: None,
         routes_memo: std::sync::Mutex::new(None),
         post_auth_refreshes_pending: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            inference: RwLock::new(None),
     };
     let err = provider.no_provider_available_error(&[
         "OpenAI: rate limited".to_string(),
@@ -348,6 +352,7 @@ fn test_active_compat_profile_counts_as_configured_openrouter_slot() {
                 initial_provider: None,
                 routes_memo: std::sync::Mutex::new(None),
                 post_auth_refreshes_pending: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            inference: RwLock::new(None),
             };
 
             // Activate a direct compat profile exactly like

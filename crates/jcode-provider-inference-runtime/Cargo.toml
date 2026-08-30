@@ -1,0 +1,27 @@
+[package]
+name = "jcode-provider-inference-runtime"
+version = "0.1.0"
+edition = "2024"
+description = "Inference.net provider runtime (OpenAI-compatible API) for jcode"
+
+[lib]
+name = "jcode_provider_inference_runtime"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = "1"
+async-stream = "0.3"
+async-trait = "0.1"
+futures = "0.3"
+jcode-base = { path = "../jcode-base", default-features = false }
+jcode-message-types = { path = "../jcode-message-types" }
+jcode-provider-core = { path = "../jcode-provider-core" }
+jcode-provider-openai = { path = "../jcode-provider-openai" }
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "charset", "http2", "system-proxy", "rustls-tls", "rustls-tls-native-roots"] }
+serde_json = { version = "1", features = ["raw_value"] }
+tokio = { version = "1", features = ["sync", "time", "rt", "net", "io-util", "process"] }
+tokio-stream = "0.1"
+
+[dev-dependencies]
+jcode-base = { path = "../jcode-base", default-features = false, features = ["test-support"] }
+tempfile = "3"

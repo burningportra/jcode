@@ -19,11 +19,11 @@ pub use jcode_provider_gemini::{
     GeminiUserTier, IneligibleTier, InlineData, LoadCodeAssistRequest, LoadCodeAssistResponse,
     LongRunningOperationResponse, OnboardUserRequest, OnboardUserResponse, ProjectRef,
     SignaturePolicy, USER_TIER_FREE, VertexGenerateContentRequest, VertexGenerateContentResponse,
-    build_contents, build_contents_with_signature_policy,
-    build_system_instruction_with_tool_guard, build_tools, choose_onboard_tier, client_metadata,
-    extract_gemini_model_ids, gemini_fallback_models, google_cloud_project_from_env,
-    ineligible_or_project_error, is_gemini_model_id, is_missing_thought_signature_error,
-    load_code_assist_request, merge_gemini_model_lists, validate_load_code_assist_response,
+    build_contents, build_contents_with_signature_policy, build_system_instruction_with_tool_guard,
+    build_tools, choose_onboard_tier, client_metadata, extract_gemini_model_ids,
+    gemini_fallback_models, google_cloud_project_from_env, ineligible_or_project_error,
+    is_gemini_model_id, is_missing_thought_signature_error, load_code_assist_request,
+    merge_gemini_model_lists, validate_load_code_assist_response,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;

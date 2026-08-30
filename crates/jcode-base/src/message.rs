@@ -47,15 +47,31 @@ fn compile_static_regexes(patterns: &[&str]) -> Vec<Regex> {
         .collect()
 }
 
+#[inline]
+fn contains_ignore_ascii_case(haystack: &str, needle: &str) -> bool {
+    let needle_bytes = needle.as_bytes();
+    if needle_bytes.is_empty() {
+        return true;
+    }
+    let haystack_bytes = haystack.as_bytes();
+    if haystack_bytes.len() < needle_bytes.len() {
+        return false;
+    }
+    haystack_bytes.windows(needle_bytes.len()).any(|window| {
+        window
+            .iter()
+            .zip(needle_bytes.iter())
+            .all(|(&h, &n)| h.to_ascii_lowercase() == n.to_ascii_lowercase())
+    })
+}
+
 /// Redact likely secrets from persisted tool output.
 ///
 /// This is a best-effort safeguard for local session history files. It targets
 /// high-confidence token/key patterns and common `KEY=VALUE` assignments used by
 /// auth flows.
 pub fn redact_secrets(text: &str) -> String {
-    // Fast path to avoid regex work for most tool outputs.
-    let lower = text.to_ascii_lowercase();
-
+    // Fast path to avoid regex work and heap allocation for most tool outputs.
     if !text.contains("sk-")
         && !text.contains("ghp_")
         && !text.contains("github_pat_")
@@ -65,13 +81,13 @@ pub fn redact_secrets(text: &str) -> String {
         && !text.contains("AKIA")
         && !text.contains("-----BEGIN ")
         && !text.contains("eyJ")
-        && !lower.contains("api_key")
-        && !lower.contains("token")
-        && !lower.contains("bearer ")
-        && !lower.contains("password")
-        && !lower.contains("secret")
-        && !lower.contains("authorization")
-        && !lower.contains("cookie")
+        && !contains_ignore_ascii_case(text, "api_key")
+        && !contains_ignore_ascii_case(text, "token")
+        && !contains_ignore_ascii_case(text, "bearer ")
+        && !contains_ignore_ascii_case(text, "password")
+        && !contains_ignore_ascii_case(text, "secret")
+        && !contains_ignore_ascii_case(text, "authorization")
+        && !contains_ignore_ascii_case(text, "cookie")
     {
         logging::debug("secret redaction fast path skipped regex scan");
         return text.to_string();

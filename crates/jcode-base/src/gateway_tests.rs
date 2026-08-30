@@ -267,26 +267,43 @@ async fn test_gateway_http_serves_pwa_and_preserves_api() {
     }
 
     // GET / serves the PWA shell as HTML.
-    let root = request(addr, "GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n").await;
-    assert!(root.starts_with("HTTP/1.1 200 OK"), "root status: {root:.40}");
+    let root = request(
+        addr,
+        "GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n",
+    )
+    .await;
+    assert!(
+        root.starts_with("HTTP/1.1 200 OK"),
+        "root status: {root:.40}"
+    );
     assert!(root.contains("Content-Type: text/html"));
     assert!(root.contains("<!DOCTYPE html>"));
 
     // GET /app.js serves JavaScript, not JSON, in the header.
-    let js = request(addr, "GET /app.js HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n").await;
+    let js = request(
+        addr,
+        "GET /app.js HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n",
+    )
+    .await;
     let js_header = js.split("\r\n\r\n").next().unwrap_or_default();
     assert!(js_header.contains("Content-Type: text/javascript"));
 
     // GET /health is UNCHANGED: still JSON with status ok.
-    let health =
-        request(addr, "GET /health HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n").await;
+    let health = request(
+        addr,
+        "GET /health HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n",
+    )
+    .await;
     assert!(health.starts_with("HTTP/1.1 200 OK"));
     assert!(health.contains("Content-Type: application/json"));
     assert!(health.contains("\"status\":\"ok\""));
 
     // An unknown path still 404s.
-    let missing =
-        request(addr, "GET /nope HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n").await;
+    let missing = request(
+        addr,
+        "GET /nope HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n",
+    )
+    .await;
     assert!(missing.starts_with("HTTP/1.1 404"));
 }
 
@@ -298,11 +315,11 @@ async fn test_gateway_http_serves_pwa_and_preserves_api() {
 /// HTTP-only asset test does not cover.
 #[tokio::test]
 async fn test_gateway_ws_token_auth_bridges_browser_subscribe() {
+    use futures::SinkExt;
     use tokio::io::AsyncReadExt;
     use tokio::net::TcpListener;
     use tokio_tungstenite::connect_async;
     use tokio_tungstenite::tungstenite::Message;
-    use futures::SinkExt;
 
     // Isolate devices.json under a temp JCODE_HOME so we never touch the real
     // registry. The gateway reloads DeviceRegistry from disk at handshake time,
@@ -326,8 +343,7 @@ async fn test_gateway_ws_token_auth_bridges_browser_subscribe() {
 
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
     let addr = listener.local_addr().expect("addr");
-    let (client_tx, mut client_rx) =
-        tokio::sync::mpsc::unbounded_channel::<super::GatewayClient>();
+    let (client_tx, mut client_rx) = tokio::sync::mpsc::unbounded_channel::<super::GatewayClient>();
     let registry = std::sync::Arc::new(tokio::sync::RwLock::new(DeviceRegistry::load()));
 
     tokio::spawn(async move {
@@ -374,7 +390,10 @@ async fn test_gateway_ws_token_auth_bridges_browser_subscribe() {
         got.contains("\"type\":\"subscribe\""),
         "bridge should deliver the subscribe line, got: {got:?}"
     );
-    assert!(got.ends_with('\n'), "bridge should newline-delimit, got: {got:?}");
+    assert!(
+        got.ends_with('\n'),
+        "bridge should newline-delimit, got: {got:?}"
+    );
 
     // Restore env.
     // SAFETY: still under lock_test_env.
@@ -473,7 +492,8 @@ async fn test_gateway_ws_subprotocol_handshake_echoes_safe_protocol_not_token() 
     );
     // The security property: the response echoes only the safe protocol.
     assert!(
-        resp.to_lowercase().contains("sec-websocket-protocol: jcode.v1"),
+        resp.to_lowercase()
+            .contains("sec-websocket-protocol: jcode.v1"),
         "server should echo jcode.v1, got: {resp:?}"
     );
     assert!(

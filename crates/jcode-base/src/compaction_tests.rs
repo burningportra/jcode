@@ -934,6 +934,49 @@ fn test_persisted_state_round_trip_preserves_compacted_view() {
     }
 }
 
+#[test]
+fn test_persisted_state_round_trip_preserves_learned_context_limit() {
+    let mut manager = CompactionManager::new().with_budget(500);
+    let messages: Vec<Message> = (0..20)
+        .map(|i| {
+            make_text_message(
+                Role::User,
+                &format!("turn {} {}", i, "x".repeat(40)),
+            )
+        })
+        .collect();
+    for _ in 0..20 {
+        manager.notify_message_added();
+    }
+
+    // No limit learned yet: persisted state carries none.
+    assert!(manager.learned_context_limit().is_none());
+
+    // The provider reports its enforced limit in a rejection; the manager
+    // records it and the value survives a persist/restore round trip (session
+    // save + reload) so recovery and proactive compaction keep tracking the
+    // endpoint's real limit.
+    manager.note_learned_context_limit(131_072);
+    assert_eq!(manager.learned_context_limit(), Some(131_072));
+
+    // persisted_state only exports once a summary exists, so compact first.
+    manager
+        .hard_compact_with(&messages)
+        .expect("should compact before persisting");
+    let persisted = manager
+        .persisted_state()
+        .expect("compaction state should be exportable");
+    assert_eq!(persisted.learned_context_limit, Some(131_072));
+
+    let mut restored = CompactionManager::new().with_budget(500);
+    restored.restore_persisted_state(&persisted, messages.len());
+    assert_eq!(restored.learned_context_limit(), Some(131_072));
+
+    // Clearing works (model changed).
+    restored.clear_learned_context_limit();
+    assert_eq!(restored.learned_context_limit(), None);
+}
+
 // ── context_usage accuracy ──────────────────────────────────────
 
 #[test]

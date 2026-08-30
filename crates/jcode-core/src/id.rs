@@ -3,10 +3,14 @@ use std::collections::HashSet;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+#[inline]
 pub fn new_id(prefix: &str) -> String {
     let ts = Utc::now().timestamp_millis();
     let rand: u64 = rand::random();
-    format!("{}_{}_{}", prefix, ts, rand)
+    let mut out = String::with_capacity(prefix.len() + 1 + 20 + 1 + 20);
+    use std::fmt::Write;
+    let _ = write!(out, "{}_{}_{}", prefix, ts, rand);
+    out
 }
 
 /// Server/location names with their icons.

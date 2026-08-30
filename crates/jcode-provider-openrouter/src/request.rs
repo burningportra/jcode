@@ -751,8 +751,7 @@ mod request_tests {
             "real-signature"
         );
         assert_eq!(
-            assistant_calls[1]["extra_content"]["google"]["thought_signature"],
-            "real-signature",
+            assistant_calls[1]["extra_content"]["google"]["thought_signature"], "real-signature",
             "an unsigned later call must inherit the most recent real signature"
         );
     }
@@ -795,8 +794,7 @@ mod request_tests {
             "sig-a"
         );
         assert_eq!(
-            calls[1]["extra_content"]["google"]["thought_signature"],
-            "sig-a",
+            calls[1]["extra_content"]["google"]["thought_signature"], "sig-a",
             "parallel sibling call must inherit the turn's signature"
         );
     }
@@ -845,8 +843,7 @@ mod request_tests {
 
         assert_eq!(assistant_calls.len(), 2);
         assert_eq!(
-            assistant_calls[0]["extra_content"]["google"]["thought_signature"],
-            "later-signature",
+            assistant_calls[0]["extra_content"]["google"]["thought_signature"], "later-signature",
             "a call before the first signed one must be seeded with the earliest signature"
         );
         assert_eq!(

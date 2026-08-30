@@ -55,11 +55,7 @@ pub(super) fn extract_ws_auth(
         .and_then(|value| value.to_str().ok());
     let subprotocol_token = subprotocol_header.and_then(parse_subprotocol_token);
     let offers_echo_protocol = subprotocol_header
-        .map(|header| {
-            header
-                .split(',')
-                .any(|p| p.trim() == WS_ECHO_PROTOCOL)
-        })
+        .map(|header| header.split(',').any(|p| p.trim() == WS_ECHO_PROTOCOL))
         .unwrap_or(false);
 
     let (token, source) = match (header_token, query_token, subprotocol_token) {

@@ -1229,9 +1229,7 @@ pub fn maybe_show_setup_hints() -> Option<StartupHints> {
                 .spawn(|| {
                     let mut s = SetupHintsState::load();
                     if let Err(err) = create_desktop_shortcut(&mut s) {
-                        jcode_logging::warn(&format!(
-                            "failed to create macOS app launcher: {err}"
-                        ));
+                        jcode_logging::warn(&format!("failed to create macOS app launcher: {err}"));
                     }
                 })
                 .ok();

@@ -147,7 +147,11 @@ mod tests {
             .find_map(|l| l.strip_prefix("Content-Length: "))
             .and_then(|v| v.trim().parse().ok())
             .expect("content-length present");
-        assert_eq!(declared, body.len(), "content-length matches substituted body");
+        assert_eq!(
+            declared,
+            body.len(),
+            "content-length matches substituted body"
+        );
     }
 
     #[test]

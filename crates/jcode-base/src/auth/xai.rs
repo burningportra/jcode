@@ -182,8 +182,7 @@ pub fn load_tokens() -> Result<XaiTokens> {
         anyhow::bail!("No xAI OAuth tokens found. Run `jcode login --provider xai-oauth`.");
     }
     crate::storage::harden_secret_file_permissions(&path);
-    crate::storage::read_json(&path)
-        .with_context(|| format!("Failed to read {}", path.display()))
+    crate::storage::read_json(&path).with_context(|| format!("Failed to read {}", path.display()))
 }
 
 /// Persist tokens with hardened (0600) permissions.
@@ -241,11 +240,12 @@ pub async fn refresh_tokens(tokens: &XaiTokens) -> Result<XaiTokens> {
 }
 
 async fn refresh_tokens_uncoordinated(tokens: &XaiTokens) -> Result<XaiTokens> {
-    let Some(refresh_token) = tokens.refresh_token.clone().filter(|t| !t.trim().is_empty())
+    let Some(refresh_token) = tokens
+        .refresh_token
+        .clone()
+        .filter(|t| !t.trim().is_empty())
     else {
-        anyhow::bail!(
-            "xAI OAuth session has no refresh token; sign in again. {RELOGIN_HINT}"
-        );
+        anyhow::bail!("xAI OAuth session has no refresh token; sign in again. {RELOGIN_HINT}");
     };
 
     // Skip a doomed round-trip if this exact token was already rejected.
@@ -315,7 +315,10 @@ pub async fn login(options: LoginOptions) -> Result<XaiTokens> {
         .unwrap_or_else(|| device.verification_uri.clone());
 
     eprintln!("\nSign in to xAI Grok (SuperGrok / X Premium+).\n");
-    eprintln!("1. Open this URL in your browser:\n\n   {}\n", device.verification_uri);
+    eprintln!(
+        "1. Open this URL in your browser:\n\n   {}\n",
+        device.verification_uri
+    );
     eprintln!("2. Enter this code if prompted:  {}\n", device.user_code);
     if let Some(qr) = crate::login_qr::indented_section(
         &verification_url,
@@ -338,7 +341,10 @@ pub async fn login(options: LoginOptions) -> Result<XaiTokens> {
         );
     }
 
-    eprintln!("Waiting for approval (this can take up to {}s)...", device.expires_in);
+    eprintln!(
+        "Waiting for approval (this can take up to {}s)...",
+        device.expires_in
+    );
     let tokens = poll_for_token(&device).await?;
     save_tokens(&tokens)?;
     let _ = crate::auth::refresh_state::record_success(XAI_OAUTH_PROVIDER_ID);
@@ -391,7 +397,8 @@ struct TokenErrorBody {
 
 async fn poll_for_token(device: &DeviceCodeResponse) -> Result<XaiTokens> {
     let client = crate::provider::shared_http_client();
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(device.expires_in.max(0) as u64);
+    let deadline =
+        tokio::time::Instant::now() + Duration::from_secs(device.expires_in.max(0) as u64);
     let mut interval = device.interval.max(1);
 
     loop {
@@ -573,10 +580,8 @@ mod tests {
 
     #[test]
     fn token_type_defaults_to_bearer_on_deserialize() {
-        let tokens: XaiTokens = serde_json::from_str(
-            r#"{"access_token":"a","expires_at":123}"#,
-        )
-        .unwrap();
+        let tokens: XaiTokens =
+            serde_json::from_str(r#"{"access_token":"a","expires_at":123}"#).unwrap();
         assert_eq!(tokens.token_type, "Bearer");
         assert!(tokens.refresh_token.is_none());
     }

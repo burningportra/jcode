@@ -838,7 +838,8 @@ fn initial_subscribe_requires_an_absolute_client_working_dir() {
 #[test]
 fn pwa_shaped_subscribe_json_is_accepted_by_the_real_handler() {
     // Mirrors crates/jcode-base/web/wire.js `Req.subscribe(sessionId, home)`.
-    let line = r#"{"id":1,"type":"subscribe","target_session_id":"sess_abc","working_dir":"/Users/me"}"#;
+    let line =
+        r#"{"id":1,"type":"subscribe","target_session_id":"sess_abc","working_dir":"/Users/me"}"#;
     let request: Request = serde_json::from_str(line).expect("PWA subscribe must deserialize");
     let dir = initial_subscribe_working_dir(&request)
         .expect("PWA subscribe with working_dir must be accepted");

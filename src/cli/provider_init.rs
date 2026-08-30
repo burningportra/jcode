@@ -98,7 +98,12 @@ pub enum ProviderChoice {
     #[value(name = "grok-build")]
     GrokBuild,
     /// xAI Grok via native OAuth device-code login (SuperGrok / X Premium+).
-    #[value(name = "xai-oauth", alias = "grok-oauth", alias = "x-ai-oauth", alias = "xai-grok-oauth")]
+    #[value(
+        name = "xai-oauth",
+        alias = "grok-oauth",
+        alias = "x-ai-oauth",
+        alias = "xai-grok-oauth"
+    )]
     XaiOauth,
     #[value(alias = "nvidia", alias = "nim")]
     NvidiaNim,

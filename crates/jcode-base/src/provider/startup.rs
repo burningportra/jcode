@@ -250,6 +250,9 @@ impl MultiProvider {
             None
         };
 
+        let inference =
+            external::instantiate_expected_external_provider(external::INFERENCE_RUNTIME);
+
         let copilot_premium_zero = matches!(
             std::env::var("JCODE_COPILOT_PREMIUM").ok().as_deref(),
             Some("0")
@@ -263,6 +266,7 @@ impl MultiProvider {
             cursor: cursor_provider.is_some(),
             bedrock: bedrock_provider.is_some(),
             openrouter: openrouter.is_some(),
+            inferencenet: inference.is_some(),
             copilot_premium_zero,
         };
         let mut active = Self::auto_default_provider(availability);
@@ -332,6 +336,7 @@ impl MultiProvider {
             cursor: RwLock::new(cursor_provider),
             bedrock: RwLock::new(bedrock_provider),
             openrouter: RwLock::new(openrouter),
+            inference: RwLock::new(inference),
             openai_compatible_profiles: RwLock::new(HashMap::new()),
             active_openai_compatible_profile: RwLock::new(None),
             active: RwLock::new(active),

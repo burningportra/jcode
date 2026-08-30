@@ -171,6 +171,11 @@ pub struct CompactionManager {
     /// Used to trigger compaction with real token counts instead of only heuristics.
     observed_input_tokens: Option<u64>,
 
+    /// Context limit learned from a provider `context_length_exceeded`
+    /// rejection. More authoritative than the local catalog heuristic; when
+    /// set, `budget_for_context()` should apply `min(catalog, learned)`.
+    learned_context_limit: Option<u64>,
+
     /// Last compaction event (if any)
     last_compaction: Option<CompactionEvent>,
 
@@ -220,6 +225,7 @@ impl CompactionManager {
             suppress_compaction_until_new_message: false,
             token_budget: DEFAULT_TOKEN_BUDGET,
             observed_input_tokens: None,
+            learned_context_limit: None,
             last_compaction: None,
             mode,
             compaction_config: cfg,
@@ -334,6 +340,7 @@ impl CompactionManager {
         self.semantic_embed_cache_counter = 0;
         self.total_turns = total_messages;
         self.compacted_count = state.compacted_count.min(total_messages);
+        self.learned_context_limit = state.learned_context_limit;
         self.active_chars
             .reset_pending(total_messages > self.compacted_count);
         self.active_summary = Some(Summary {
@@ -386,6 +393,7 @@ impl CompactionManager {
                 covers_up_to_turn: summary.covers_up_to_turn,
                 original_turn_count: summary.original_turn_count,
                 compacted_count: self.compacted_count,
+                learned_context_limit: self.learned_context_limit,
             })
     }
 
@@ -803,6 +811,24 @@ impl CompactionManager {
     /// Store provider-reported input token usage for compaction decisions.
     pub fn update_observed_input_tokens(&mut self, tokens: u64) {
         self.observed_input_tokens = Some(tokens);
+    }
+
+    /// Record a context limit reported by the provider itself (from a parsed
+    /// `context_length_exceeded` body). Survives [`Self::persisted_state`] /
+    /// [`Self::restore_persisted_state`] round trips so a re-seeded session
+    /// keeps tracking the endpoint's real limit.
+    pub fn note_learned_context_limit(&mut self, limit: u64) {
+        self.learned_context_limit = Some(limit);
+    }
+
+    /// The learned provider-reported context limit, if any.
+    pub fn learned_context_limit(&self) -> Option<u64> {
+        self.learned_context_limit
+    }
+
+    /// Clear the learned limit (model changed: the old limit no longer applies).
+    pub fn clear_learned_context_limit(&mut self) {
+        self.learned_context_limit = None;
     }
 
     /// Best-effort current token count using the caller's messages.
@@ -1783,6 +1809,7 @@ pub async fn build_transfer_compaction_state(
         covers_up_to_turn: total_turns,
         original_turn_count: total_turns,
         compacted_count: 0,
+        learned_context_limit: None,
     }))
 }
 

@@ -167,9 +167,7 @@ fn parse_git_head_file(repo_dir: &Path) -> Option<String> {
     if trimmed.starts_with("ref: ") {
         // Resolve ref: refs/heads/<name> → actual packfile or loose ref
         let ref_path = repo_dir.join(trimmed.strip_prefix("ref: ").unwrap().trim());
-        let ref_content = fs::read_to_string(&ref_path).ok()?
-            .trim()
-            .to_string();
+        let ref_content = fs::read_to_string(&ref_path).ok()?.trim().to_string();
         // Validate it looks like a 40-char hex SHA
         if ref_content.len() == 40 && ref_content.bytes().all(|b| b.is_ascii_hexdigit()) {
             return Some(ref_content);

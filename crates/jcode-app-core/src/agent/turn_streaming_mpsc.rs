@@ -24,7 +24,11 @@ const WRAP_TOOL_MARKERS: [&str; 2] = ["to=functions.", "+#+#"];
 ///
 /// This avoids re-scanning the entire accumulated response on every streamed
 /// delta, which was O(response) per token and O(response^2) over a full answer.
+#[inline]
 fn find_wrap_marker_incremental(accumulated: &str, appended_len: usize) -> Option<usize> {
+    if accumulated.is_empty() {
+        return None;
+    }
     let max_marker_len = WRAP_TOOL_MARKERS
         .iter()
         .map(|marker| marker.len())
@@ -1643,6 +1647,20 @@ mod tests {
         assert!(!is_error);
         assert!(message.contains("Resume the wait"));
         assert!(message.contains("\"task_id\":\"bg-123\""));
+    }
+
+    #[test]
+    fn reload_interrupted_selfdev_is_non_error_and_indicates_restart() {
+        for action in ["reload", "build-reload", "build_reload"] {
+            let tc = tool_call("selfdev", json!({"action": action}));
+            let (message, is_error) = reload_interrupted_tool_result(&tc, 0.5);
+
+            assert!(
+                !is_error,
+                "selfdev {action} interruption must not be marked error"
+            );
+            assert_eq!(message, "Reload initiated. Process restarting...");
+        }
     }
 
     #[test]

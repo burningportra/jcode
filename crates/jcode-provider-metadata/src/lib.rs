@@ -148,10 +148,10 @@ mod catalog;
 pub mod registry;
 
 pub use catalog::*;
-pub use registry::{
-    registry_context_limit, registry_entry, ProviderModelEntry, ProviderRegistryEntry,
-};
 use catalog::{LOGIN_PROVIDERS, OPENAI_COMPAT_PROFILES};
+pub use registry::{
+    ProviderModelEntry, ProviderRegistryEntry, registry_context_limit, registry_entry,
+};
 
 pub fn openai_compatible_profiles() -> &'static [OpenAiCompatibleProfile] {
     OPENAI_COMPAT_PROFILES

@@ -5,6 +5,7 @@
 //! consecutive, boundary, and prefix matches receive bonuses, so typo tolerance
 //! does not displace stronger literal matches.
 
+#[inline]
 fn is_boundary(c: char) -> bool {
     matches!(c, '/' | '-' | '_' | ' ' | '.' | ':')
 }

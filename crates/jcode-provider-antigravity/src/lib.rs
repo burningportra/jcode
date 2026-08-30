@@ -7,15 +7,19 @@ use std::collections::{HashMap, HashSet};
 /// Known-good model id used when the backend default is unknown. The literal
 /// alias `"default"` is rejected by `generateContent` with HTTP 404, so we must
 /// always resolve it to a real model id before issuing a request.
-pub const DEFAULT_FALLBACK_MODEL: &str = "gemini-3-flash";
+pub const DEFAULT_FALLBACK_MODEL: &str = "gemini-3-flash-preview";
 pub const AVAILABLE_MODELS: &[&str] = &[
     "claude-opus-4-6-thinking",
     "claude-sonnet-4-6",
-    "gemini-3.1-pro-high",
-    "gemini-3.1-pro-low",
-    "gemini-3-flash",
-    "gemini-3-flash-agent",
-    "gemini-3.5-flash-low",
+    "gemini-3.7-flash",
+    "gemini-3.1-pro-preview",
+    "gemini-3-pro-preview",
+    "gemini-3-flash-preview",
+    "gemini-2.5-pro",
+    "gemini-2.5-flash",
+    "gemini-2.0-flash",
+    "gemini-1.5-pro",
+    "gemini-1.5-flash",
     "gpt-oss-120b-medium",
 ];
 pub const FETCH_MODELS_API_URL: &str =

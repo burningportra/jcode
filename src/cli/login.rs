@@ -433,9 +433,7 @@ async fn login_grok_build_flow() -> Result<()> {
 
 async fn login_xai_oauth_flow(no_browser: bool) -> Result<()> {
     eprintln!("Starting xAI Grok OAuth login (device-code flow).");
-    eprintln!(
-        "This signs in with your SuperGrok / X Premium+ subscription, not an xAI API key."
-    );
+    eprintln!("This signs in with your SuperGrok / X Premium+ subscription, not an xAI API key.");
     eprintln!(
         "If browser launch fails, or you pass `--no-browser`, jcode prints the verification URL and code to enter manually."
     );

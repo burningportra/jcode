@@ -536,10 +536,8 @@ pub fn openai_compatible_profile_context_limit(profile_id: &str, model: &str) ->
         // id the provider serves. This wins over the fuzzy family classifier
         // because `accounts/fireworks/...` ids embed the upstream family name
         // and deserve provider-verified limits.
-        _ => {
-            jcode_provider_metadata::registry_context_limit(&profile_id, &model)
-                .or_else(|| jcode_provider_core::models::open_weight_family_context_limit(&model))
-        }
+        _ => jcode_provider_metadata::registry_context_limit(&profile_id, &model)
+            .or_else(|| jcode_provider_core::models::open_weight_family_context_limit(&model)),
     }
 }
 
