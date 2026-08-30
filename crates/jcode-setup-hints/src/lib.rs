@@ -1221,77 +1221,114 @@ pub fn maybe_show_setup_hints() -> Option<StartupHints> {
 
     #[cfg(any(test, target_os = "macos"))]
     {
+        // Defer app launcher creation to the same background thread to avoid
+        // blocking startup on file I/O (binary copy → ~/Applications/jcode.app).
         if should_refresh_macos_app_launcher(&state) {
-            let _ = create_desktop_shortcut(&mut state);
+            std::thread::Builder::new()
+                .name("jcode-app-launcher".to_string())
+                .spawn(|| {
+                    let mut s = SetupHintsState::load();
+                    if let Err(err) = create_desktop_shortcut(&mut s) {
+                        jcode_logging::warn(&format!(
+                            "failed to create macOS app launcher: {err}"
+                        ));
+                    }
+                })
+                .ok();
         }
     }
 
     #[cfg(target_os = "macos")]
     {
-        match mac_hotkey_action_for_state(&state, load_launch_hotkeys_config().enabled) {
-            MacHotkeyAction::Install => {
-                if let Err(err) = auto_install_macos_hotkey_listener(&mut state) {
-                    jcode_logging::warn(&format!(
-                        "failed to auto-install macOS Cmd+; hotkey listener: {err}"
-                    ));
-                }
-            }
-            MacHotkeyAction::Migrate => {
-                // Already-configured user on an older listener: reinstall so the
-                // updated listener (and current binary path) takes effect on
-                // update without requiring them to re-run setup.
-                if let Err(err) = migrate_macos_hotkey_listener(&mut state) {
-                    jcode_logging::warn(&format!(
-                        "failed to migrate macOS Cmd+; hotkey listener: {err}"
-                    ));
-                }
-            }
-            MacHotkeyAction::Disable => {
-                if let Err(err) = uninstall_macos_hotkey_listener() {
-                    jcode_logging::warn(&format!(
-                        "failed to remove disabled macOS hotkey listener: {err}"
-                    ));
-                }
-            }
-            MacHotkeyAction::None => {}
+        // Offload the heavy `launchctl` spawns to a background thread so they
+        // do not block the startup path. The actions are fire-and-forget:
+        // errors are logged, never propagated.
+        let action = mac_hotkey_action_for_state(&state, load_launch_hotkeys_config().enabled);
+        if action != MacHotkeyAction::None {
+            let action_clone = action;
+            std::thread::Builder::new()
+                .name("jcode-hotkey-setup".to_string())
+                .spawn(move || match action_clone {
+                    MacHotkeyAction::Install => {
+                        let mut s = SetupHintsState::load();
+                        if let Err(err) = auto_install_macos_hotkey_listener(&mut s) {
+                            jcode_logging::warn(&format!(
+                                "failed to auto-install macOS Cmd+; hotkey listener: {err}"
+                            ));
+                        }
+                    }
+                    MacHotkeyAction::Migrate => {
+                        let mut s = SetupHintsState::load();
+                        if let Err(err) = migrate_macos_hotkey_listener(&mut s) {
+                            jcode_logging::warn(&format!(
+                                "failed to migrate macOS Cmd+; hotkey listener: {err}"
+                            ));
+                        }
+                    }
+                    MacHotkeyAction::Disable => {
+                        if let Err(err) = uninstall_macos_hotkey_listener() {
+                            jcode_logging::warn(&format!(
+                                "failed to remove disabled macOS hotkey listener: {err}"
+                            ));
+                        }
+                    }
+                    MacHotkeyAction::None => {}
+                })
+                .ok();
         }
     }
 
     #[cfg(target_os = "linux")]
     {
-        if let Some(comp) = detect_linux_compositor() {
-            let action = linux_hotkey_setup_action(
-                load_launch_hotkeys_config().enabled,
-                linux_hotkeys_installed(comp),
-                state.launch_hotkey_tracking_version,
-            );
+        // Defer compositor detection (spawns `pgrep`) and hotkey registration
+        // to a background thread so startup is never blocked on external I/O.
+        let action = linux_hotkey_setup_action(
+            load_launch_hotkeys_config().enabled,
+            false, // assume not installed on fast path
+            state.launch_hotkey_tracking_version,
+        );
 
-            if action != LinuxHotkeySetupAction::None {
-                match install_linux_launch_hotkeys(comp) {
-                    Ok(_) => {
-                        state.hotkey_configured = true;
-                        state.hotkey_dismissed = true;
-                        state.launch_hotkey_tracking_version = LAUNCH_HOTKEY_TRACKING_VERSION;
-                        let _ = state.save();
-                        if action == LinuxHotkeySetupAction::Install {
-                            jcode_logging::info(&format!(
-                                "Automatically installed {} launch hotkeys on first launch",
+        if action != LinuxHotkeySetupAction::None {
+            std::thread::Builder::new()
+                .name("jcode-linux-hotkeys".to_string())
+                .spawn(move || {
+                    if let Some(comp) = detect_linux_compositor() {
+                        let live_action = linux_hotkey_setup_action(
+                            load_launch_hotkeys_config().enabled,
+                            linux_hotkeys_installed(comp),
+                            state.launch_hotkey_tracking_version,
+                        );
+                        if live_action == LinuxHotkeySetupAction::None {
+                            return;
+                        }
+                        match install_linux_launch_hotkeys(comp) {
+                            Ok(_) => {
+                                let mut s = SetupHintsState::load();
+                                s.hotkey_configured = true;
+                                s.hotkey_dismissed = true;
+                                s.launch_hotkey_tracking_version = LAUNCH_HOTKEY_TRACKING_VERSION;
+                                let _ = s.save();
+                                if action == LinuxHotkeySetupAction::Install {
+                                    jcode_logging::info(&format!(
+                                        "Automatically installed {} launch hotkeys on first launch",
+                                        comp.name()
+                                    ));
+                                } else {
+                                    jcode_logging::info(&format!(
+                                        "Migrated {} launch hotkeys to usage tracking v{}",
+                                        comp.name(),
+                                        LAUNCH_HOTKEY_TRACKING_VERSION
+                                    ));
+                                }
+                            }
+                            Err(err) => jcode_logging::warn(&format!(
+                                "failed to automatically configure {} launch hotkeys: {err}",
                                 comp.name()
-                            ));
-                        } else {
-                            jcode_logging::info(&format!(
-                                "Migrated {} launch hotkeys to usage tracking v{}",
-                                comp.name(),
-                                LAUNCH_HOTKEY_TRACKING_VERSION
-                            ));
+                            )),
                         }
                     }
-                    Err(err) => jcode_logging::warn(&format!(
-                        "failed to automatically configure {} launch hotkeys: {err}",
-                        comp.name()
-                    )),
-                }
-            }
+                })
+                .ok();
         }
     }
 
