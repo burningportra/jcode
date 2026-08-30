@@ -2054,3 +2054,248 @@ async fn fable_guardrail_reconsideration_recovers_the_streaming_turn() {
         "{text:?}"
     );
 }
+
+// ── Context-limit auto-recovery convergence ─────────────────────────
+//
+// The Cerebras-style error that motivated the shared classifier (2026-08-30):
+// snake_case code, "Current length is X while limit is Y", no "tokens" word.
+const CEREBRAS_CONTEXT_LIMIT_BODY: &str = "OpenAI-compatible chat request failed\n  endpoint: https://api.cerebras.ai/v1/chat/completions\n  model: gemma-4-31b\n  status: 400 Bad Request\n  response: {\"message\":\"Please reduce the length of the messages or completion. Current length is 131121 while limit is 131072\",\"type\":\"invalid_request_error\",\"param\":\"messages\",\"code\":\"context_length_exceeded\"}";
+
+/// Emits a Cerebras-style context-limit error for the first `fail_count`
+/// complete() calls, then succeeds with a short reply. Drives the agent
+/// recovery loop end-to-end: classify -> parse provider-reported limit ->
+/// learn budget -> hard compact -> retry.
+struct ContextLimitThenSuccessProvider {
+    fail_count: u32,
+    /// Number of complete() invocations, for asserting the retry happened.
+    calls: std::sync::Mutex<u32>,
+}
+
+impl ContextLimitThenSuccessProvider {
+    fn new(fail_count: u32) -> Self {
+        Self {
+            fail_count,
+            calls: std::sync::Mutex::new(0),
+        }
+    }
+
+    fn calls(&self) -> u32 {
+        *self.calls.lock().unwrap()
+    }
+}
+
+#[async_trait]
+impl Provider for ContextLimitThenSuccessProvider {
+    async fn complete(
+        &self,
+        _messages: &[Message],
+        _tools: &[ToolDefinition],
+        _system: &str,
+        _resume_session_id: Option<&str>,
+    ) -> Result<EventStream> {
+        let call = {
+            let mut calls = self.calls.lock().unwrap();
+            let call = *calls;
+            *calls += 1;
+            call
+        };
+        let (tx, rx) = tokio_mpsc::channel::<Result<StreamEvent>>(8);
+        if call < self.fail_count {
+            let _ = tx
+                .send(Err(anyhow::anyhow!(CEREBRAS_CONTEXT_LIMIT_BODY)))
+                .await;
+        } else {
+            let _ = tx
+                .send(Ok(StreamEvent::TextDelta("recovered".to_string())))
+                .await;
+            let _ = tx
+                .send(Ok(StreamEvent::MessageEnd {
+                    stop_reason: Some("end_turn".to_string()),
+                }))
+                .await;
+        }
+        drop(tx);
+        Ok(Box::pin(ReceiverStream::new(rx)))
+    }
+
+    fn name(&self) -> &str {
+        "context-limit-stub"
+    }
+
+    fn supports_compaction(&self) -> bool {
+        true
+    }
+
+    fn uses_jcode_compaction(&self) -> bool {
+        true
+    }
+
+    fn context_window(&self) -> usize {
+        // Catalog heuristic claims 262k; the provider's error body reports the
+        // real 131,072 limit, which recovery must trust instead.
+        262_144
+    }
+
+    fn fork(&self) -> Arc<dyn Provider> {
+        Arc::new(Self::new(self.fail_count))
+    }
+}
+
+/// The session needs more than MIN_TURNS_TO_KEEP messages so hard compaction
+/// has something to drop (it bails with "Not enough messages" otherwise).
+fn add_recovery_fixture(agent: &mut Agent) {
+    for i in 0..12 {
+        agent.add_message(
+            Role::User,
+            vec![ContentBlock::Text {
+                text: format!("historical turn {i}: {}", "context ".repeat(40)),
+                cache_control: None,
+            }],
+        );
+        agent.add_message(
+            Role::Assistant,
+            vec![ContentBlock::Text {
+                text: format!("acknowledged turn {i}"),
+                cache_control: None,
+            }],
+        );
+    }
+    agent.add_message(
+        Role::User,
+        vec![ContentBlock::Text {
+            text: "hello".to_string(),
+            cache_control: None,
+        }],
+    );
+}
+
+fn count_auto_recovery_events(rx: &mut tokio::sync::mpsc::UnboundedReceiver<ServerEvent>) -> u32 {
+    let mut count = 0;
+    while let Ok(event) = rx.try_recv() {
+        if let ServerEvent::Compaction { trigger, .. } = event {
+            if trigger == "auto_recovery" {
+                count += 1;
+            }
+        }
+    }
+    count
+}
+
+#[tokio::test]
+async fn context_limit_error_auto_compacts_and_retries_to_completion() {
+    let _guard = crate::storage::lock_test_env();
+    let concrete = Arc::new(ContextLimitThenSuccessProvider::new(1));
+    let provider: Arc<dyn Provider> = concrete.clone();
+    let registry = Registry::new(provider.clone()).await;
+    let mut agent = Agent::new(provider, registry);
+
+    for i in 0..12 {
+        agent.add_message(
+            Role::User,
+            vec![ContentBlock::Text {
+                text: format!("historical turn {i}: {}", "context ".repeat(40)),
+                cache_control: None,
+            }],
+        );
+        agent.add_message(
+            Role::Assistant,
+            vec![ContentBlock::Text {
+                text: format!("acknowledged turn {i}"),
+                cache_control: None,
+            }],
+        );
+    }
+    agent.add_message(
+        Role::User,
+        vec![ContentBlock::Text {
+            text: "hello".to_string(),
+            cache_control: None,
+        }],
+    );
+
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    tokio::time::timeout(Duration::from_secs(30), agent.run_turn_streaming_mpsc(tx))
+        .await
+        .expect("turn should complete within the timeout")
+        .expect("turn should succeed after auto-compaction and retry");
+
+    let mut saw_compaction = false;
+    while let Ok(event) = rx.try_recv() {
+        if let ServerEvent::Compaction { trigger, .. } = event {
+            if trigger == "auto_recovery" {
+                saw_compaction = true;
+            }
+        }
+    }
+    assert!(
+        saw_compaction,
+        "expected an auto_recovery compaction event during the turn"
+    );
+    assert_eq!(
+        concrete.calls(),
+        2,
+        "provider should be called twice: once failing, once succeeding after compaction"
+    );
+}
+
+/// Convergence variant: the provider rejects the first two attempts with the
+/// same Cerebras-style body, then succeeds once recovery has shrunk the
+/// payload. Asserts the loop converges strictly within the 5-retry budget:
+/// each retry's payload is strictly smaller because the budget drops to the
+/// parsed limit and hard compaction keeps halving the kept turns.
+#[tokio::test]
+async fn context_limit_errors_converge_within_retry_budget() {
+    let _guard = crate::storage::lock_test_env();
+    let concrete = Arc::new(ContextLimitThenSuccessProvider::new(2));
+    let provider: Arc<dyn Provider> = concrete.clone();
+    let registry = Registry::new(provider.clone()).await;
+    let mut agent = Agent::new(provider, registry);
+
+    for i in 0..12 {
+        agent.add_message(
+            Role::User,
+            vec![ContentBlock::Text {
+                text: format!("historical turn {i}: {}", "context ".repeat(40)),
+                cache_control: None,
+            }],
+        );
+        agent.add_message(
+            Role::Assistant,
+            vec![ContentBlock::Text {
+                text: format!("acknowledged turn {i}"),
+                cache_control: None,
+            }],
+        );
+    }
+    agent.add_message(
+        Role::User,
+        vec![ContentBlock::Text {
+            text: "hello".to_string(),
+            cache_control: None,
+        }],
+    );
+
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    tokio::time::timeout(Duration::from_secs(60), agent.run_turn_streaming_mpsc(tx))
+        .await
+        .expect("turn should converge within the timeout")
+        .expect("turn should converge within the retry budget");
+
+    let mut compactions = 0;
+    while let Ok(event) = rx.try_recv() {
+        if let ServerEvent::Compaction { trigger, .. } = event {
+            if trigger == "auto_recovery" {
+                compactions += 1;
+            }
+        }
+    }
+    assert_eq!(
+        compactions, 2,
+        "expected exactly 2 auto_recovery compactions (one per failing attempt)"
+    );
+    assert_eq!(
+        concrete.calls(),
+        3,
+        "two failed attempts + one success, each failure followed by a compaction"
+    );
+}
