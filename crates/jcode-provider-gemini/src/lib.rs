@@ -16,6 +16,7 @@ pub const AVAILABLE_MODELS: &[&str] = &[
     "gemini-1.5-flash",
 ];
 pub const FALLBACK_MODELS: &[&str] = &[
+    "gemini-3.7-flash",
     "gemini-3.1-pro-preview",
     "gemini-3-pro-preview",
     "gemini-2.5-pro",
@@ -719,6 +720,7 @@ mod tests {
         assert_eq!(
             gemini_fallback_models("gemini-2.5-flash"),
             vec![
+                "gemini-3.7-flash",
                 "gemini-3.1-pro-preview",
                 "gemini-3-pro-preview",
                 "gemini-2.5-pro",
