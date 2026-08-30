@@ -154,11 +154,11 @@ pub use registry::{
 use catalog::{LOGIN_PROVIDERS, OPENAI_COMPAT_PROFILES};
 
 pub fn openai_compatible_profiles() -> &'static [OpenAiCompatibleProfile] {
-    &OPENAI_COMPAT_PROFILES
+    OPENAI_COMPAT_PROFILES
 }
 
 pub fn login_providers() -> &'static [LoginProviderDescriptor] {
-    &LOGIN_PROVIDERS
+    LOGIN_PROVIDERS
 }
 
 fn login_providers_for_surface(surface: LoginProviderSurface) -> Vec<LoginProviderDescriptor> {
