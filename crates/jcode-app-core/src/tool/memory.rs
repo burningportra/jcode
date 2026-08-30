@@ -114,11 +114,11 @@ impl Tool for MemoryTool {
                     "enum": ["fact", "preference", "entity", "correction"]
                 },
                 "query": { "type": "string" },
-                "id": { "type": "string" },
+                "id": { "type": "string", "description": "Memory ID returned by remember. Required for forget, tag, and link actions." },
                 "tags": { "type": "array", "items": { "type": "string" } },
                 "scope": { "type": "string", "enum": ["project", "global", "all"] },
-                "from_id": { "type": "string" },
-                "to_id": { "type": "string" },
+                "from_id": { "type": "string", "description": "Source memory ID for link action." },
+                "to_id": { "type": "string", "description": "Target memory ID for link action." },
                 "limit": { "type": "integer", "description": "Max results." }
             },
             "required": ["action"]

@@ -2775,8 +2775,8 @@ impl Tool for CommunicateTool {
                         if !new_session_id.is_empty() =>
                     {
                         Ok(ToolOutput::new(format!(
-                            "Spawned new agent: {}",
-                            new_session_id
+                            "Spawned new agent: {}\nUse to_session=`{}` (or target_session) to message, assign tasks, or stop it.",
+                            new_session_id, new_session_id
                         )))
                     }
                     Ok(response) => {

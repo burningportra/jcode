@@ -774,7 +774,7 @@ impl Tool for ScheduleTool {
                 },
                 "schedule_id": {
                     "type": "string",
-                    "description": "Scheduled task ID. Required for action=cancel."
+                    "description": "Scheduled task ID. Required for action=cancel. The id is returned in the create response (in parentheses after 'id:')."
                 },
                 "task": {
                     "type": "string",
