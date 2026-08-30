@@ -63,6 +63,40 @@ fn test_skill_prompt_integration() {
     );
 }
 
+/// An invoked skill must be framed as a directive to execute now, not as
+/// passive reference. This is what makes `/goal` (and other protocol skills)
+/// reliably run their protocol instead of being ignored. Both the full and
+/// split builders funnel through the same helper, so assert the framing once
+/// on the helper and confirm each builder carries it.
+#[test]
+fn active_skill_is_framed_as_an_imperative_directive() {
+    let skill_prompt = "# Skill: goal\n\nRun the plan-space protocol.";
+    let section = format_active_skill_section(skill_prompt);
+
+    assert!(section.starts_with("# Active Skill"));
+    assert!(section.contains(skill_prompt));
+    // The directive must tell the model to act, not merely reference.
+    let lower = section.to_lowercase();
+    assert!(lower.contains("follow it now"), "missing imperative to act");
+    assert!(
+        lower.contains("first step"),
+        "should direct the model to start at the skill's first step"
+    );
+    assert!(
+        lower.contains("not reference material") || lower.contains("not reference"),
+        "should distinguish directive from reference material"
+    );
+
+    // Both builders must carry the directive, not just the raw skill text.
+    let full = build_system_prompt(Some(skill_prompt), &[]);
+    assert!(full.contains("Follow it now"));
+    let (split, _) = build_system_prompt_split(None, &[], false, None, None);
+    assert!(!split.dynamic_part.contains("Follow it now"));
+    let (split_with_skill, _) =
+        build_system_prompt_split(Some(skill_prompt), &[], false, None, None);
+    assert!(split_with_skill.dynamic_part.contains("Follow it now"));
+}
+
 #[test]
 fn skill_description_collapses_whitespace_without_clipping_short_text() {
     assert_eq!(

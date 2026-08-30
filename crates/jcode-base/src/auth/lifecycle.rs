@@ -900,6 +900,8 @@ fn normalized_login_provider_id(provider_id: &str) -> Option<&'static str> {
         "copilot" => Some("copilot"),
         "gemini" => Some("gemini"),
         "antigravity" => Some("antigravity"),
+        "grok-build" => Some("grok-build"),
+        "xai-oauth" | "grok-oauth" | "x-ai-oauth" | "xai-grok-oauth" => Some("xai-oauth"),
         _ => None,
     }
 }
@@ -1153,6 +1155,7 @@ fn direct_provider_activation(provider_id: &str) -> Option<ProviderActivation> {
         "gemini" => (RuntimeProviderId::Gemini, ActiveProvider::Gemini),
         "antigravity" => (RuntimeProviderId::Antigravity, ActiveProvider::Antigravity),
         "grok-build" => (RuntimeProviderId::GrokBuild, ActiveProvider::OpenRouter),
+        "xai-oauth" => (RuntimeProviderId::XaiOauth, ActiveProvider::OpenRouter),
         _ => return None,
     };
     Some(ProviderActivation::initial(runtime_id, active))

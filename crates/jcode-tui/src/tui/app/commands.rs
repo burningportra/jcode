@@ -2554,14 +2554,15 @@ pub(super) fn handle_goals_command(app: &mut App, trimmed: &str) -> bool {
 }
 
 pub(super) fn handle_disabled_mission_command(app: &mut App, trimmed: &str) -> bool {
-    if slash_command_rest(trimmed, "/mission").is_none()
-        && slash_command_rest(trimmed, "/goal").is_none()
-    {
+    // `/goal` is no longer handled here: it is a bundled, endorsed skill
+    // (.jcode/skills/goal) and must fall through to skill dispatch.
+    if slash_command_rest(trimmed, "/mission").is_none() {
         return false;
     }
 
     app.push_display_message(DisplayMessage::system(
-        "The /mission and /goal commands are disabled in this build.".to_string(),
+        "The /mission command is disabled in this build. Use /goal to set a durable initiative."
+            .to_string(),
     ));
     true
 }

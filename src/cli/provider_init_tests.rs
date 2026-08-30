@@ -33,6 +33,10 @@ fn test_provider_choice_arg_values() {
     assert_eq!(ProviderChoice::Openai.as_arg_value(), "openai");
     assert_eq!(ProviderChoice::OpenaiApi.as_arg_value(), "openai-api");
     assert_eq!(ProviderChoice::Openrouter.as_arg_value(), "openrouter");
+    assert_eq!(
+        ProviderChoice::VercelAiGateway.as_arg_value(),
+        "vercel-ai-gateway"
+    );
     assert_eq!(ProviderChoice::Bedrock.as_arg_value(), "bedrock");
     assert_eq!(ProviderChoice::Azure.as_arg_value(), "azure");
     assert_eq!(ProviderChoice::Opencode.as_arg_value(), "opencode");

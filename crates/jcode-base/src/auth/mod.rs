@@ -25,6 +25,7 @@ mod status_types;
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_sandbox;
 pub mod validation;
+pub mod xai;
 
 pub(crate) use commands::command_exists;
 #[cfg(test)]
@@ -437,6 +438,7 @@ impl AuthStatus {
                 ("gemini", self.gemini.label().to_string()),
                 ("cursor", self.cursor.label().to_string()),
                 ("grok_build", self.grok_build.label().to_string()),
+                ("xai_oauth", self.xai_oauth.label().to_string()),
             ],
         );
     }
@@ -470,6 +472,7 @@ impl AuthStatus {
             LoginProviderAuthStateKey::Gemini => self.gemini,
             LoginProviderAuthStateKey::Cursor => self.cursor,
             LoginProviderAuthStateKey::GrokBuild => self.grok_build,
+            LoginProviderAuthStateKey::XaiOauth => self.xai_oauth,
             LoginProviderAuthStateKey::Google => self.google,
         }
     }
@@ -535,6 +538,7 @@ impl AuthStatus {
                 }
             }
             crate::provider_catalog::LoginProviderTarget::GrokBuild => self.grok_build,
+            crate::provider_catalog::LoginProviderTarget::XaiOauth => self.xai_oauth,
             crate::provider_catalog::LoginProviderTarget::OpenAiCompatible(profile) => {
                 if crate::provider_catalog::openai_compatible_profile_is_configured(profile) {
                     AuthState::Available
@@ -613,6 +617,13 @@ impl AuthStatus {
                     "subscription login not configured (backend managed by Jcode)".to_string()
                 } else {
                     "not configured (Jcode downloads the provider backend during login)".to_string()
+                }
+            }
+            crate::provider_catalog::LoginProviderTarget::XaiOauth => {
+                if self.xai_oauth == AuthState::Available {
+                    "xAI Grok OAuth (device-code); SuperGrok/Premium+ subscription bearer refreshed automatically".to_string()
+                } else {
+                    "not configured (run login to authorize via auth.x.ai device code)".to_string()
                 }
             }
             crate::provider_catalog::LoginProviderTarget::OpenAiCompatible(profile) => {
@@ -857,8 +868,22 @@ impl AuthStatus {
                 AuthRefreshSupport::ExternalManaged,
                 AuthValidationMethod::CommandProbe,
             ),
+            crate::provider_catalog::LoginProviderTarget::XaiOauth => (
+                if state == AuthState::Available {
+                    AuthCredentialSource::JcodeManagedFile
+                } else {
+                    AuthCredentialSource::None
+                },
+                if state == AuthState::Available {
+                    "xAI Grok OAuth device-code login (~/.jcode/xai_oauth.json)".to_string()
+                } else {
+                    "xAI Grok OAuth not configured".to_string()
+                },
+                AuthExpiryConfidence::Exact,
+                AuthRefreshSupport::Automatic,
+                AuthValidationMethod::PresenceCheck,
+            ),
             crate::provider_catalog::LoginProviderTarget::OpenAiCompatible(profile) => {
-                // Prefer the active named config profile's credential location
                 // (set via `--provider-profile`) over the built-in profile env
                 // so the reported source matches what runtime actually uses (#402).
                 let (source, detail) = if let Some((key_env, env_file)) =
@@ -1006,6 +1031,21 @@ fn build_auth_status_uncached(mode: AuthProbeMode) -> (AuthStatus, Vec<(&'static
     record_auth_probe_step(&mut timings, "grok_build", || {
         status.grok_build = if grok_build::cli_available() && grok_build::has_cached_login() {
             AuthState::Available
+        } else {
+            AuthState::NotConfigured
+        }
+    });
+    record_auth_probe_step(&mut timings, "xai_oauth", || {
+        status.xai_oauth = if xai::has_cached_auth() {
+            refreshable_token_state(
+                "xai_oauth",
+                xai::load_tokens().map(|tokens| {
+                    (
+                        tokens.is_expired(),
+                        tokens.refresh_token.clone().unwrap_or_default(),
+                    )
+                }),
+            )
         } else {
             AuthState::NotConfigured
         }
@@ -1329,6 +1369,21 @@ fn assessment_for_key(
             AuthExpiryConfidence::Unknown,
             AuthRefreshSupport::ExternalManaged,
             AuthValidationMethod::CommandProbe,
+        ),
+        LoginProviderAuthStateKey::XaiOauth => (
+            if state == AuthState::Available {
+                AuthCredentialSource::JcodeManagedFile
+            } else {
+                AuthCredentialSource::None
+            },
+            if state == AuthState::Available {
+                "xAI Grok OAuth device-code login (~/.jcode/xai_oauth.json)".to_string()
+            } else {
+                "xAI Grok OAuth not configured".to_string()
+            },
+            AuthExpiryConfidence::Exact,
+            AuthRefreshSupport::Automatic,
+            AuthValidationMethod::PresenceCheck,
         ),
         LoginProviderAuthStateKey::Google => {
             let (source, detail) = summarize_sources(vec![google_source()]);

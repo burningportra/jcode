@@ -106,6 +106,28 @@ pub struct GoalUpdate {
     pub summary: String,
 }
 
+/// One APR-style plan-refinement pass recorded against a goal. Captures the
+/// convergence trail (lens, score, gaps found/resolved, optional reviewer model)
+/// so the quality progression survives beyond the free-text update log.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PlanReview {
+    pub at: DateTime<Utc>,
+    /// 1-based pass number in the refinement loop.
+    pub pass: u32,
+    /// The review lens, e.g. "architecture", "edge-cases", "security".
+    pub lens: String,
+    /// Quality score 0-100 after this pass (clamped on construction).
+    pub score: u8,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub gaps: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub resolved: Vec<String>,
+    /// Reviewer model when a cross-model reviewer produced this pass (APR's key
+    /// move); None for a same-session self-review.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reviewer_model: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Goal {
     pub id: String,
@@ -134,6 +156,8 @@ pub struct Goal {
     pub updated_at: DateTime<Utc>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub updates: Vec<GoalUpdate>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reviews: Vec<PlanReview>,
 }
 
 impl Goal {
@@ -156,6 +180,7 @@ impl Goal {
             created_at: now,
             updated_at: now,
             updates: Vec::new(),
+            reviews: Vec::new(),
         }
     }
 

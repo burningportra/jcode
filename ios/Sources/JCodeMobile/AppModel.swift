@@ -37,7 +37,12 @@ final class AppModel {
 
     // MARK: - Pairing
 
-    func pair(gateway: Gateway, code: String, deviceName: String) async throws {
+    func pair(
+        gateway: Gateway,
+        code: String,
+        deviceName: String,
+        resumeSessionID: String? = nil
+    ) async throws {
         let client = PairingClient()
         let response = try await client.pair(
             gateway: gateway,
@@ -55,7 +60,7 @@ final class AppModel {
         store.save(credential)
         servers = store.loadAll()
         activeServer = credential
-        connect(to: credential)
+        connect(to: credential, sessionID: resumeSessionID)
     }
 
     func removeServer(_ credential: ServerCredential) {

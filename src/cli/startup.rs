@@ -227,6 +227,9 @@ pub fn register_external_provider_runtimes() {
             OpenRouterRuntimeSpec::CompatibleProfile(profile) => std::sync::Arc::new(
                 OpenRouterProvider::new_openai_compatible_profile_runtime(profile)?,
             ),
+            OpenRouterRuntimeSpec::XaiOauth => {
+                std::sync::Arc::new(OpenRouterProvider::new_xai_oauth_runtime()?)
+            }
             OpenRouterRuntimeSpec::NamedProfile { name, config } => std::sync::Arc::new(
                 OpenRouterProvider::new_named_openai_compatible(&name, &config)?,
             ),

@@ -157,6 +157,86 @@ pub fn update_goal(
     Ok(Some(goal))
 }
 
+/// Input for recording an APR-style plan-refinement pass against a goal.
+#[derive(Debug, Clone, Default)]
+pub struct GoalReviewInput {
+    pub pass: Option<u32>,
+    pub lens: String,
+    pub score: u8,
+    pub gaps: Vec<String>,
+    pub resolved: Vec<String>,
+    pub reviewer_model: Option<String>,
+    /// Optional free-text summary; also appended to the update log so the pass
+    /// shows up in the existing "Recent updates" trail.
+    pub summary: Option<String>,
+}
+
+/// Record a plan-refinement review pass on a goal. Appends a `PlanReview` (and a
+/// mirrored update-log line) and persists. Returns `None` if the goal does not
+/// exist. The pass number auto-increments from existing reviews when not given.
+pub fn record_review(
+    id: &str,
+    scope_hint: Option<GoalScope>,
+    working_dir: Option<&Path>,
+    review: GoalReviewInput,
+) -> Result<Option<Goal>> {
+    let Some(mut goal) = load_goal(id, scope_hint, working_dir)? else {
+        return Ok(None);
+    };
+
+    let lens = review.lens.trim();
+    if lens.is_empty() {
+        anyhow::bail!("review lens cannot be empty");
+    }
+    let pass = review.pass.unwrap_or_else(|| goal.reviews.len() as u32 + 1);
+    let score = review.score.min(100);
+    let now = Utc::now();
+
+    // Mirror the pass into the free-text update log so it appears in the
+    // existing "Recent updates" render, matching how the skill logs passes.
+    let reviewer = review
+        .reviewer_model
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let summary = review
+        .summary
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| {
+            let attribution = reviewer
+                .map(|m| format!(" [+review {}]", m))
+                .unwrap_or_default();
+            format!(
+                "pass {} ({}){}: score {}/100 — {} gap(s) found / {} resolved",
+                pass,
+                lens,
+                attribution,
+                score,
+                review.gaps.len(),
+                review.resolved.len()
+            )
+        });
+    goal.updates.push(GoalUpdate { at: now, summary });
+
+    goal.reviews.push(jcode_task_types::PlanReview {
+        at: now,
+        pass,
+        lens: lens.to_string(),
+        score,
+        gaps: trim_vec(review.gaps),
+        resolved: trim_vec(review.resolved),
+        reviewer_model: reviewer.map(str::to_string),
+    });
+
+    goal.updated_at = now;
+    save_goal(&goal, working_dir)?;
+    sync_goal_memory(&goal, working_dir)?;
+    Ok(Some(goal))
+}
+
 pub fn load_goal(
     id: &str,
     scope_hint: Option<GoalScope>,
@@ -482,8 +562,40 @@ pub fn render_goal_detail(goal: &Goal) -> String {
         }
         out.push('\n');
     }
+    if !goal.reviews.is_empty() {
+        out.push_str("## Plan review\n");
+        let scores: Vec<String> = goal.reviews.iter().map(|r| r.score.to_string()).collect();
+        out.push_str(&format!(
+            "Quality: {} (latest {}/100 after {} pass{})\n\n",
+            scores.join(" → "),
+            goal.reviews.last().map(|r| r.score).unwrap_or(0),
+            goal.reviews.len(),
+            if goal.reviews.len() == 1 { "" } else { "es" }
+        ));
+        for review in goal.reviews.iter().rev().take(8) {
+            let attribution = review
+                .reviewer_model
+                .as_deref()
+                .map(|m| format!(" [+review {}]", m))
+                .unwrap_or_default();
+            out.push_str(&format!(
+                "- pass {} ({}){}: {}/100 — {} gap(s), {} resolved\n",
+                review.pass,
+                review.lens,
+                attribution,
+                review.score,
+                review.gaps.len(),
+                review.resolved.len()
+            ));
+        }
+        out.push('\n');
+    }
     if !goal.updates.is_empty() {
         out.push_str("## Recent updates\n");
+        out.push_str(
+            "_History, newest first. The sections above are the current plan; \
+             older entries here may describe superseded designs._\n",
+        );
         for update in goal.updates.iter().rev().take(8) {
             out.push_str(&format!(
                 "- {}: {}\n",
@@ -508,6 +620,83 @@ fn should_focus_goal_page(session_id: &str, page_id: &str) -> Result<bool> {
 fn save_goal(goal: &Goal, working_dir: Option<&Path>) -> Result<()> {
     let path = goal_file(goal, working_dir)?;
     crate::storage::write_json_fast(&path, goal)
+}
+
+/// Delete a goal and all of its derived artifacts.
+///
+/// A goal is not a single file: creating/updating one also mirrors it into the
+/// memory graph (`goal:<id>`), a session may hold an attachment pointing at it,
+/// and the side panel may show a page for it. Deletion removes all of these.
+///
+/// Ordering is deliberate: the derived/cosmetic mirrors (side-panel page, memory
+/// entry, session attachment) are removed first on a best-effort basis, and the
+/// goal JSON file (the source of truth) is removed LAST. This gives exactly one
+/// point of no return: until the JSON is gone the goal is still loadable, so a
+/// failure in an earlier best-effort step never leaves a half-deleted goal that
+/// cannot be retried.
+///
+/// Idempotent: missing artifacts at any step are ignored. Returns `Ok(Some)`
+/// with the deleted goal, or `Ok(None)` if no goal with `id` existed.
+pub fn delete_goal(
+    id: &str,
+    scope_hint: Option<GoalScope>,
+    working_dir: Option<&Path>,
+    session_id: Option<&str>,
+) -> Result<Option<Goal>> {
+    let Some(goal) = load_goal(id, scope_hint, working_dir)? else {
+        return Ok(None);
+    };
+
+    // 1. Best-effort: remove the side-panel page for this goal (if any session
+    //    is showing one). delete_page errors when the page is absent, so only
+    //    call it when the page exists in that session's snapshot.
+    if let Some(session_id) = session_id {
+        let page_id = goal_page_id(&goal.id);
+        if let Ok(snapshot) = crate::side_panel::snapshot_for_session(session_id)
+            && snapshot.pages.iter().any(|page| page.id == page_id)
+        {
+            let _ = crate::side_panel::delete_page(session_id, &page_id);
+        }
+        let _ = refresh_goals_overview_for_session(session_id, working_dir);
+    }
+
+    // 2. Best-effort: forget the mirrored memory entry, on the scope-matched
+    //    manager (mirror of sync_goal_memory).
+    {
+        use crate::memory::MemoryManager;
+        let manager = match goal.scope {
+            GoalScope::Project => working_dir.map(|dir| MemoryManager::new().with_project_dir(dir)),
+            GoalScope::Global => Some(MemoryManager::new()),
+        };
+        if let Some(manager) = manager {
+            let _ = manager.forget(&goal_memory_id(&goal));
+        }
+    }
+
+    // 3. Best-effort: clear the CURRENT session's attachment iff it points at
+    //    this goal. Never touch other sessions' attachments; they resolve to
+    //    None via load_attached_goal once the JSON is gone.
+    if let Some(session_id) = session_id
+        && let Ok(path) = session_attachment_path(session_id)
+        && path.exists()
+        && let Ok(attachment) = crate::storage::read_json::<GoalAttachment>(&path)
+        && attachment.goal_id == goal.id
+    {
+        let _ = std::fs::remove_file(&path);
+    }
+
+    // 4. Point of no return: remove the goal JSON file (source of truth) last.
+    let path = goal_file(&goal, working_dir)?;
+    match std::fs::remove_file(&path) {
+        Ok(()) => {}
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+        Err(err) => {
+            return Err(err)
+                .with_context(|| format!("failed to delete goal file {}", path.display()));
+        }
+    }
+
+    Ok(Some(goal))
 }
 
 fn goal_file(goal: &Goal, working_dir: Option<&Path>) -> Result<PathBuf> {

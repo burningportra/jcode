@@ -734,6 +734,13 @@ pub const ENDORSED_SKILLS: &[EndorsedSkill] = &[
         install: None,
     },
     EndorsedSkill {
+        name: "goal",
+        description: "Set a goal as a durable initiative and let its plan converge through adversarial review passes with typed underspecification checks (APR-style) before implementing.",
+        category: "jcode",
+        source: "bundled in jcode repo (.jcode/skills/goal)",
+        install: None,
+    },
+    EndorsedSkill {
         name: "todo-planning-skill",
         description: "Create thorough, well-structured todo lists for long tasks, including reflection, static analysis, verification, and next-step updates.",
         category: "jcode",

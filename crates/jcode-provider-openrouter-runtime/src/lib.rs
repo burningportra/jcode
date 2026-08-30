@@ -444,6 +444,11 @@ enum ProviderAuth {
     AzureEntra {
         label: String,
     },
+    /// xAI Grok OAuth (device-code): the bearer is refreshed from
+    /// ~/.jcode/xai_oauth.json at request time, mirroring AzureEntra.
+    XaiOauth {
+        label: String,
+    },
     None {
         label: String,
     },
@@ -460,6 +465,10 @@ impl ProviderAuth {
                 let token = jcode_base::auth::azure::get_bearer_token().await?;
                 Ok(req.bearer_auth(token))
             }
+            Self::XaiOauth { .. } => {
+                let token = jcode_base::auth::xai::resolve_bearer().await?;
+                Ok(req.bearer_auth(token))
+            }
             Self::None { .. } => Ok(req),
         }
     }
@@ -469,6 +478,7 @@ impl ProviderAuth {
             Self::AuthorizationBearer { label, .. } => label,
             Self::HeaderValue { label, .. } => label,
             Self::AzureEntra { label } => label,
+            Self::XaiOauth { label } => label,
             Self::None { label } => label,
         }
     }
@@ -1216,6 +1226,9 @@ impl OpenRouterProvider {
             if let Some(profile) = openai_compatible_profile_by_id(profile_id) {
                 return profile.display_name.to_string();
             }
+            if profile_id == jcode_base::provider::external::XAI_OAUTH_RUNTIME {
+                return "xAI Grok OAuth".to_string();
+            }
             return profile_id.to_string();
         }
 
@@ -1264,7 +1277,13 @@ impl OpenRouterProvider {
             .map(|profile_id| {
                 openai_compatible_profile_by_id(profile_id)
                     .map(|profile| profile.display_name.to_string())
-                    .unwrap_or_else(|| profile_id.to_string())
+                    .unwrap_or_else(|| {
+                        if profile_id == jcode_base::provider::external::XAI_OAUTH_RUNTIME {
+                            "xAI Grok OAuth".to_string()
+                        } else {
+                            profile_id.to_string()
+                        }
+                    })
             })
             .unwrap_or_else(|| "OpenAI-compatible".to_string());
         let api_method = self
@@ -1739,6 +1758,57 @@ impl OpenRouterProvider {
             extra_body: Self::resolve_extra_body(None, &resolved.env_file),
             static_models,
             static_context_limits,
+            static_image_input_support: HashMap::new(),
+            send_openrouter_headers: false,
+            models_cache: Arc::new(RwLock::new(ModelsCache::default())),
+            model_catalog_refresh: Arc::new(Mutex::new(ModelCatalogRefreshState::default())),
+            provider_routing: Arc::new(RwLock::new(ProviderRouting::default())),
+            provider_pin: Arc::new(Mutex::new(None)),
+            endpoints_cache: Arc::new(RwLock::new(HashMap::new())),
+            endpoint_refresh: Arc::new(Mutex::new(EndpointRefreshTracker::default())),
+        })
+    }
+
+    /// xAI Grok OAuth (device-code) runtime. Reuses the OpenAI-compatible
+    /// transport against `https://api.x.ai/v1`, but resolves its bearer from
+    /// ~/.jcode/xai_oauth.json at request time (like AzureEntra) instead of an
+    /// API key. Distinct runtime identity from the API-key `xai` profile.
+    pub fn new_xai_oauth_runtime() -> Result<Self> {
+        if !jcode_base::auth::xai::has_cached_auth() {
+            anyhow::bail!(
+                "xAI Grok OAuth is selected, but no login is stored. Run `jcode login --provider xai-oauth`."
+            );
+        }
+        let api_base = normalize_api_base(jcode_base::auth::xai::XAI_OAUTH_API_BASE)
+            .unwrap_or_else(|| jcode_base::auth::xai::XAI_OAUTH_API_BASE.to_string());
+        let static_models: Vec<String> = jcode_base::auth::xai::XAI_OAUTH_STATIC_MODELS
+            .iter()
+            .map(|model| (*model).to_string())
+            .collect();
+        let model = std::env::var("JCODE_OPENROUTER_MODEL")
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| jcode_base::auth::xai::XAI_OAUTH_DEFAULT_MODEL.to_string());
+
+        Ok(Self {
+            client: jcode_provider_core::shared_http_client(),
+            model: Arc::new(RwLock::new(model)),
+            reasoning_effort: Arc::new(RwLock::new(None)),
+            api_base,
+            auth: ProviderAuth::XaiOauth {
+                label: "xAI Grok OAuth".to_string(),
+            },
+            supports_provider_features: false,
+            supports_model_catalog: true,
+            profile_id: Some(jcode_base::provider::external::XAI_OAUTH_RUNTIME.to_string()),
+            reasoning_effort_support: None,
+            disable_reasoning_heuristics: false,
+            static_reasoning_config: HashMap::new(),
+            max_tokens: Self::configured_max_tokens(None),
+            extra_body: Self::resolve_extra_body(None, DEFAULT_ENV_FILE),
+            static_models,
+            static_context_limits: HashMap::new(),
             static_image_input_support: HashMap::new(),
             send_openrouter_headers: false,
             models_cache: Arc::new(RwLock::new(ModelsCache::default())),
@@ -2375,6 +2445,12 @@ impl OpenRouterProvider {
         ) {
             return jcode_base::auth::azure::has_configuration();
         }
+        if matches!(
+            configured_dynamic_bearer_provider().as_deref(),
+            Some("xai-oauth")
+        ) {
+            return jcode_base::auth::xai::has_cached_auth();
+        }
         if configured_allow_no_auth() {
             return true;
         }
@@ -2392,6 +2468,17 @@ impl OpenRouterProvider {
                     } else {
                         anyhow::bail!(
                             "Azure OpenAI is configured for Entra ID, but Azure settings are incomplete. Run `jcode login --provider azure`."
+                        )
+                    }
+                }
+                "xai-oauth" => {
+                    if jcode_base::auth::xai::has_cached_auth() {
+                        Ok(ProviderAuth::XaiOauth {
+                            label: "xAI Grok OAuth".to_string(),
+                        })
+                    } else {
+                        anyhow::bail!(
+                            "xAI Grok OAuth is selected, but no login is stored. Run `jcode login --provider xai-oauth`."
                         )
                     }
                 }

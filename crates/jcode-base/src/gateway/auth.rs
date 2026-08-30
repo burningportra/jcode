@@ -2,13 +2,27 @@
 pub(super) struct WsAuth {
     pub(super) token: String,
     pub(super) source: WsAuthSource,
+    /// Subprotocol the server must echo in the handshake response, set only when
+    /// the client authenticated via `Sec-WebSocket-Protocol`. A browser that
+    /// offered subprotocols expects the server to select one it can accept.
+    pub(super) selected_protocol: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum WsAuthSource {
     Header,
     Query,
+    /// Token carried in `Sec-WebSocket-Protocol` as `jcode.bearer.<token>`.
+    /// This is the browser-friendly path: `new WebSocket()` cannot set an
+    /// Authorization header, and this keeps the token out of the URL (and thus
+    /// out of URL-based server/proxy logs and browser history).
+    Subprotocol,
 }
+
+/// The non-secret subprotocol a browser offers alongside the bearer token so the
+/// server has something safe to echo back in the handshake response.
+pub(super) const WS_ECHO_PROTOCOL: &str = "jcode.v1";
+const WS_BEARER_PREFIX: &str = "jcode.bearer.";
 
 #[expect(
     clippy::result_large_err,
@@ -33,21 +47,38 @@ pub(super) fn extract_ws_auth(
     };
     let query_token = request.uri().query().and_then(parse_query_token);
 
-    let (token, source) = match (header_token, query_token) {
-        (Some(header), Some(query)) if header != query => {
+    // Sec-WebSocket-Protocol may list several protocols; find the bearer one and
+    // remember whether the client also offered the safe echo protocol.
+    let subprotocol_header = request
+        .headers()
+        .get("sec-websocket-protocol")
+        .and_then(|value| value.to_str().ok());
+    let subprotocol_token = subprotocol_header.and_then(parse_subprotocol_token);
+    let offers_echo_protocol = subprotocol_header
+        .map(|header| {
+            header
+                .split(',')
+                .any(|p| p.trim() == WS_ECHO_PROTOCOL)
+        })
+        .unwrap_or(false);
+
+    let (token, source) = match (header_token, query_token, subprotocol_token) {
+        // Any two present-and-different sources is a conflict.
+        (Some(a), Some(b), _) | (Some(a), _, Some(b)) | (_, Some(a), Some(b)) if a != b => {
             return Err(ws_error_response(
                 401,
                 "Unauthorized",
                 "Conflicting auth token sources",
             ));
         }
-        (Some(header), _) => (header, WsAuthSource::Header),
-        (None, Some(query)) => (query, WsAuthSource::Query),
-        (None, None) => {
+        (Some(header), _, _) => (header, WsAuthSource::Header),
+        (None, _, Some(sub)) => (sub, WsAuthSource::Subprotocol),
+        (None, Some(query), None) => (query, WsAuthSource::Query),
+        (None, None, None) => {
             return Err(ws_error_response(
                 401,
                 "Unauthorized",
-                "Missing Authorization header or token query parameter",
+                "Missing Authorization header, Sec-WebSocket-Protocol bearer, or token query parameter",
             ));
         }
     };
@@ -60,9 +91,16 @@ pub(super) fn extract_ws_auth(
         ));
     }
 
+    let selected_protocol = if source == WsAuthSource::Subprotocol && offers_echo_protocol {
+        Some(WS_ECHO_PROTOCOL.to_string())
+    } else {
+        None
+    };
+
     Ok(WsAuth {
         token: token.to_string(),
         source,
+        selected_protocol,
     })
 }
 
@@ -80,6 +118,24 @@ pub(crate) fn parse_bearer_token(header_value: &str) -> Option<&str> {
         return None;
     }
     Some(token)
+}
+
+/// Extract the bearer token from a `Sec-WebSocket-Protocol` header value.
+///
+/// The browser offers `jcode.bearer.<token>` (optionally with other protocols,
+/// comma-separated). Returns the token, or `None` if no bearer protocol is
+/// present. The token protocol itself is never echoed back to the client, so the
+/// secret does not appear in the handshake response.
+pub(crate) fn parse_subprotocol_token(header_value: &str) -> Option<&str> {
+    for proto in header_value.split(',') {
+        let proto = proto.trim();
+        if let Some(token) = proto.strip_prefix(WS_BEARER_PREFIX)
+            && !token.is_empty()
+        {
+            return Some(token);
+        }
+    }
+    None
 }
 
 pub(crate) fn parse_query_token(query: &str) -> Option<&str> {

@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; connect-src 'self' ws: wss:; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; manifest-src 'self'" />
+  <title>jcode remote</title>
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <meta name="theme-color" content="#0b0d10" />
+  <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="/icon.svg" />
+  <link rel="stylesheet" href="/app.css" />
+</head>
+<body>
+  <header id="bar">
+    <span id="dot" class="dot" title="connection"></span>
+    <span id="status">starting</span>
+    <span id="session" class="muted"></span>
+  </header>
+  <main id="transcript" aria-live="polite"></main>
+  <form id="composer" autocomplete="off">
+    <textarea id="input" rows="1" placeholder="Message this session..." enterkeyhint="send"></textarea>
+    <button id="send" type="submit" title="Send">Send</button>
+    <button id="interrupt" type="button" title="Interrupt the running turn" hidden>Stop</button>
+  </form>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

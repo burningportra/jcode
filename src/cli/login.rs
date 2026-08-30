@@ -298,6 +298,9 @@ pub async fn run_login_provider(
             LoginProviderTarget::GrokBuild => login_grok_build_flow()
                 .await
                 .map(|_| LoginFlowOutcome::Completed),
+            LoginProviderTarget::XaiOauth => login_xai_oauth_flow(options.no_browser)
+                .await
+                .map(|_| LoginFlowOutcome::Completed),
             LoginProviderTarget::OpenRouter => {
                 login_openrouter_flow().map(|_| LoginFlowOutcome::Completed)
             }
@@ -425,6 +428,34 @@ async fn login_grok_build_flow() -> Result<()> {
     if !status.success() {
         anyhow::bail!("`{} login` exited with status {status}", cli.display());
     }
+    Ok(())
+}
+
+async fn login_xai_oauth_flow(no_browser: bool) -> Result<()> {
+    eprintln!("Starting xAI Grok OAuth login (device-code flow).");
+    eprintln!(
+        "This signs in with your SuperGrok / X Premium+ subscription, not an xAI API key."
+    );
+    eprintln!(
+        "If browser launch fails, or you pass `--no-browser`, jcode prints the verification URL and code to enter manually."
+    );
+    eprintln!();
+
+    let tokens = crate::auth::xai::login(crate::auth::xai::LoginOptions {
+        no_browser,
+        print_only: false,
+    })
+    .await?;
+
+    eprintln!("Successfully logged in to xAI Grok!");
+    eprintln!(
+        "Tokens saved to {}",
+        crate::auth::xai::tokens_path()?.display()
+    );
+    if let Some(scope) = tokens.scope.as_deref() {
+        eprintln!("Granted scope: {}", scope);
+    }
+    crate::telemetry::record_auth_success("xai-oauth", "oauth");
     Ok(())
 }
 

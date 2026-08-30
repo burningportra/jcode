@@ -1043,7 +1043,7 @@ fn test_goals_command_opens_overview_in_side_panel() {
 }
 
 #[test]
-fn test_mission_and_goal_commands_are_disabled() {
+fn test_mission_command_is_disabled_but_goal_reaches_skill_dispatch() {
     let _guard = crate::storage::lock_test_env();
     let temp = tempfile::tempdir().expect("tempdir");
     let prev_home = std::env::var_os("JCODE_HOME");
@@ -1068,22 +1068,10 @@ fn test_mission_and_goal_commands_are_disabled() {
         "/mission must not create a mission"
     );
 
-    app.input = "/goal status".to_string();
-    app.submit_input();
-    assert!(!app.is_processing, "/goal must not start a turn");
+    // `/goal` is a bundled skill; the legacy disabled handler must not claim it.
     assert!(
-        !app.pending_queued_dispatch,
-        "/goal must not queue dispatch"
-    );
-    assert!(
-        app.queued_messages.is_empty(),
-        "/goal must not queue prompts"
-    );
-    assert!(
-        crate::mission::load(&app.session.id)
-            .expect("load mission")
-            .is_none(),
-        "/goal must not create a mission"
+        !crate::tui::app::commands::handle_disabled_mission_command(&mut app, "/goal status"),
+        "/goal must fall through to skill dispatch"
     );
 
     if let Some(prev_home) = prev_home {

@@ -146,6 +146,10 @@ const REGISTERED_COMMANDS: &[RegisteredCommand] = &[
         "/skills",
         "Show loaded skills and jcode-endorsed recommendations",
     ),
+    RegisteredCommand::public(
+        "/learning",
+        "Review repeated workflows suggested as reusable skills",
+    ),
     RegisteredCommand::public("/version", "Show current version"),
     RegisteredCommand::public("/changelog", "Show recent changes in this build"),
     RegisteredCommand::public("/info", "Show session info and tokens"),

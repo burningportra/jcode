@@ -1211,6 +1211,9 @@ pub(in crate::tui::app) fn handle_server_event(
                     ));
                 }
             }
+            if completed_current_message {
+                app.refresh_learning_inbox_after_turn();
+            }
             completed_current_message || auto_poked
         }
         ServerEvent::Error {

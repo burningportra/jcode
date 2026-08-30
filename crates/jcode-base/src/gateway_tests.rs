@@ -75,6 +75,52 @@ fn test_parse_query_token() {
 }
 
 #[test]
+fn test_parse_subprotocol_token() {
+    use super::auth::parse_subprotocol_token;
+    assert_eq!(
+        parse_subprotocol_token("jcode.bearer.abc123"),
+        Some("abc123")
+    );
+    // Real browser form: bearer protocol plus the echo protocol, comma-separated.
+    assert_eq!(
+        parse_subprotocol_token("jcode.bearer.deadbeef, jcode.v1"),
+        Some("deadbeef")
+    );
+    assert_eq!(parse_subprotocol_token("jcode.v1"), None);
+    assert_eq!(parse_subprotocol_token("jcode.bearer."), None);
+    assert_eq!(parse_subprotocol_token(""), None);
+}
+
+#[test]
+fn test_extract_ws_auth_accepts_subprotocol_bearer_and_selects_echo() {
+    let token = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    let request = Request::builder()
+        .uri("ws://example.com/ws")
+        .header(
+            "sec-websocket-protocol",
+            format!("jcode.bearer.{token}, jcode.v1"),
+        )
+        .body(())
+        .expect("request");
+    let auth = extract_ws_auth(&request).expect("subprotocol auth");
+    assert_eq!(auth.token, token);
+    assert_eq!(auth.source, super::auth::WsAuthSource::Subprotocol);
+    // The server must echo the non-secret protocol, never the bearer token one.
+    assert_eq!(
+        auth.selected_protocol.as_deref(),
+        Some(super::auth::WS_ECHO_PROTOCOL)
+    );
+    assert!(
+        !auth
+            .selected_protocol
+            .as_deref()
+            .unwrap_or_default()
+            .contains(token),
+        "the echoed protocol must never contain the secret token"
+    );
+}
+
+#[test]
 fn test_hex_token_validation() {
     assert!(is_valid_hex_token(
         "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
@@ -167,4 +213,279 @@ fn test_authorize_ws_device_rejects_unknown_and_revoked_with_401() {
     let err =
         auth::authorize_ws_device(&registry, &token).expect_err("revoked token must be rejected");
     assert_eq!(err.status(), 401);
+}
+
+/// The PWA asset server must never capture the API/WS paths, or serving the web
+/// app would silently break pairing, health, and the WebSocket upgrade. This is
+/// the load-bearing non-regression guarantee for M2.
+#[test]
+fn test_asset_server_never_shadows_api_paths() {
+    assert!(super::web_assets::serve_asset("/health").is_none());
+    assert!(super::web_assets::serve_asset("/pair").is_none());
+    assert!(super::web_assets::serve_asset("/ws").is_none());
+    // But it does serve the app shell and its assets.
+    assert!(super::web_assets::serve_asset("/").is_some());
+    assert!(super::web_assets::serve_asset("/app.js").is_some());
+    assert!(super::web_assets::serve_asset("/service-worker.js").is_some());
+    assert!(super::web_assets::serve_asset("/manifest.webmanifest").is_some());
+}
+
+/// End-to-end HTTP: bind an ephemeral port, run the real connection router, and
+/// make real TCP requests. Proves the gateway actually serves the PWA over the
+/// wire AND that adding asset routes did not regress /health or the 404 path.
+#[tokio::test]
+async fn test_gateway_http_serves_pwa_and_preserves_api() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::{TcpListener, TcpStream};
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    let (client_tx, _client_rx) = tokio::sync::mpsc::unbounded_channel::<super::GatewayClient>();
+    let registry = std::sync::Arc::new(tokio::sync::RwLock::new(DeviceRegistry::default()));
+
+    // Accept loop: one connection per request (each request uses Connection: close).
+    tokio::spawn(async move {
+        loop {
+            let Ok((stream, peer)) = listener.accept().await else {
+                break;
+            };
+            let registry = std::sync::Arc::clone(&registry);
+            let client_tx = client_tx.clone();
+            tokio::spawn(async move {
+                let _ = super::handle_connection(stream, peer, registry, client_tx).await;
+            });
+        }
+    });
+
+    async fn request(addr: std::net::SocketAddr, raw: &str) -> String {
+        let mut stream = TcpStream::connect(addr).await.expect("connect");
+        stream.write_all(raw.as_bytes()).await.expect("write");
+        stream.flush().await.expect("flush");
+        let mut buf = Vec::new();
+        stream.read_to_end(&mut buf).await.expect("read");
+        String::from_utf8_lossy(&buf).into_owned()
+    }
+
+    // GET / serves the PWA shell as HTML.
+    let root = request(addr, "GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n").await;
+    assert!(root.starts_with("HTTP/1.1 200 OK"), "root status: {root:.40}");
+    assert!(root.contains("Content-Type: text/html"));
+    assert!(root.contains("<!DOCTYPE html>"));
+
+    // GET /app.js serves JavaScript, not JSON, in the header.
+    let js = request(addr, "GET /app.js HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n").await;
+    let js_header = js.split("\r\n\r\n").next().unwrap_or_default();
+    assert!(js_header.contains("Content-Type: text/javascript"));
+
+    // GET /health is UNCHANGED: still JSON with status ok.
+    let health =
+        request(addr, "GET /health HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n").await;
+    assert!(health.starts_with("HTTP/1.1 200 OK"));
+    assert!(health.contains("Content-Type: application/json"));
+    assert!(health.contains("\"status\":\"ok\""));
+
+    // An unknown path still 404s.
+    let missing =
+        request(addr, "GET /nope HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n").await;
+    assert!(missing.starts_with("HTTP/1.1 404"));
+}
+
+/// The browser client authenticates the WebSocket via `?token=` (it cannot set
+/// an Authorization header). This test proves that path end to end: pair a
+/// device, open a real `ws://.../ws?token=<hex>` connection, send a `subscribe`
+/// line the way the PWA does, and confirm it arrives on the server-side bridge
+/// stream that `handle_client` would consume. This is the WS half that the
+/// HTTP-only asset test does not cover.
+#[tokio::test]
+async fn test_gateway_ws_token_auth_bridges_browser_subscribe() {
+    use tokio::io::AsyncReadExt;
+    use tokio::net::TcpListener;
+    use tokio_tungstenite::connect_async;
+    use tokio_tungstenite::tungstenite::Message;
+    use futures::SinkExt;
+
+    // Isolate devices.json under a temp JCODE_HOME so we never touch the real
+    // registry. The gateway reloads DeviceRegistry from disk at handshake time,
+    // so the paired device must be persisted there.
+    let _env = crate::storage::lock_test_env();
+    let temp = tempfile::tempdir().expect("tempdir");
+    let prev_home = std::env::var_os("JCODE_HOME");
+    // SAFETY: guarded by lock_test_env so no other test mutates env concurrently.
+    unsafe {
+        std::env::set_var("JCODE_HOME", temp.path());
+    }
+
+    // Pair a device and persist it to the isolated registry on disk.
+    let token = {
+        let mut reg = DeviceRegistry::load();
+        let t = reg.pair_device("web-test".to_string(), "Web browser".to_string(), None);
+        reg.save().expect("save registry");
+        t
+    };
+    assert_eq!(token.len(), 64, "pair token should be 64 hex chars");
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    let (client_tx, mut client_rx) =
+        tokio::sync::mpsc::unbounded_channel::<super::GatewayClient>();
+    let registry = std::sync::Arc::new(tokio::sync::RwLock::new(DeviceRegistry::load()));
+
+    tokio::spawn(async move {
+        if let Ok((stream, peer)) = listener.accept().await {
+            let _ = super::handle_connection(stream, peer, registry, client_tx).await;
+        }
+    });
+
+    // Connect exactly like the browser would over the bridge. We use the
+    // `?token=` path here because the tungstenite *client* in this test does not
+    // register subprotocols the way a browser does; the subprotocol auth path is
+    // proven at the unit level (test_extract_ws_auth_accepts_subprotocol_bearer_
+    // and_selects_echo) and at the raw-handshake level
+    // (test_gateway_ws_subprotocol_handshake_echoes_safe_protocol_not_token).
+    let url = format!("ws://{addr}/ws?token={token}");
+    let (mut ws, _resp) = connect_async(&url).await.expect("ws handshake accepted");
+
+    // The gateway hands a server-side bridge stream to handle_client via the
+    // channel as soon as the handshake completes.
+    let mut client = tokio::time::timeout(std::time::Duration::from_secs(5), client_rx.recv())
+        .await
+        .expect("gateway produced a client before timeout")
+        .expect("client present");
+    assert_eq!(client.device_name, "Web browser");
+
+    // Send a subscribe request the way wire.js does (single JSON line).
+    let subscribe = r#"{"id":1,"type":"subscribe"}"#;
+    ws.send(Message::Text(subscribe.to_string()))
+        .await
+        .expect("send subscribe");
+
+    // Read it off the server-side bridge stream: the browser's bytes must arrive
+    // as a newline-delimited line, proving the WS<->protocol bridge works.
+    let mut buf = [0u8; 256];
+    let n = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        client.stream.read(&mut buf),
+    )
+    .await
+    .expect("read before timeout")
+    .expect("read ok");
+    let got = String::from_utf8_lossy(&buf[..n]);
+    assert!(
+        got.contains("\"type\":\"subscribe\""),
+        "bridge should deliver the subscribe line, got: {got:?}"
+    );
+    assert!(got.ends_with('\n'), "bridge should newline-delimit, got: {got:?}");
+
+    // Restore env.
+    // SAFETY: still under lock_test_env.
+    unsafe {
+        match prev_home {
+            Some(v) => std::env::set_var("JCODE_HOME", v),
+            None => std::env::remove_var("JCODE_HOME"),
+        }
+    }
+}
+
+/// A revoked/unknown token must be rejected at the WS handshake with a 401, so
+/// the browser sees an auth failure it can react to rather than a silent drop.
+#[tokio::test]
+async fn test_gateway_ws_rejects_bad_token_at_handshake() {
+    use tokio::net::TcpListener;
+    use tokio_tungstenite::connect_async;
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    let (client_tx, _client_rx) = tokio::sync::mpsc::unbounded_channel::<super::GatewayClient>();
+    let registry = std::sync::Arc::new(tokio::sync::RwLock::new(DeviceRegistry::default()));
+
+    tokio::spawn(async move {
+        if let Ok((stream, peer)) = listener.accept().await {
+            let _ = super::handle_connection(stream, peer, registry, client_tx).await;
+        }
+    });
+
+    // 64 hex chars but never paired -> unknown token.
+    let bogus = "a".repeat(64);
+    let url = format!("ws://{addr}/ws?token={bogus}");
+    let result = connect_async(&url).await;
+    assert!(result.is_err(), "unknown token must fail the handshake");
+}
+
+/// Raw-socket proof of the browser-safe subprotocol auth: a paired device
+/// offering `jcode.bearer.<token>, jcode.v1` gets a 101 upgrade whose
+/// `Sec-WebSocket-Protocol` response header is exactly `jcode.v1` and never
+/// contains the secret token. This is the security property the feature exists
+/// for, verified at the byte level (the tungstenite client cannot express it).
+#[tokio::test]
+async fn test_gateway_ws_subprotocol_handshake_echoes_safe_protocol_not_token() {
+    use base64::Engine;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::{TcpListener, TcpStream};
+
+    let _env = crate::storage::lock_test_env();
+    let temp = tempfile::tempdir().expect("tempdir");
+    let prev_home = std::env::var_os("JCODE_HOME");
+    // SAFETY: guarded by lock_test_env.
+    unsafe {
+        std::env::set_var("JCODE_HOME", temp.path());
+    }
+
+    let token = {
+        let mut reg = DeviceRegistry::load();
+        let t = reg.pair_device("web".to_string(), "Web".to_string(), None);
+        reg.save().expect("save");
+        t
+    };
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    let (client_tx, _rx) = tokio::sync::mpsc::unbounded_channel::<super::GatewayClient>();
+    let registry = std::sync::Arc::new(tokio::sync::RwLock::new(DeviceRegistry::load()));
+    tokio::spawn(async move {
+        if let Ok((stream, peer)) = listener.accept().await {
+            let _ = super::handle_connection(stream, peer, registry, client_tx).await;
+        }
+    });
+
+    // Hand-write the WebSocket upgrade the way a browser does, with the token in
+    // Sec-WebSocket-Protocol rather than the URL.
+    let key = base64::engine::general_purpose::STANDARD.encode([0u8; 16]);
+    let req = format!(
+        "GET /ws HTTP/1.1\r\nHost: {addr}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\
+         Sec-WebSocket-Version: 13\r\nSec-WebSocket-Key: {key}\r\n\
+         Sec-WebSocket-Protocol: jcode.bearer.{token}, jcode.v1\r\n\r\n"
+    );
+    let mut stream = TcpStream::connect(addr).await.expect("connect");
+    stream.write_all(req.as_bytes()).await.expect("write");
+    stream.flush().await.expect("flush");
+
+    // Read the response head.
+    let mut buf = vec![0u8; 1024];
+    let n = tokio::time::timeout(std::time::Duration::from_secs(5), stream.read(&mut buf))
+        .await
+        .expect("read timeout")
+        .expect("read");
+    let resp = String::from_utf8_lossy(&buf[..n]);
+
+    assert!(
+        resp.starts_with("HTTP/1.1 101"),
+        "expected a 101 upgrade, got: {resp:?}"
+    );
+    // The security property: the response echoes only the safe protocol.
+    assert!(
+        resp.to_lowercase().contains("sec-websocket-protocol: jcode.v1"),
+        "server should echo jcode.v1, got: {resp:?}"
+    );
+    assert!(
+        !resp.contains(&token),
+        "the secret token must NEVER appear in the handshake response"
+    );
+
+    // SAFETY: still under lock_test_env.
+    unsafe {
+        match prev_home {
+            Some(v) => std::env::set_var("JCODE_HOME", v),
+            None => std::env::remove_var("JCODE_HOME"),
+        }
+    }
 }

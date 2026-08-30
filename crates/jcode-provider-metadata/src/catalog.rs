@@ -107,6 +107,20 @@ pub const ORCAROUTER_PROFILE: OpenAiCompatibleProfile = OpenAiCompatibleProfile 
     requires_api_key: true,
 };
 
+pub const VERCEL_AI_GATEWAY_PROFILE: OpenAiCompatibleProfile = OpenAiCompatibleProfile {
+    id: "vercel-ai-gateway",
+    display_name: "Vercel AI Gateway",
+    api_base: "https://ai-gateway.vercel.sh/v1",
+    api_key_env: "AI_GATEWAY_API_KEY",
+    env_file: "vercel-ai-gateway.env",
+    setup_url: "https://vercel.com/docs/ai-gateway",
+    // The gateway exposes models from multiple upstream providers. Let its live
+    // catalog determine the available and preferred model rather than pinning a
+    // provider-specific default here.
+    default_model: None,
+    requires_api_key: true,
+};
+
 // Anthropic and OpenAI also expose OpenAI-compatible `/v1/chat/completions`
 // endpoints, so they can be driven by `provider-doctor` /
 // `provider-test-coverage` as OpenAI-compatible profiles. These profile ids
@@ -454,7 +468,7 @@ pub const OPENAI_COMPAT_PROFILE: OpenAiCompatibleProfile = OpenAiCompatibleProfi
     requires_api_key: true,
 };
 
-pub(crate) const OPENAI_COMPAT_PROFILES: [OpenAiCompatibleProfile; 39] = [
+pub(crate) const OPENAI_COMPAT_PROFILES: [OpenAiCompatibleProfile; 40] = [
     OPENCODE_PROFILE,
     OPENCODE_GO_PROFILE,
     ZAI_PROFILE,
@@ -467,6 +481,7 @@ pub(crate) const OPENAI_COMPAT_PROFILES: [OpenAiCompatibleProfile; 39] = [
     CORTECS_PROFILE,
     OPENROUTER_OPENAI_COMPAT_PROFILE,
     ORCAROUTER_PROFILE,
+    VERCEL_AI_GATEWAY_PROFILE,
     ANTHROPIC_OPENAI_COMPAT_PROFILE,
     OPENAI_NATIVE_OPENAI_COMPAT_PROFILE,
     GEMINI_OPENAI_COMPAT_PROFILE,
@@ -603,6 +618,19 @@ pub const ORCAROUTER_LOGIN_PROVIDER: LoginProviderDescriptor = LoginProviderDesc
     recommended: false,
     target: LoginProviderTarget::OpenAiCompatible(ORCAROUTER_PROFILE),
     order: LoginProviderSurfaceOrder::new(Some(39), Some(39), Some(39), Some(39), Some(39)),
+};
+
+pub const VERCEL_AI_GATEWAY_LOGIN_PROVIDER: LoginProviderDescriptor = LoginProviderDescriptor {
+    id: "vercel-ai-gateway",
+    display_name: "Vercel AI Gateway",
+    auth_kind: LoginProviderAuthKind::ApiKey,
+    auth_state_key: LoginProviderAuthStateKey::OpenRouterLike,
+    auth_status_method: "API key",
+    aliases: &["vercel", "ai-gateway", "vercel-ai"],
+    menu_detail: "API key, OpenAI-compatible multi-provider gateway",
+    recommended: false,
+    target: LoginProviderTarget::OpenAiCompatible(VERCEL_AI_GATEWAY_PROFILE),
+    order: LoginProviderSurfaceOrder::new(Some(40), Some(40), Some(40), Some(40), Some(40)),
 };
 
 pub const BEDROCK_LOGIN_PROVIDER: LoginProviderDescriptor = LoginProviderDescriptor {
@@ -1003,6 +1031,23 @@ pub const GROK_BUILD_LOGIN_PROVIDER: LoginProviderDescriptor = LoginProviderDesc
     order: LoginProviderSurfaceOrder::new(Some(100), Some(100), Some(100), Some(100), Some(100)),
 };
 
+/// xAI Grok OAuth (SuperGrok / X Premium+) subscription login via the device
+/// code flow. Distinct from the API-key `xai` provider (which consumes
+/// `XAI_API_KEY`) and from `grok-build`. Aliases are chosen to not collide with
+/// `xai`'s aliases (x.ai/x-ai/grok).
+pub const XAI_OAUTH_LOGIN_PROVIDER: LoginProviderDescriptor = LoginProviderDescriptor {
+    id: "xai-oauth",
+    display_name: "xAI Grok OAuth (SuperGrok / X Premium+)",
+    auth_kind: LoginProviderAuthKind::OAuth,
+    auth_state_key: LoginProviderAuthStateKey::XaiOauth,
+    auth_status_method: "SuperGrok / X Premium+ OAuth",
+    aliases: &["grok-oauth", "x-ai-oauth", "xai-grok-oauth"],
+    menu_detail: "SuperGrok / X Premium+ subscription login",
+    recommended: false,
+    target: LoginProviderTarget::XaiOauth,
+    order: LoginProviderSurfaceOrder::new(Some(33), Some(33), Some(33), Some(33), Some(33)),
+};
+
 pub const NVIDIA_NIM_LOGIN_PROVIDER: LoginProviderDescriptor = LoginProviderDescriptor {
     id: "nvidia-nim",
     display_name: "NVIDIA NIM",
@@ -1177,7 +1222,7 @@ pub const GOOGLE_LOGIN_PROVIDER: LoginProviderDescriptor = LoginProviderDescript
     order: LoginProviderSurfaceOrder::new(Some(13), None, None, None, None),
 };
 
-pub(crate) const LOGIN_PROVIDERS: [LoginProviderDescriptor; 51] = [
+pub(crate) const LOGIN_PROVIDERS: [LoginProviderDescriptor; 53] = [
     AUTO_IMPORT_LOGIN_PROVIDER,
     CLAUDE_LOGIN_PROVIDER,
     ANTHROPIC_API_LOGIN_PROVIDER,
@@ -1186,6 +1231,7 @@ pub(crate) const LOGIN_PROVIDERS: [LoginProviderDescriptor; 51] = [
     JCODE_LOGIN_PROVIDER,
     OPENROUTER_LOGIN_PROVIDER,
     ORCAROUTER_LOGIN_PROVIDER,
+    VERCEL_AI_GATEWAY_LOGIN_PROVIDER,
     BEDROCK_LOGIN_PROVIDER,
     AZURE_LOGIN_PROVIDER,
     OPENCODE_LOGIN_PROVIDER,
@@ -1216,6 +1262,7 @@ pub(crate) const LOGIN_PROVIDERS: [LoginProviderDescriptor; 51] = [
     MINIMAX_LOGIN_PROVIDER,
     XAI_LOGIN_PROVIDER,
     GROK_BUILD_LOGIN_PROVIDER,
+    XAI_OAUTH_LOGIN_PROVIDER,
     NVIDIA_NIM_LOGIN_PROVIDER,
     XIAOMI_MIMO_LOGIN_PROVIDER,
     META_MUSE_LOGIN_PROVIDER,

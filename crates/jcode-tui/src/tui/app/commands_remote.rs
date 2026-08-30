@@ -1,8 +1,9 @@
 use super::{App, DisplayMessage};
 use crate::gateway::control::{
-    RemoteCommand, RemoteStatus, ToggleOutcome, create_pairing_invite, parse_remote_command,
-    revoke_device, set_gateway_enabled,
+    RemoteCommand, RemoteStatus, ToggleOutcome, create_pairing_invite,
+    create_pairing_invite_for_session, parse_remote_command, revoke_device, set_gateway_enabled,
 };
+use crate::tui::TuiState;
 
 const REMOTE_HELP: &str = "\
 **`/remote`** - use jcode from any device
@@ -14,8 +15,13 @@ control plane is currently in early access.
 - `/remote` or `/remote cloud` - activate or manage Jcode Cloud
 - `/remote status` - local gateway state, dial address, paired devices
 - `/remote on` / `/remote off` - enable or disable the gateway
-- `/remote pair` - show a pairing code and QR for a new device
+- `/remote pair` - show a pairing code, QR, and a browser link for a new device
+- `/remote handoff` - hand this session to your phone or a browser (pairs + resumes it)
 - `/remote revoke <device>` - remove a paired device
+
+`pair` and `handoff` also print a plain `http://host:port/?code=...` link that
+opens the browser client (a small installable PWA), so no app install is needed.
+Keep the gateway on a trusted network such as Tailscale, not the public internet.
 
 For self-hosting, run `/remote on`, restart the server, then `/remote pair`.
 ";
@@ -38,6 +44,7 @@ pub(super) fn handle_remote_command(app: &mut App, trimmed: &str) -> bool {
         Ok(RemoteCommand::On) => toggle(app, true),
         Ok(RemoteCommand::Off) => toggle(app, false),
         Ok(RemoteCommand::Pair) => show_pairing_invite(app),
+        Ok(RemoteCommand::Handoff(session)) => show_handoff_invite(app, session),
         Ok(RemoteCommand::Revoke(target)) => revoke(app, &target),
     }
 
@@ -147,7 +154,15 @@ fn show_pairing_invite(app: &mut App) {
                 invite.dial_address
             ));
 
-            if let Ok(qr) = crate::login_qr::render_unicode_qr(&invite.uri) {
+            body.push_str(&format!(
+                "\nOpen in any browser (no app needed) or scan the QR below:\n\n{}\n",
+                invite.browser_url()
+            ));
+
+            // Encode the browser URL in the QR so a phone camera opens it
+            // directly. The `jcode://` deep link only works for the iOS app and
+            // makes a plain camera report "no usable data".
+            if let Ok(qr) = crate::login_qr::render_unicode_qr(&invite.browser_url()) {
                 body.push_str("\n```\n");
                 body.push_str(&qr);
                 body.push_str("\n```\n");
@@ -158,6 +173,61 @@ fn show_pairing_invite(app: &mut App) {
         }
         Err(error) => app.push_display_message(DisplayMessage::error(format!(
             "Failed to create pairing code: {}",
+            crate::util::format_error_chain(&error)
+        ))),
+    }
+}
+
+fn show_handoff_invite(app: &mut App, session_override: Option<String>) {
+    let session_id = session_override.or_else(|| app.current_session_id());
+    let Some(session_id) = session_id else {
+        app.push_display_message(DisplayMessage::error(
+            "No active session to hand off. Start a conversation first, or use `/remote pair`."
+                .to_string(),
+        ));
+        return;
+    };
+
+    match create_pairing_invite_for_session(Some(session_id.clone())) {
+        Ok(invite) => {
+            let mut body = String::from("**Hand this session to your phone**\n\n");
+
+            if !invite.gateway_enabled {
+                body.push_str(
+                    "Remote access is currently **off**, so this code cannot be used yet. \
+                     Run `/remote on` and restart the server first.\n\n",
+                );
+            }
+
+            body.push_str(&format!(
+                "Scan the QR below with your phone camera to open this \
+                 conversation in the browser, or pair with the jcode iOS \
+                 app.\n\n- Pairing code: **{}** (expires in 5 minutes)\n\
+                 - Connect to: `{}`\n- Session: `{}`\n",
+                invite.spaced_code(),
+                invite.dial_address,
+                session_id,
+            ));
+
+            body.push_str(&format!(
+                "\nOr open in any browser (no app needed):\n\n{}\n",
+                invite.browser_url()
+            ));
+
+            // Encode the browser URL in the QR so a phone camera opens it
+            // directly, instead of the `jcode://` deep link that a plain camera
+            // reports as "no usable data".
+            if let Ok(qr) = crate::login_qr::render_unicode_qr(&invite.browser_url()) {
+                body.push_str("\n```\n");
+                body.push_str(&qr);
+                body.push_str("\n```\n");
+            }
+
+            app.push_display_message(DisplayMessage::system(body));
+            app.set_status_notice("Handoff code ready");
+        }
+        Err(error) => app.push_display_message(DisplayMessage::error(format!(
+            "Failed to create handoff code: {}",
             crate::util::format_error_chain(&error)
         ))),
     }
@@ -208,7 +278,7 @@ mod tests {
     /// subcommands the parser actually accepts.
     #[test]
     fn help_documents_every_supported_subcommand() {
-        for sub in ["cloud", "status", "on", "off", "pair", "revoke"] {
+        for sub in ["cloud", "status", "on", "off", "pair", "handoff", "revoke"] {
             assert!(
                 REMOTE_HELP.contains(sub),
                 "help should document /remote {sub}"

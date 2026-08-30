@@ -40,6 +40,8 @@ pub enum ProviderChoice {
     )]
     OpenaiApi,
     Openrouter,
+    #[value(alias = "vercel", alias = "ai-gateway", alias = "vercel-ai")]
+    VercelAiGateway,
     #[value(alias = "aws-bedrock", alias = "aws_bedrock")]
     Bedrock,
     #[value(alias = "azure-openai", alias = "aoai")]
@@ -93,6 +95,9 @@ pub enum ProviderChoice {
     /// Grok Build subscription via the authenticated Grok CLI ACP transport.
     #[value(name = "grok-build")]
     GrokBuild,
+    /// xAI Grok via native OAuth device-code login (SuperGrok / X Premium+).
+    #[value(name = "xai-oauth", alias = "grok-oauth", alias = "x-ai-oauth", alias = "xai-grok-oauth")]
+    XaiOauth,
     #[value(alias = "nvidia", alias = "nim")]
     NvidiaNim,
     #[value(alias = "xiaomi", alias = "mimo", alias = "xiaomi-mimo-api")]
@@ -148,6 +153,7 @@ impl ProviderChoice {
             Self::Openai => "openai",
             Self::OpenaiApi => "openai-api",
             Self::Openrouter => "openrouter",
+            Self::VercelAiGateway => "vercel-ai-gateway",
             Self::Bedrock => "bedrock",
             Self::Azure => "azure",
             Self::Opencode => "opencode",
@@ -175,6 +181,7 @@ impl ProviderChoice {
             Self::Minimax => "minimax",
             Self::Xai => "xai",
             Self::GrokBuild => "grok-build",
+            Self::XaiOauth => "xai-oauth",
             Self::NvidiaNim => "nvidia-nim",
             Self::XiaomiMimo => "xiaomi-mimo",
             Self::MetaMuse => "meta-muse",
@@ -225,6 +232,10 @@ const PROVIDER_CHOICE_LOGIN_PROVIDERS: &[(ProviderChoice, LoginProviderDescripto
     (
         ProviderChoice::Openrouter,
         crate::provider_catalog::OPENROUTER_LOGIN_PROVIDER,
+    ),
+    (
+        ProviderChoice::VercelAiGateway,
+        crate::provider_catalog::VERCEL_AI_GATEWAY_LOGIN_PROVIDER,
     ),
     (
         ProviderChoice::Bedrock,
@@ -333,6 +344,10 @@ const PROVIDER_CHOICE_LOGIN_PROVIDERS: &[(ProviderChoice, LoginProviderDescripto
     (
         ProviderChoice::GrokBuild,
         crate::provider_catalog::GROK_BUILD_LOGIN_PROVIDER,
+    ),
+    (
+        ProviderChoice::XaiOauth,
+        crate::provider_catalog::XAI_OAUTH_LOGIN_PROVIDER,
     ),
     (
         ProviderChoice::NvidiaNim,
@@ -1230,6 +1245,22 @@ fn disable_subscription_runtime_mode() {
     crate::subscription_catalog::clear_runtime_env();
 }
 
+/// Point the reused OpenRouter transport at xAI's model catalog when the
+/// `xai-oauth` login provider is active. Without this the runtime falls back to
+/// its OpenRouter `DEFAULT_MODEL` (an Anthropic id), which `api.x.ai` rejects
+/// with "model not found". We only set defaults when the user has not already
+/// pinned a model via `JCODE_OPENROUTER_MODEL`/`JCODE_OPENROUTER_STATIC_MODELS`.
+fn apply_xai_oauth_model_defaults() {
+    let default_model = auth::xai::XAI_OAUTH_DEFAULT_MODEL;
+    let static_models = auth::xai::XAI_OAUTH_STATIC_MODELS.join("\n");
+    if std::env::var_os("JCODE_OPENROUTER_MODEL").is_none() {
+        crate::env::set_var("JCODE_OPENROUTER_MODEL", default_model);
+    }
+    if std::env::var_os("JCODE_OPENROUTER_STATIC_MODELS").is_none() {
+        crate::env::set_var("JCODE_OPENROUTER_STATIC_MODELS", static_models);
+    }
+}
+
 fn disable_subscription_runtime_mode_preserving_active_provider_profile() {
     if std::env::var_os("JCODE_PROVIDER_PROFILE_ACTIVE").is_some()
         || std::env::var_os("JCODE_NAMED_PROVIDER_PROFILE").is_some()
@@ -1299,6 +1330,18 @@ pub async fn login_and_bootstrap_provider(
                 crate::provider::external::GROK_BUILD_RUNTIME,
             )
             .ok_or_else(|| anyhow::anyhow!("Grok Build runtime is not registered"))?
+        }
+        LoginProviderTarget::XaiOauth => {
+            disable_subscription_runtime_mode();
+            // Reuse the OpenAI-compatible transport pointed at api.x.ai, but with a
+            // refreshable OAuth bearer resolved at request time (mirrors Azure Entra).
+            crate::env::set_var("JCODE_RUNTIME_PROVIDER", "xai-oauth");
+            crate::env::set_var("JCODE_ACTIVE_PROVIDER", "openrouter");
+            crate::env::set_var("JCODE_OPENROUTER_TRANSPORT_STATE", "direct-api-key");
+            crate::env::set_var("JCODE_OPENROUTER_API_BASE", "https://api.x.ai/v1");
+            crate::env::set_var("JCODE_OPENROUTER_DYNAMIC_BEARER_PROVIDER", "xai-oauth");
+            apply_xai_oauth_model_defaults();
+            Arc::new(provider::MultiProvider::new())
         }
         LoginProviderTarget::OpenAiApiKey => {
             disable_subscription_runtime_mode();
@@ -1527,6 +1570,22 @@ async fn init_provider_with_options(
             )
             .ok_or_else(|| anyhow::anyhow!("Grok Build runtime is not registered"))?
         }
+        ProviderChoice::XaiOauth => {
+            disable_subscription_runtime_mode();
+            init_notice("Using xAI Grok via OAuth device-code login (use /model to switch)");
+            if !auth::xai::has_cached_auth() {
+                init_notice(
+                    "No xAI Grok OAuth login is stored; run `jcode login --provider xai-oauth`. Falling back to another available provider until you do.",
+                );
+            }
+            crate::env::set_var("JCODE_RUNTIME_PROVIDER", "xai-oauth");
+            crate::env::set_var("JCODE_ACTIVE_PROVIDER", "openrouter");
+            crate::env::set_var("JCODE_OPENROUTER_TRANSPORT_STATE", "direct-api-key");
+            crate::env::set_var("JCODE_OPENROUTER_API_BASE", "https://api.x.ai/v1");
+            crate::env::set_var("JCODE_OPENROUTER_DYNAMIC_BEARER_PROVIDER", "xai-oauth");
+            apply_xai_oauth_model_defaults();
+            Arc::new(provider::MultiProvider::new_fast())
+        }
         ProviderChoice::Openrouter => {
             disable_subscription_runtime_mode();
             ensure_external_api_key_auth_allowed_for_explicit_choice("OPENROUTER_API_KEY")?;
@@ -1551,6 +1610,7 @@ async fn init_provider_with_options(
             Arc::new(multi)
         }
         ProviderChoice::Opencode
+        | ProviderChoice::VercelAiGateway
         | ProviderChoice::OpencodeGo
         | ProviderChoice::Zai
         | ProviderChoice::Ai302

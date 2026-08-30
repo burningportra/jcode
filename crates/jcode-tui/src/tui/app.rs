@@ -73,6 +73,7 @@ mod idle_heap_release;
 mod inline_interactive;
 mod input;
 mod input_help;
+mod learning_inbox;
 mod local;
 mod misc_ui;
 mod model_context;
@@ -1208,6 +1209,8 @@ pub struct App {
     current_message_id: Option<u64>,
     // Whether running in remote mode
     is_remote: bool,
+    // Whether the server and TUI client share this machine's persisted session store.
+    learning_inbox_store_is_local: bool,
     runtime_mode: AppRuntimeMode,
     // Remote rewind/undo request waiting for the server's replacement History payload.
     pending_remote_rewind_notice: Option<PendingRemoteRewindNotice>,

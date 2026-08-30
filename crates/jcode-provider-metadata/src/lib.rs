@@ -35,6 +35,7 @@ pub enum LoginProviderTarget {
     OpenAiCompatible(OpenAiCompatibleProfile),
     Cursor,
     GrokBuild,
+    XaiOauth,
     Copilot,
     Gemini,
     Antigravity,
@@ -55,6 +56,7 @@ pub enum LoginProviderAuthStateKey {
     Antigravity,
     Cursor,
     GrokBuild,
+    XaiOauth,
     Google,
 }
 
@@ -360,6 +362,32 @@ mod tests {
     }
 
     #[test]
+    fn vercel_ai_gateway_uses_official_openai_compatible_configuration() {
+        let provider = resolve_login_selection("vercel-ai-gateway", &cli_login_providers())
+            .expect("Vercel AI Gateway CLI login provider");
+        let LoginProviderTarget::OpenAiCompatible(profile) = provider.target else {
+            panic!("Vercel AI Gateway should use the OpenAI-compatible runtime");
+        };
+
+        assert_eq!(profile.id, "vercel-ai-gateway");
+        assert_eq!(profile.display_name, "Vercel AI Gateway");
+        assert_eq!(profile.api_base, "https://ai-gateway.vercel.sh/v1");
+        assert_eq!(profile.api_key_env, "AI_GATEWAY_API_KEY");
+        assert_eq!(profile.env_file, "vercel-ai-gateway.env");
+        assert_eq!(profile.setup_url, "https://vercel.com/docs/ai-gateway");
+        assert_eq!(profile.default_model, None);
+        assert!(profile.requires_api_key);
+        assert_eq!(
+            resolve_login_provider("vercel").map(|candidate| candidate.id),
+            Some("vercel-ai-gateway")
+        );
+        assert_eq!(
+            resolve_login_provider("ai-gateway").map(|candidate| candidate.id),
+            Some("vercel-ai-gateway")
+        );
+    }
+
+    #[test]
     fn normalize_api_base_accepts_private_http_hosts() {
         assert_eq!(
             normalize_api_base("http://192.168.1.25:8000/v1/").as_deref(),
@@ -609,6 +637,20 @@ mod tests {
         assert_eq!(
             resolve_login_provider("grok").map(|provider| provider.id),
             Some("xai")
+        );
+        // The OAuth device-code provider is distinct from the API-key `xai`
+        // provider; its aliases must never collapse onto `xai`.
+        assert_eq!(
+            resolve_login_provider("xai-oauth").map(|provider| provider.id),
+            Some("xai-oauth")
+        );
+        assert_eq!(
+            resolve_login_provider("grok-oauth").map(|provider| provider.id),
+            Some("xai-oauth")
+        );
+        assert_eq!(
+            resolve_login_provider("xai-grok-oauth").map(|provider| provider.id),
+            Some("xai-oauth")
         );
         assert_eq!(
             resolve_login_provider("lm-studio").map(|provider| provider.id),

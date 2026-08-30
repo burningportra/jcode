@@ -187,6 +187,85 @@ fn test_cerebras_model_routes_are_profile_scoped_and_unique() {
 }
 
 #[test]
+fn test_vercel_ai_gateway_has_immediate_profile_scoped_model_routes() {
+    with_clean_provider_test_env(|| {
+        with_env_var("AI_GATEWAY_API_KEY", "test-vercel-key", || {
+            let profile = crate::provider_catalog::openai_compatible_profile_by_id(
+                "vercel-ai-gateway",
+            )
+            .expect("Vercel AI Gateway profile");
+            let static_models =
+                crate::provider_catalog::openai_compatible_profile_static_models(profile);
+
+            assert!(static_models.contains(&"openai/gpt-5.5".to_string()));
+            assert!(static_models.contains(&"anthropic/claude-sonnet-5".to_string()));
+
+            let routes = MultiProvider::new_fast().model_routes();
+            assert!(routes.iter().any(|route| {
+                route.model == "openai/gpt-5.5"
+                    && route.provider == "Vercel AI Gateway"
+                    && route.api_method == "openai-compatible:vercel-ai-gateway"
+                    && route.available
+            }));
+        });
+    });
+}
+
+#[test]
+fn test_xai_oauth_grok_models_surface_in_picker_when_another_provider_is_active() {
+    with_clean_provider_test_env(|| {
+        let runtime = enter_test_runtime();
+        runtime.block_on(async {
+            // Simulate a stored xai-oauth login (JCODE_HOME is isolated by the
+            // test env), while OpenAI is the active provider.
+            crate::env::set_var("OPENAI_API_KEY", "sk-openai-test");
+            let now_ms = chrono::Utc::now().timestamp_millis();
+            let tokens = crate::auth::xai::XaiTokens {
+                access_token: "xai-access-test".to_string(),
+                refresh_token: Some("xai-refresh-test".to_string()),
+                // Far future so the runtime accepts the login without refresh.
+                expires_at: now_ms + 86_400_000,
+                token_type: "Bearer".to_string(),
+                scope: None,
+                id_token: None,
+                obtained_at: now_ms,
+            };
+            crate::auth::xai::save_tokens(&tokens).expect("save xai-oauth tokens");
+            assert!(crate::auth::xai::has_cached_auth());
+
+            let provider = MultiProvider::new_fast();
+            let routes = provider.model_routes();
+            // Every default grok model must be offered with the dedicated xAI
+            // Grok OAuth identity and a switchable api_method, even though
+            // xai-oauth is not the active provider (the bug: they were absent).
+            for model in crate::auth::xai::XAI_OAUTH_STATIC_MODELS {
+                let route = routes
+                    .iter()
+                    .find(|route| route.model == *model && route.provider == "xAI Grok OAuth")
+                    .unwrap_or_else(|| {
+                        panic!("xai-oauth grok model '{model}' missing from picker: {routes:?}")
+                    });
+                assert_eq!(route.api_method, "openai-compatible:xai-oauth");
+                assert!(
+                    route.available,
+                    "xai-oauth route should be available: {route:?}"
+                );
+                // The picker converts this route into a switch spec that the
+                // set_model prefix branch understands.
+                assert_eq!(
+                    MultiProvider::model_switch_request_for_session_route(
+                        &route.model,
+                        Some(&route.provider),
+                        Some(&route.api_method),
+                    ),
+                    format!("xai-oauth:{model}")
+                );
+            }
+        })
+    });
+}
+
+#[test]
 fn test_direct_chutes_ignores_legacy_openrouter_catalog_cache() {
     with_clean_provider_test_env(|| {
         let temp_home = tempfile::tempdir().expect("temp HOME");
@@ -1864,24 +1943,24 @@ fn test_context_limit_spark_vs_codex() {
         context_limit_for_model("gpt-5.3-codex-spark"),
         Some(128_000)
     );
-    assert_eq!(context_limit_for_model("gpt-5.5"), Some(272_000));
-    assert_eq!(context_limit_for_model("gpt-5.3-codex"), Some(272_000));
-    assert_eq!(context_limit_for_model("gpt-5.2-codex"), Some(272_000));
-    assert_eq!(context_limit_for_model("gpt-5-codex"), Some(272_000));
+    assert_eq!(context_limit_for_model("gpt-5.5"), Some(1_050_000));
+    assert_eq!(context_limit_for_model("gpt-5.3-codex"), Some(400_000));
+    assert_eq!(context_limit_for_model("gpt-5.2-codex"), Some(400_000));
+    assert_eq!(context_limit_for_model("gpt-5-codex"), Some(400_000));
 }
 
 #[test]
 fn test_context_limit_gpt_5_4() {
-    assert_eq!(context_limit_for_model("gpt-5.4"), Some(1_000_000));
-    assert_eq!(context_limit_for_model("gpt-5.4-pro"), Some(1_000_000));
-    assert_eq!(context_limit_for_model("gpt-5.4[1m]"), Some(1_000_000));
+    assert_eq!(context_limit_for_model("gpt-5.4"), Some(1_050_000));
+    assert_eq!(context_limit_for_model("gpt-5.4-pro"), Some(1_050_000));
+    assert_eq!(context_limit_for_model("gpt-5.4[1m]"), Some(1_050_000));
 }
 
 #[test]
 fn test_context_limit_respects_provider_hint() {
     assert_eq!(
         context_limit_for_model_with_provider("gpt-5.4", Some("openai")),
-        Some(1_000_000)
+        Some(1_050_000)
     );
     assert_eq!(
         context_limit_for_model_with_provider("gpt-5.4", Some("copilot")),
@@ -1897,7 +1976,7 @@ fn test_context_limit_respects_provider_hint() {
 fn test_resolve_model_capabilities_uses_provider_hint() {
     let openai = resolve_model_capabilities("gpt-5.4", Some("openai"));
     assert_eq!(openai.provider.as_deref(), Some("openai"));
-    assert_eq!(openai.context_window, Some(1_000_000));
+    assert_eq!(openai.context_window, Some(1_050_000));
 
     let copilot = resolve_model_capabilities("gpt-5.4", Some("copilot"));
     assert_eq!(copilot.provider.as_deref(), Some("copilot"));

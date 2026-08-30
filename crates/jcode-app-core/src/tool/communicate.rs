@@ -1751,8 +1751,32 @@ fn format_swarm_model_list(
         out.push_str("\nNo model routes reported. Configure agents.swarm_model or use inherit.");
         return out;
     }
-    out.push_str("\nAvailable model routes (configure agents.swarm_model with a bare model or route-pinned value):\n");
-    for route in model_routes {
+    // A single logical model (e.g. `claude-fable-5`) is frequently offered by
+    // many providers/gateways at once (OpenRouter alone re-lists every model
+    // per upstream provider). Emitting one line per route makes `list_models`
+    // dump tens of thousands of tokens into the caller's context, which is
+    // pure noise for the decision the caller is actually making: "which model
+    // do I pin?" Collapse to one line per distinct model, preferring the first
+    // available route seen, and cap the total as a hard backstop.
+    const MAX_MODEL_LINES: usize = 60;
+    let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    let mut deduped: Vec<&jcode_provider_core::ModelRoute> = Vec::new();
+    // First pass: available routes win the slot for their model.
+    for route in model_routes.iter().filter(|r| r.available) {
+        if seen.insert(route.model.as_str()) {
+            deduped.push(route);
+        }
+    }
+    // Second pass: models that only have unavailable routes still get listed.
+    for route in model_routes.iter().filter(|r| !r.available) {
+        if seen.insert(route.model.as_str()) {
+            deduped.push(route);
+        }
+    }
+    let total_models = deduped.len();
+    let hidden = total_models.saturating_sub(MAX_MODEL_LINES);
+    out.push_str("\nAvailable models (configure agents.swarm_model with a bare model or route-pinned value):\n");
+    for route in deduped.into_iter().take(MAX_MODEL_LINES) {
         let availability = if route.available {
             ""
         } else {
@@ -1772,7 +1796,20 @@ fn format_swarm_model_list(
             route.model, route.provider, route.api_method, availability, cost, detail
         ));
     }
-    out.push_str("\nAlso pass effort (none|minimal|low|medium|high|xhigh|max) to set the spawned agent's reasoning effort.");
+    if hidden > 0 {
+        out.push_str(&format!(
+            "... and {hidden} more model(s) not shown ({total_models} total). Narrow by setting agents.swarm_model.\n"
+        ));
+    }
+    out.push_str(
+        "\nTo route workers to a specific model, set agents.swarm_model (a bare model or a \
+         route-pinned value like `openai-api:gpt-5.5`). There is no per-spawn model override: \
+         spawning with a `model` argument does NOT change the worker's model, so verify a \
+         worker's actual model from its session before relying on it.\n",
+    );
+    out.push_str(
+        "Pass effort (none|minimal|low|medium|high|xhigh|max) to set the spawned agent's reasoning effort.",
+    );
     out
 }
 

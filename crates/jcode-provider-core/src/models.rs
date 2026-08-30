@@ -175,6 +175,37 @@ fn copilot_context_limit_for_model(model: &str) -> usize {
     }
 }
 
+/// Published total context capacity for OpenAI GPT-5-family models.
+///
+/// Codex catalogs commonly advertise a conservative 272K default prompt budget
+/// even when the model supports a larger window. That is a client policy, not
+/// the model maximum the context meter promises to display. Keep genuinely
+/// smaller route variants pinned before applying the family-wide capacities.
+fn openai_published_context_limit(model: &str) -> Option<usize> {
+    if model.starts_with("gpt-5.3-codex-spark")
+        || model.starts_with("gpt-5.2-chat")
+        || model.starts_with("gpt-5.1-chat")
+        || model.starts_with("gpt-5-chat")
+    {
+        return Some(128_000);
+    }
+
+    let suffix = model.strip_prefix("gpt-5")?;
+    let minor = suffix
+        .strip_prefix('.')
+        .and_then(|suffix| suffix.split(|c: char| !c.is_ascii_digit()).next())
+        .filter(|minor| !minor.is_empty())
+        .and_then(|minor| minor.parse::<u32>().ok());
+
+    if minor.is_some_and(|minor| minor >= 4) {
+        // GPT-5.4 and newer publish a 1.05M-token window.
+        Some(1_050_000)
+    } else {
+        // GPT-5 through GPT-5.3 publish a 400K-token window.
+        Some(400_000)
+    }
+}
+
 /// Return the static provider class for a built-in model name.
 ///
 /// Root providers may layer runtime-only provider catalogs on top of this.
@@ -231,12 +262,27 @@ pub fn context_limit_for_model_with_provider_and_cache(
     provider_hint: Option<&str>,
     cached_context_limit: impl Fn(&str) -> Option<usize>,
 ) -> Option<usize> {
-    let provider = provider_key_from_hint(provider_hint).or_else(|| provider_for_model(model));
+    let explicit_provider = provider_key_from_hint(provider_hint);
+    let provider = explicit_provider.or_else(|| provider_for_model(model));
     let (model, is_1m) = model_id_for_capability_lookup(model, provider);
     let model = model.as_str();
 
     if matches!(provider, Some("copilot")) {
         return Some(copilot_context_limit_for_model(model));
+    }
+
+    // Only apply OpenAI's published capacities to the built-in OpenAI route or
+    // to an unqualified global lookup. An explicitly named custom provider may
+    // serve a GPT-named model with a different window and must keep its config.
+    let official_openai_limit = (matches!(provider, Some("openai"))
+        && (provider_hint.is_none() || matches!(explicit_provider, Some("openai"))))
+    .then(|| openai_published_context_limit(model))
+    .flatten();
+
+    // Smaller official variants are authoritative and must not be inflated by
+    // stale or generic family metadata.
+    if official_openai_limit == Some(128_000) {
+        return official_openai_limit;
     }
 
     // Claude models: classify long-context behavior centrally. For generations
@@ -262,30 +308,14 @@ pub fn context_limit_for_model_with_provider_and_cache(
     // model-family fallbacks (e.g. custom openai-compatible providers may serve
     // GPT-named models with different context windows). See issue #541.
     if let Some(limit) = cached_context_limit(model) {
-        return Some(limit);
+        // Old persisted Codex catalogs contain the conservative 272K default.
+        // Never let that stale policy value reduce a known model's supported
+        // maximum, while still accepting a larger live maximum in the future.
+        return Some(official_openai_limit.map_or(limit, |published| published.max(limit)));
     }
 
-    // Spark variant has a smaller context window than the full codex model.
-    if model.starts_with("gpt-5.3-codex-spark") {
-        return Some(128_000);
-    }
-
-    if model.starts_with("gpt-5.2-chat")
-        || model.starts_with("gpt-5.1-chat")
-        || model.starts_with("gpt-5-chat")
-    {
-        return Some(128_000);
-    }
-
-    // GPT-5.4-family models should default to the long-context window.
-    // The live Codex OAuth catalog can still override this via the dynamic cache above.
-    if model.starts_with("gpt-5.4") {
-        return Some(1_000_000);
-    }
-
-    // Most GPT-5.x codex/reasoning models: 272k per Codex backend API.
-    if model.starts_with("gpt-5") {
-        return Some(272_000);
+    if official_openai_limit.is_some() {
+        return official_openai_limit;
     }
 
     if model.starts_with("gemini-2.0-flash")
@@ -808,8 +838,35 @@ mod tests {
         // Fallbacks still apply when no cached value exists.
         assert_eq!(
             context_limit_for_model_with_provider_and_cache("gpt-5.4", None, |_| None),
-            Some(1_000_000)
+            Some(1_050_000)
         );
+        // An explicit custom provider hint keeps its configured lower limit.
+        assert_eq!(
+            context_limit_for_model_with_provider_and_cache(
+                "gpt-5.4",
+                Some("private-gateway"),
+                |model| (model == "gpt-5.4").then_some(230_000)
+            ),
+            Some(230_000)
+        );
+    }
+
+    #[test]
+    fn conservative_codex_catalog_budget_does_not_shrink_the_model_maximum() {
+        for (model, expected) in [
+            ("gpt-5.4", 1_050_000),
+            ("gpt-5.5", 1_050_000),
+            ("gpt-5.6-sol", 1_050_000),
+            ("gpt-5.3-codex", 400_000),
+        ] {
+            assert_eq!(
+                context_limit_for_model_with_provider_and_cache(model, Some("openai"), |_| Some(
+                    272_000
+                )),
+                Some(expected),
+                "{model} should report its supported maximum, not the catalog's default budget"
+            );
+        }
     }
 
     #[test]

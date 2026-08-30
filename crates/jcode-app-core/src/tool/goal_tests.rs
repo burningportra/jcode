@@ -213,3 +213,430 @@ fn test_initiative_schema_omits_public_enums_for_scope_and_status() {
     assert!(schema["properties"]["scope"]["enum"].is_null());
     assert!(schema["properties"]["status"]["enum"].is_null());
 }
+
+fn delete_test_ctx(session_id: &str, project: std::path::PathBuf) -> ToolContext {
+    ToolContext {
+        session_id: session_id.to_string(),
+        message_id: "msg".to_string(),
+        tool_call_id: "tool".to_string(),
+        working_dir: Some(project),
+        stdin_request_tx: None,
+        graceful_shutdown_signal: None,
+        execution_mode: crate::tool::ToolExecutionMode::AgentTurn,
+    }
+}
+
+#[tokio::test]
+async fn initiative_delete_removes_all_artifacts() {
+    let _guard = crate::storage::lock_test_env();
+    let temp = tempfile::tempdir().expect("tempdir");
+    let project = temp.path().join("repo");
+    std::fs::create_dir_all(&project).expect("project dir");
+    let prev_home = std::env::var_os("JCODE_HOME");
+    crate::env::set_var("JCODE_HOME", temp.path());
+
+    let tool = InitiativeTool::new();
+    let ctx = delete_test_ctx("ses_delete_all", project.clone());
+
+    tool.execute(
+        json!({"action": "create", "title": "Doomed goal", "scope": "project"}),
+        ctx.clone(),
+    )
+    .await
+    .expect("create goal");
+
+    // Attach the session to the goal (as show/resume would) so we exercise the
+    // attachment-cleanup path.
+    let goal = crate::goal::load_goal("doomed-goal", None, Some(project.as_path()))
+        .expect("load goal")
+        .expect("goal exists");
+    crate::goal::attach_goal_to_session("ses_delete_all", &goal, Some(project.as_path()))
+        .expect("attach");
+
+    // The memory mirror exists after create.
+    let manager = crate::memory::MemoryManager::new().with_project_dir(project.as_path());
+    let has_mirror = |m: &crate::memory::MemoryManager| {
+        m.list_all()
+            .expect("list_all")
+            .iter()
+            .any(|e| e.id == "goal:doomed-goal")
+    };
+    assert!(
+        has_mirror(&manager),
+        "memory mirror should exist before delete"
+    );
+
+    let out = tool
+        .execute(
+            json!({"action": "delete", "id": "doomed-goal"}),
+            ctx.clone(),
+        )
+        .await
+        .expect("delete goal");
+    assert!(out.output.contains("Deleted initiative"));
+    assert!(out.output.contains("doomed-goal"));
+
+    // 1. Goal JSON gone.
+    assert!(
+        crate::goal::load_goal("doomed-goal", None, Some(project.as_path()))
+            .expect("load")
+            .is_none(),
+        "goal JSON should be deleted"
+    );
+    // 2. Memory mirror gone.
+    assert!(!has_mirror(&manager), "memory mirror should be deleted");
+    // 3. Session attachment gone (resolves to None).
+    assert!(
+        crate::goal::load_attached_goal("ses_delete_all", Some(project.as_path()))
+            .expect("attached")
+            .is_none(),
+        "session attachment should be cleared"
+    );
+
+    if let Some(prev_home) = prev_home {
+        crate::env::set_var("JCODE_HOME", prev_home);
+    } else {
+        crate::env::remove_var("JCODE_HOME");
+    }
+}
+
+#[tokio::test]
+async fn initiative_delete_not_found_errors() {
+    let _guard = crate::storage::lock_test_env();
+    let temp = tempfile::tempdir().expect("tempdir");
+    let project = temp.path().join("repo");
+    std::fs::create_dir_all(&project).expect("project dir");
+    let prev_home = std::env::var_os("JCODE_HOME");
+    crate::env::set_var("JCODE_HOME", temp.path());
+
+    let tool = InitiativeTool::new();
+    let ctx = delete_test_ctx("ses_delete_missing", project.clone());
+
+    let err = tool
+        .execute(json!({"action": "delete", "id": "nope"}), ctx)
+        .await
+        .expect_err("delete of missing goal should error");
+    assert!(err.to_string().contains("initiative not found"));
+
+    if let Some(prev_home) = prev_home {
+        crate::env::set_var("JCODE_HOME", prev_home);
+    } else {
+        crate::env::remove_var("JCODE_HOME");
+    }
+}
+
+#[tokio::test]
+async fn initiative_delete_is_idempotent() {
+    let _guard = crate::storage::lock_test_env();
+    let temp = tempfile::tempdir().expect("tempdir");
+    let project = temp.path().join("repo");
+    std::fs::create_dir_all(&project).expect("project dir");
+    let prev_home = std::env::var_os("JCODE_HOME");
+    crate::env::set_var("JCODE_HOME", temp.path());
+
+    let tool = InitiativeTool::new();
+    let ctx = delete_test_ctx("ses_delete_twice", project.clone());
+
+    tool.execute(
+        json!({"action": "create", "title": "Twice", "scope": "project"}),
+        ctx.clone(),
+    )
+    .await
+    .expect("create goal");
+
+    tool.execute(json!({"action": "delete", "id": "twice"}), ctx.clone())
+        .await
+        .expect("first delete");
+    // Second delete resolves to not-found rather than panicking.
+    let err = tool
+        .execute(json!({"action": "delete", "id": "twice"}), ctx)
+        .await
+        .expect_err("second delete should be not-found");
+    assert!(err.to_string().contains("initiative not found"));
+
+    if let Some(prev_home) = prev_home {
+        crate::env::set_var("JCODE_HOME", prev_home);
+    } else {
+        crate::env::remove_var("JCODE_HOME");
+    }
+}
+
+#[tokio::test]
+async fn initiative_delete_leaves_other_session_attachment() {
+    let _guard = crate::storage::lock_test_env();
+    let temp = tempfile::tempdir().expect("tempdir");
+    let project = temp.path().join("repo");
+    std::fs::create_dir_all(&project).expect("project dir");
+    let prev_home = std::env::var_os("JCODE_HOME");
+    crate::env::set_var("JCODE_HOME", temp.path());
+
+    let tool = InitiativeTool::new();
+    let deleter = delete_test_ctx("ses_deleter", project.clone());
+
+    tool.execute(
+        json!({"action": "create", "title": "Shared", "scope": "project"}),
+        deleter.clone(),
+    )
+    .await
+    .expect("create goal");
+
+    let goal = crate::goal::load_goal("shared", None, Some(project.as_path()))
+        .expect("load")
+        .expect("goal exists");
+    // A different session is attached to the same goal.
+    crate::goal::attach_goal_to_session("ses_other", &goal, Some(project.as_path()))
+        .expect("attach other");
+
+    tool.execute(json!({"action": "delete", "id": "shared"}), deleter)
+        .await
+        .expect("delete goal");
+
+    // The other session's attachment FILE must remain untouched, even though it
+    // now resolves to None (goal JSON gone).
+    let other_attachment = crate::storage::jcode_dir()
+        .expect("jcode dir")
+        .join("goals")
+        .join("sessions")
+        .join("ses_other.json");
+    assert!(
+        other_attachment.exists(),
+        "other session's attachment file must not be deleted"
+    );
+
+    if let Some(prev_home) = prev_home {
+        crate::env::set_var("JCODE_HOME", prev_home);
+    } else {
+        crate::env::remove_var("JCODE_HOME");
+    }
+}
+
+#[tokio::test]
+async fn initiative_review_records_pass_and_renders_progression() {
+    let _guard = crate::storage::lock_test_env();
+    let temp = tempfile::tempdir().expect("tempdir");
+    let project = temp.path().join("repo");
+    std::fs::create_dir_all(&project).expect("project dir");
+    let prev_home = std::env::var_os("JCODE_HOME");
+    crate::env::set_var("JCODE_HOME", temp.path());
+
+    let tool = InitiativeTool::new();
+    let ctx = delete_test_ctx("ses_review", project.clone());
+
+    tool.execute(
+        json!({"action": "create", "title": "Reviewed goal", "scope": "project"}),
+        ctx.clone(),
+    )
+    .await
+    .expect("create goal");
+
+    // First pass: architecture, self-review.
+    tool.execute(
+        json!({
+            "action": "review",
+            "id": "reviewed-goal",
+            "lens": "architecture",
+            "score": 35,
+            "gaps": ["missing data model", "no error handling"]
+        }),
+        ctx.clone(),
+    )
+    .await
+    .expect("first review");
+
+    // Second pass: cross-model reviewer, higher score.
+    let out = tool
+        .execute(
+            json!({
+                "action": "review",
+                "id": "reviewed-goal",
+                "lens": "security",
+                "score": 90,
+                "resolved": ["missing data model", "no error handling"],
+                "reviewer_model": "claude-fable-5"
+            }),
+            ctx.clone(),
+        )
+        .await
+        .expect("second review");
+    assert!(out.output.contains("Recorded review"));
+    assert!(out.output.contains("pass 2 (security) 90/100"));
+
+    let goal = crate::goal::load_goal("reviewed-goal", None, Some(project.as_path()))
+        .expect("load")
+        .expect("goal exists");
+    assert_eq!(goal.reviews.len(), 2);
+    assert_eq!(goal.reviews[0].pass, 1);
+    assert_eq!(goal.reviews[1].pass, 2);
+    assert_eq!(
+        goal.reviews[1].reviewer_model.as_deref(),
+        Some("claude-fable-5")
+    );
+
+    // The detail render shows a quality progression.
+    let detail = crate::goal::render_goal_detail(&goal);
+    assert!(detail.contains("## Plan review"), "detail = {detail}");
+    assert!(detail.contains("35 → 90"), "detail = {detail}");
+    assert!(
+        detail.contains("[+review claude-fable-5]"),
+        "detail = {detail}"
+    );
+
+    if let Some(prev_home) = prev_home {
+        crate::env::set_var("JCODE_HOME", prev_home);
+    } else {
+        crate::env::remove_var("JCODE_HOME");
+    }
+}
+
+#[tokio::test]
+async fn initiative_review_requires_lens_and_existing_goal() {
+    let _guard = crate::storage::lock_test_env();
+    let temp = tempfile::tempdir().expect("tempdir");
+    let project = temp.path().join("repo");
+    std::fs::create_dir_all(&project).expect("project dir");
+    let prev_home = std::env::var_os("JCODE_HOME");
+    crate::env::set_var("JCODE_HOME", temp.path());
+
+    let tool = InitiativeTool::new();
+    let ctx = delete_test_ctx("ses_review_err", project.clone());
+
+    // Missing lens.
+    tool.execute(
+        json!({"action": "create", "title": "Goal", "scope": "project"}),
+        ctx.clone(),
+    )
+    .await
+    .expect("create goal");
+    let err = tool
+        .execute(
+            json!({"action": "review", "id": "goal", "score": 50}),
+            ctx.clone(),
+        )
+        .await
+        .expect_err("missing lens should error");
+    assert!(err.to_string().contains("lens is required"));
+
+    // Unknown goal.
+    let err = tool
+        .execute(
+            json!({"action": "review", "id": "nope", "lens": "architecture", "score": 50}),
+            ctx,
+        )
+        .await
+        .expect_err("unknown goal should error");
+    assert!(err.to_string().contains("initiative not found"));
+
+    if let Some(prev_home) = prev_home {
+        crate::env::set_var("JCODE_HOME", prev_home);
+    } else {
+        crate::env::remove_var("JCODE_HOME");
+    }
+}
+
+#[tokio::test]
+async fn initiative_list_json_returns_structured_and_markdown_default_unchanged() {
+    let _guard = crate::storage::lock_test_env();
+    let temp = tempfile::tempdir().expect("tempdir");
+    let project = temp.path().join("repo");
+    std::fs::create_dir_all(&project).expect("project dir");
+    let prev_home = std::env::var_os("JCODE_HOME");
+    crate::env::set_var("JCODE_HOME", temp.path());
+
+    let tool = InitiativeTool::new();
+    let ctx = delete_test_ctx("ses_list_json", project.clone());
+
+    tool.execute(
+        json!({"action": "create", "title": "Listed goal", "scope": "project"}),
+        ctx.clone(),
+    )
+    .await
+    .expect("create goal");
+
+    // Default (markdown) output must be byte-identical to render_goals_overview.
+    let default_out = tool
+        .execute(json!({"action": "list"}), ctx.clone())
+        .await
+        .expect("list default");
+    let goals = crate::goal::list_relevant_goals(Some(project.as_path())).expect("goals");
+    assert_eq!(
+        default_out.output,
+        crate::goal::render_goals_overview(&goals)
+    );
+
+    // Explicit markdown must equal default.
+    let md_out = tool
+        .execute(json!({"action": "list", "format": "markdown"}), ctx.clone())
+        .await
+        .expect("list markdown");
+    assert_eq!(md_out.output, default_out.output);
+
+    // json format returns a parseable JSON array whose body equals the metadata.
+    let json_out = tool
+        .execute(json!({"action": "list", "format": "json"}), ctx.clone())
+        .await
+        .expect("list json");
+    let parsed: serde_json::Value =
+        serde_json::from_str(&json_out.output).expect("json body parses");
+    assert!(parsed.is_array(), "json body should be an array");
+    assert_eq!(parsed.as_array().unwrap().len(), 1);
+    assert_eq!(parsed[0]["title"], "Listed goal");
+    // Body matches the attached metadata (same shape).
+    assert_eq!(parsed, json_out.metadata.clone().unwrap());
+
+    if let Some(prev_home) = prev_home {
+        crate::env::set_var("JCODE_HOME", prev_home);
+    } else {
+        crate::env::remove_var("JCODE_HOME");
+    }
+}
+
+#[tokio::test]
+async fn initiative_list_json_empty_is_empty_array() {
+    let _guard = crate::storage::lock_test_env();
+    let temp = tempfile::tempdir().expect("tempdir");
+    let project = temp.path().join("repo");
+    std::fs::create_dir_all(&project).expect("project dir");
+    let prev_home = std::env::var_os("JCODE_HOME");
+    crate::env::set_var("JCODE_HOME", temp.path());
+
+    let tool = InitiativeTool::new();
+    let ctx = delete_test_ctx("ses_list_json_empty", project.clone());
+
+    let out = tool
+        .execute(json!({"action": "list", "format": "json"}), ctx)
+        .await
+        .expect("list json empty");
+    let parsed: serde_json::Value = serde_json::from_str(&out.output).expect("parses");
+    assert_eq!(parsed, serde_json::json!([]));
+
+    if let Some(prev_home) = prev_home {
+        crate::env::set_var("JCODE_HOME", prev_home);
+    } else {
+        crate::env::remove_var("JCODE_HOME");
+    }
+}
+
+#[tokio::test]
+async fn initiative_list_invalid_format_errors() {
+    let _guard = crate::storage::lock_test_env();
+    let temp = tempfile::tempdir().expect("tempdir");
+    let project = temp.path().join("repo");
+    std::fs::create_dir_all(&project).expect("project dir");
+    let prev_home = std::env::var_os("JCODE_HOME");
+    crate::env::set_var("JCODE_HOME", temp.path());
+
+    let tool = InitiativeTool::new();
+    let ctx = delete_test_ctx("ses_list_bad_format", project.clone());
+
+    let err = tool
+        .execute(json!({"action": "list", "format": "yaml"}), ctx)
+        .await
+        .expect_err("invalid format should error");
+    assert!(err.to_string().contains("unknown format"));
+
+    if let Some(prev_home) = prev_home {
+        crate::env::set_var("JCODE_HOME", prev_home);
+    } else {
+        crate::env::remove_var("JCODE_HOME");
+    }
+}

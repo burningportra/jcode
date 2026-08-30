@@ -6,15 +6,15 @@
 pub use jcode_config_types::{
     AgentsConfig, AmbientConfig, AuthConfig, AutoJudgeConfig, AutoReviewConfig, CompactionConfig,
     CompactionMode, CrossProviderFailoverMode, DiagramDisplayMode, DiagramPanePosition,
-    DiffDisplayMode, DisplayConfig, FeatureConfig, GatewayConfig, HookCommands, HooksConfig,
-    KeybindingsConfig, LatexRenderingMode, LaunchHotkeyEntry, LaunchHotkeysConfig,
+    DiffDisplayMode, DisplayConfig, FeatureConfig, FffBackendMode, GatewayConfig, HookCommands,
+    HooksConfig, KeybindingsConfig, LatexRenderingMode, LaunchHotkeyEntry, LaunchHotkeysConfig,
     MarkdownSpacingMode, NamedProviderAuth, NamedProviderConfig, NamedProviderModelConfig,
     NamedProviderType, NativeScrollbarConfig, NotificationsConfig, OverscrollStatusMode,
     PowerConfig, PromptSuggestionAcceptanceKey, PromptSuggestionsConfig,
     PromptSuggestionsResolvedConfig, PromptSuggestionsWorkspaceOverride, ProviderConfig,
-    ReasoningDisplayMode, SafetyConfig, SessionPickerResumeAction, SponsorsConfig, SwarmSpawnMode,
-    SwarmStripLayout, TerminalConfig, UpdateChannel, WebSearchConfig, WebSearchEngine,
-    normalize_prompt_suggestion_workspace,
+    QualityConfig, ReasoningDisplayMode, SafetyConfig, SearchConfig, SessionPickerResumeAction,
+    SponsorsConfig, SwarmSpawnMode, SwarmStripLayout, TerminalConfig, UpdateChannel,
+    WebSearchConfig, WebSearchEngine, normalize_prompt_suggestion_workspace,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
@@ -486,6 +486,12 @@ pub struct Config {
 
     /// Web search tool configuration
     pub websearch: WebSearchConfig,
+
+    /// Indexed repository search rollout configuration.
+    pub search: SearchConfig,
+
+    /// Experimental sourced quality-report tool configuration.
+    pub quality: QualityConfig,
 
     /// Built-in tool exposure configuration
     pub tools: ToolConfig,

@@ -12,6 +12,8 @@ struct PairingView: View {
     @State private var isPairing = false
     @State private var errorMessage: String?
     @State private var showScanner = false
+    /// Session to resume when the scanned QR was a `/remote handoff`.
+    @State private var handoffSessionID: String?
 
     var body: some View {
         ScrollView {
@@ -101,6 +103,7 @@ struct PairingView: View {
                     host = payload.gateway.host
                     port = String(payload.gateway.port)
                     code = payload.code
+                    handoffSessionID = payload.sessionID
                     pair()
                 } else {
                     errorMessage = "Not a jcode pairing QR code"
@@ -168,6 +171,7 @@ struct PairingView: View {
         guard let portValue = UInt16(port) else { return }
         let gateway = Gateway(host: host.trimmingCharacters(in: .whitespaces), port: portValue)
         let pairCode = code
+        let resumeSessionID = handoffSessionID
         isPairing = true
         errorMessage = nil
         Task {
@@ -176,7 +180,8 @@ struct PairingView: View {
                 try await model.pair(
                     gateway: gateway,
                     code: pairCode,
-                    deviceName: UIDevice.current.name
+                    deviceName: UIDevice.current.name,
+                    resumeSessionID: resumeSessionID
                 )
             } catch let error as PairingClient.PairingError {
                 switch error {

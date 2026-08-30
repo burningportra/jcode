@@ -362,6 +362,7 @@ impl MultiProvider {
 
         result.spawn_anthropic_catalog_refresh_if_needed();
         result.spawn_openai_catalog_refresh_if_needed();
+        result.install_subscription_transport_profiles();
         result.auto_select_active_multi_account();
         crate::logging::info(&format!(
             "[TIMING] provider_init: claude={}, anthropic={}, openai={}, copilot={}, antigravity={}, gemini={}, cursor={}, bedrock={}, openrouter={}, total={}ms",
@@ -415,6 +416,32 @@ impl MultiProvider {
         result
     }
 
+    /// Install the xAI Grok OAuth compatible-profile runtime at construction so
+    /// the model picker offers its grok models even when another provider is
+    /// active, instead of only after a fresh login event. It reuses the
+    /// OpenRouter transport but is a distinct runtime identity (bearer refreshed
+    /// from ~/.jcode/xai_oauth.json at request time).
+    fn install_subscription_transport_profiles(&self) {
+        let registry = super::ProviderRegistry::new(self);
+        if crate::auth::xai::has_cached_auth()
+            && registry
+                .compatible_profile(super::XAI_OAUTH_PROFILE_ID)
+                .is_none()
+        {
+            match super::external::instantiate_openrouter_runtime(
+                super::external::OpenRouterRuntimeSpec::XaiOauth,
+            ) {
+                Ok(xai) => {
+                    registry.install_compatible_profile(super::XAI_OAUTH_PROFILE_ID, xai);
+                }
+                Err(error) => crate::logging::warn(&format!(
+                    "xAI Grok OAuth credentials are available but the runtime failed to \
+                     initialize at startup: {error}"
+                )),
+            }
+        }
+    }
+
     pub(super) fn spawn_openai_catalog_refresh_if_needed(&self) {
         let Some(provider) = self.openai_provider() else {
             return;
@@ -422,7 +449,6 @@ impl MultiProvider {
         if !begin_openai_model_catalog_refresh() {
             return;
         }
-
         tokio::spawn(async move {
             if let Err(err) = provider.prefetch_models().await {
                 crate::logging::info(&format!(

@@ -24,31 +24,34 @@ pub(super) async fn process_turn_with_input(
     event_stream: &mut EventStream,
     bus_receiver: &mut Receiver<BusEvent>,
 ) {
-    match app
+    let turn_succeeded = match app
         .run_turn_interactive(terminal, event_stream, Some(bus_receiver))
         .await
     {
         Ok(()) => {
             app.last_stream_error = None;
             app.last_submitted_input = None;
+            true
         }
         Err(error) => {
             let err_str = crate::util::format_error_chain(&error);
-            if super::is_request_payload_too_large_error(&err_str) {
-                if !app
-                    .try_recover_payload_too_large_and_retry(terminal, event_stream)
+            let recovered = if super::is_request_payload_too_large_error(&err_str) {
+                app.try_recover_payload_too_large_and_retry(terminal, event_stream)
                     .await
-                {
-                    app.handle_turn_error(err_str);
-                }
             } else if is_context_limit_error(&err_str) {
-                if !app.try_auto_compact_and_retry(terminal, event_stream).await {
-                    app.handle_turn_error(err_str);
-                }
+                app.try_auto_compact_and_retry(terminal, event_stream).await
             } else {
+                false
+            };
+            if !recovered {
                 app.handle_turn_error(err_str);
             }
+            recovered
         }
+    };
+
+    if turn_succeeded {
+        app.refresh_learning_inbox_after_turn();
     }
 
     if app.pending_queued_dispatch {
@@ -190,6 +193,10 @@ pub(super) fn handle_bus_event(
         Ok(BusEvent::ProductivityReportReady(event)) => {
             app.handle_productivity_report_ready(event);
             true
+        }
+        Ok(BusEvent::LearningInboxUpdated(update)) => app.handle_learning_inbox_updated(update),
+        Ok(BusEvent::LearningInboxCommandCompleted(update)) => {
+            app.handle_learning_inbox_command_completed(update)
         }
         Ok(BusEvent::MermaidRenderCompleted) => true,
         Ok(BusEvent::UsageReport(results)) => {

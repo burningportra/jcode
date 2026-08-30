@@ -20,7 +20,7 @@ fn default_display_for_action(action: &str) -> crate::goal::GoalDisplayMode {
         // The tool must never open (spawn) the side panel on its own; users
         // open it explicitly via /goals. UpdateOnly refreshes pages that are
         // already open without stealing focus.
-        "update" | "checkpoint" => crate::goal::GoalDisplayMode::UpdateOnly,
+        "update" | "checkpoint" | "review" => crate::goal::GoalDisplayMode::UpdateOnly,
         _ => crate::goal::GoalDisplayMode::None,
     }
 }
@@ -81,6 +81,20 @@ struct GoalInput {
     checkpoint_summary: Option<String>,
     #[serde(default)]
     display: Option<String>,
+    #[serde(default)]
+    lens: Option<String>,
+    #[serde(default)]
+    score: Option<u8>,
+    #[serde(default)]
+    pass: Option<u32>,
+    #[serde(default)]
+    gaps: Option<Vec<String>>,
+    #[serde(default)]
+    resolved: Option<Vec<String>>,
+    #[serde(default)]
+    reviewer_model: Option<String>,
+    #[serde(default)]
+    format: Option<String>,
 }
 
 fn goal_step_schema() -> Value {
@@ -121,7 +135,7 @@ impl Tool for InitiativeTool {
                 "intent": super::intent_schema_property(),
                 "action": {
                     "type": "string",
-                    "enum": ["create", "list", "show", "resume", "update", "checkpoint", "focus"],
+                    "enum": ["create", "list", "show", "resume", "update", "checkpoint", "review", "delete", "focus"],
                     "description": "Action."
                 },
                 "id": {"type": "string"},
@@ -136,7 +150,14 @@ impl Tool for InitiativeTool {
                 "blockers": {"type": "array", "items": {"type": "string"}},
                 "current_milestone_id": {"type": "string"},
                 "progress_percent": {"type": "integer"},
-                "checkpoint_summary": {"type": "string"}
+                "checkpoint_summary": {"type": "string"},
+                "lens": {"type": "string", "description": "Review lens for a `review` pass, e.g. architecture, edge-cases, security."},
+                "score": {"type": "integer", "description": "Quality score 0-100 after a `review` pass."},
+                "pass": {"type": "integer", "description": "1-based pass number for `review`; auto-increments when omitted."},
+                "gaps": {"type": "array", "items": {"type": "string"}, "description": "Gaps found in this review pass."},
+                "resolved": {"type": "array", "items": {"type": "string"}, "description": "Gaps resolved in this review pass."},
+                "reviewer_model": {"type": "string", "description": "Model that produced a cross-model review pass, if any."},
+                "format": {"type": "string", "enum": ["markdown", "json"], "description": "Output format for the `list` action. Default markdown; `json` returns the goals as an in-band JSON array (same shape as list metadata) so models/scripts get structured data."}
             }
         })
     }
@@ -154,6 +175,18 @@ impl Tool for InitiativeTool {
 
         match params.action.as_str() {
             "list" => {
+                // Resolve the output format up front so an invalid value errors
+                // before any side effects. markdown (default) keeps the output
+                // byte-identical to before; json puts structured data in-band so
+                // the model/scripts can consume it (metadata is not forwarded to
+                // the model transcript).
+                let as_json = match params.format.as_deref().map(str::trim) {
+                    None | Some("") | Some("markdown") => false,
+                    Some("json") => true,
+                    Some(other) => {
+                        anyhow::bail!("unknown format: {} (expected markdown or json)", other)
+                    }
+                };
                 let goals = crate::goal::list_relevant_goals(working_dir)?;
                 if display != crate::goal::GoalDisplayMode::None {
                     let focus = display != crate::goal::GoalDisplayMode::UpdateOnly;
@@ -164,9 +197,15 @@ impl Tool for InitiativeTool {
                     )?;
                     publish_side_panel_snapshot(&ctx.session_id, &snapshot);
                 }
-                Ok(ToolOutput::new(crate::goal::render_goals_overview(&goals))
+                let goals_json = serde_json::to_value(&goals)?;
+                let body = if as_json {
+                    serde_json::to_string_pretty(&goals_json)?
+                } else {
+                    crate::goal::render_goals_overview(&goals)
+                };
+                Ok(ToolOutput::new(body)
                     .with_title(format!("{} goals", goals.len()))
-                    .with_metadata(serde_json::to_value(&goals)?))
+                    .with_metadata(goals_json))
             }
             "create" => {
                 let title = params
@@ -347,6 +386,79 @@ impl Tool for InitiativeTool {
                         .with_title(goal.title.clone())
                         .with_metadata(serde_json::to_value(&goal)?),
                 )
+            }
+            "review" => {
+                let id = params
+                    .id
+                    .as_deref()
+                    .ok_or_else(|| anyhow::anyhow!("id is required for review"))?;
+                let lens = params
+                    .lens
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .ok_or_else(|| anyhow::anyhow!("lens is required for review"))?;
+                let goal = crate::goal::record_review(
+                    id,
+                    params
+                        .scope
+                        .as_deref()
+                        .and_then(crate::goal::GoalScope::parse),
+                    working_dir,
+                    crate::goal::GoalReviewInput {
+                        pass: params.pass,
+                        lens: lens.to_string(),
+                        score: params.score.unwrap_or(0),
+                        gaps: params.gaps.clone().unwrap_or_default(),
+                        resolved: params.resolved.clone().unwrap_or_default(),
+                        reviewer_model: params.reviewer_model.clone(),
+                        summary: params.checkpoint_summary.clone(),
+                    },
+                )?
+                .ok_or_else(|| anyhow::anyhow!("initiative not found: {}", id))?;
+                if display != crate::goal::GoalDisplayMode::None
+                    && goal_page_is_open(&ctx.session_id, &goal.id)?
+                {
+                    let snapshot =
+                        crate::goal::write_goal_page(&ctx.session_id, working_dir, &goal, display)?;
+                    publish_side_panel_snapshot(&ctx.session_id, &snapshot);
+                }
+                let latest = goal.reviews.last();
+                let summary = latest
+                    .map(|r| format!(" pass {} ({}) {}/100", r.pass, r.lens, r.score))
+                    .unwrap_or_default();
+                Ok(
+                    ToolOutput::new(format!("Recorded review on `{}`:{}", goal.id, summary))
+                        .with_title(goal.title.clone())
+                        .with_metadata(serde_json::to_value(&goal)?),
+                )
+            }
+            "delete" => {
+                let id = params
+                    .id
+                    .as_deref()
+                    .ok_or_else(|| anyhow::anyhow!("id is required for delete"))?;
+                let scope_hint = params
+                    .scope
+                    .as_deref()
+                    .and_then(crate::goal::GoalScope::parse);
+                let Some(goal) = crate::goal::delete_goal(
+                    id,
+                    scope_hint,
+                    working_dir,
+                    Some(ctx.session_id.as_str()),
+                )?
+                else {
+                    anyhow::bail!("initiative not found: {}", id);
+                };
+                Ok(ToolOutput::new(format!(
+                    "Deleted initiative `{}` ({}) [was {}]",
+                    goal.id,
+                    goal.title,
+                    goal.status.as_str()
+                ))
+                .with_title(goal.title.clone())
+                .with_metadata(serde_json::to_value(&goal)?))
             }
             other => anyhow::bail!("unknown goal action: {}", other),
         }

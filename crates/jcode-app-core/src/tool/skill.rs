@@ -2,12 +2,20 @@
 
 use super::{Tool, ToolContext, ToolOutput};
 use crate::skill::SkillRegistry;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::{Value, json};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use tokio::sync::RwLock;
+
+pub(crate) mod crystallization;
+pub(crate) mod discovery;
+pub(crate) mod evolution;
+
+use crystallization::EvidenceReference;
+
+static CRYSTALLIZATION_OPERATION_LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
 
 pub struct SkillTool {
     registry: Arc<RwLock<SkillRegistry>>,
@@ -42,10 +50,228 @@ struct SkillInput {
     /// needs to load the prompt, so args are currently accepted and ignored.
     #[serde(default)]
     args: Option<String>,
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    content: Option<String>,
+    #[serde(default)]
+    evidence: Option<Vec<EvidenceReference>>,
+    #[serde(default)]
+    proposal_id: Option<String>,
+    #[serde(default)]
+    confirmed: Option<bool>,
+    #[serde(default)]
+    approval_evidence: Option<EvidenceReference>,
+    #[serde(default)]
+    suggestion_id: Option<String>,
+    #[serde(default)]
+    usage_id: Option<String>,
+    #[serde(default)]
+    outcome: Option<String>,
+    #[serde(default)]
+    confidence: Option<f64>,
+    #[serde(default)]
+    rationale: Option<String>,
+    #[serde(default)]
+    related_skill: Option<String>,
+    #[serde(default)]
+    evolution_kind: Option<String>,
+    #[serde(default)]
+    source_names: Option<Vec<String>>,
+    #[serde(default)]
+    destination_name: Option<String>,
+    #[serde(default)]
+    proposed_content: Option<String>,
 }
 
 fn default_action() -> String {
     "load".to_string()
+}
+
+fn validate_action_fields(params: &SkillInput) -> Result<()> {
+    match params.action.as_str() {
+        "crystallize" => {
+            if params.proposal_id.is_some()
+                || params.confirmed.is_some()
+                || params.approval_evidence.is_some()
+                || params.suggestion_id.is_some()
+                || params.usage_id.is_some()
+                || params.outcome.is_some()
+                || params.confidence.is_some()
+                || params.rationale.is_some()
+                || params.related_skill.is_some()
+                || params.evolution_kind.is_some()
+                || params.source_names.is_some()
+                || params.destination_name.is_some()
+                || params.proposed_content.is_some()
+            {
+                anyhow::bail!("crystallize accepts name, description, content, and evidence only");
+            }
+        }
+        "approve_crystallization" => {
+            if params.name.is_some()
+                || params.description.is_some()
+                || params.content.is_some()
+                || params.evidence.is_some()
+                || params.args.is_some()
+                || params.suggestion_id.is_some()
+                || params.usage_id.is_some()
+                || params.outcome.is_some()
+                || params.confidence.is_some()
+                || params.rationale.is_some()
+                || params.related_skill.is_some()
+                || params.evolution_kind.is_some()
+                || params.source_names.is_some()
+                || params.destination_name.is_some()
+                || params.proposed_content.is_some()
+            {
+                anyhow::bail!(
+                    "approve_crystallization accepts proposal_id, confirmed, and approval_evidence only"
+                );
+            }
+        }
+        "discover_crystallization" => {
+            if params.name.is_some()
+                || params.args.is_some()
+                || params.description.is_some()
+                || params.content.is_some()
+                || params.evidence.is_some()
+                || params.proposal_id.is_some()
+                || params.confirmed.is_some()
+                || params.approval_evidence.is_some()
+                || params.suggestion_id.is_some()
+                || params.usage_id.is_some()
+                || params.outcome.is_some()
+                || params.confidence.is_some()
+                || params.rationale.is_some()
+                || params.related_skill.is_some()
+                || params.evolution_kind.is_some()
+                || params.source_names.is_some()
+                || params.destination_name.is_some()
+                || params.proposed_content.is_some()
+            {
+                anyhow::bail!("discover_crystallization accepts no action-specific fields");
+            }
+        }
+        "review_crystallization" | "dismiss_crystallization" | "suppress_crystallization" => {
+            if params.name.is_some()
+                || params.args.is_some()
+                || params.description.is_some()
+                || params.content.is_some()
+                || params.evidence.is_some()
+                || params.proposal_id.is_some()
+                || params.confirmed.is_some()
+                || params.approval_evidence.is_some()
+                || params.usage_id.is_some()
+                || params.outcome.is_some()
+                || params.confidence.is_some()
+                || params.rationale.is_some()
+                || params.related_skill.is_some()
+                || params.evolution_kind.is_some()
+                || params.source_names.is_some()
+                || params.destination_name.is_some()
+                || params.proposed_content.is_some()
+            {
+                anyhow::bail!("Discovery suggestion actions accept suggestion_id only");
+            }
+        }
+        "record_skill_outcome" => {
+            if params.usage_id.is_none()
+                || params.outcome.is_none()
+                || params.confidence.is_none()
+                || params.rationale.is_none()
+                || params.name.is_some()
+                || params.args.is_some()
+                || params.description.is_some()
+                || params.content.is_some()
+                || params.evidence.is_some()
+                || params.suggestion_id.is_some()
+                || params.proposal_id.is_some()
+                || params.confirmed.is_some()
+                || params.approval_evidence.is_some()
+                || params.evolution_kind.is_some()
+                || params.source_names.is_some()
+                || params.destination_name.is_some()
+                || params.proposed_content.is_some()
+            {
+                anyhow::bail!(
+                    "record_skill_outcome requires usage_id, outcome, confidence, and rationale"
+                );
+            }
+        }
+        "propose_skill_evolution" => {
+            if params.suggestion_id.is_none()
+                || params.evolution_kind.is_none()
+                || params.source_names.is_none()
+                || params.name.is_some()
+                || params.args.is_some()
+                || params.description.is_some()
+                || params.content.is_some()
+                || params.evidence.is_some()
+                || params.proposal_id.is_some()
+                || params.confirmed.is_some()
+                || params.approval_evidence.is_some()
+                || params.usage_id.is_some()
+                || params.outcome.is_some()
+                || params.confidence.is_some()
+                || params.rationale.is_some()
+                || params.related_skill.is_some()
+            {
+                anyhow::bail!(
+                    "propose_skill_evolution requires suggestion_id, evolution_kind, and source_names"
+                );
+            }
+        }
+        "approve_skill_evolution" => {
+            if params.proposal_id.is_none()
+                || params.confirmed.is_none()
+                || params.approval_evidence.is_none()
+                || params.name.is_some()
+                || params.suggestion_id.is_some()
+                || params.evolution_kind.is_some()
+                || params.source_names.is_some()
+                || params.destination_name.is_some()
+                || params.proposed_content.is_some()
+                || params.args.is_some()
+                || params.description.is_some()
+                || params.content.is_some()
+                || params.evidence.is_some()
+                || params.usage_id.is_some()
+                || params.outcome.is_some()
+                || params.confidence.is_some()
+                || params.rationale.is_some()
+                || params.related_skill.is_some()
+            {
+                anyhow::bail!(
+                    "approve_skill_evolution accepts proposal_id, confirmed, and approval_evidence only"
+                );
+            }
+        }
+        _ => {
+            if params.description.is_some()
+                || params.content.is_some()
+                || params.evidence.is_some()
+                || params.proposal_id.is_some()
+                || params.confirmed.is_some()
+                || params.approval_evidence.is_some()
+                || params.suggestion_id.is_some()
+                || params.usage_id.is_some()
+                || params.outcome.is_some()
+                || params.confidence.is_some()
+                || params.rationale.is_some()
+                || params.related_skill.is_some()
+                || params.evolution_kind.is_some()
+                || params.source_names.is_some()
+                || params.destination_name.is_some()
+                || params.proposed_content.is_some()
+            {
+                anyhow::bail!(
+                    "Action-specific fields require their documented skill_manage action"
+                );
+            }
+        }
+    }
+    Ok(())
 }
 
 #[async_trait]
@@ -65,28 +291,87 @@ impl Tool for SkillTool {
                 "intent": super::intent_schema_property(),
                 "action": {
                     "type": "string",
-                    "enum": ["load", "list", "reload", "reload_all", "read"],
+                    "enum": ["load", "list", "reload", "reload_all", "read", "crystallize", "approve_crystallization", "discover_crystallization", "review_crystallization", "dismiss_crystallization", "suppress_crystallization", "record_skill_outcome", "propose_skill_evolution", "approve_skill_evolution"],
                     "description": "Action."
                 },
                 "name": {
                     "type": "string",
                     "description": "Skill name."
-                }
+                },
+                "description": {
+                    "type": "string",
+                    "description": "Proposed skill description for crystallize."
+                },
+                "content": {
+                    "type": "string",
+                    "description": "Proposed SKILL.md body for crystallize."
+                },
+                "evidence": {
+                    "type": "array",
+                    "minItems": 2,
+                    "maxItems": 12,
+                    "items": {
+                        "type": "object",
+                        "required": ["session_id", "message_id"],
+                        "properties": {
+                            "session_id": {"type": "string"},
+                            "message_id": {"type": "string"}
+                        }
+                    }
+                },
+                "proposal_id": {
+                    "type": "string",
+                    "description": "Content-addressed crystallization proposal ID."
+                },
+                "confirmed": {
+                    "type": "boolean",
+                    "description": "Must be true to install an approved crystallization proposal."
+                },
+                "approval_evidence": {
+                    "type": "object",
+                    "required": ["session_id", "message_id"],
+                    "properties": {
+                        "session_id": {"type": "string"},
+                        "message_id": {"type": "string"}
+                    },
+                    "description": "Persisted user message containing the full proposal ID and explicit approval."
+                },
+                "suggestion_id": {
+                    "type": "string",
+                    "description": "Content-addressed proactive discovery suggestion ID."
+                },
+                "usage_id": {"type": "string", "description": "Content-addressed eligible skill usage ID."},
+                "outcome": {"anyOf": [
+                    {"type": "string", "enum": ["helped", "corrected", "replaced", "unused"]},
+                    {"type": "null"}
+                ]},
+                "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                "rationale": {"type": "string", "minLength": 1, "maxLength": 500},
+                "related_skill": {"type": "string", "description": "Canonical related skill, allowed only for replaced."},
+                "evolution_kind": {"anyOf": [
+                    {"type": "string", "enum": ["refine", "merge", "retire"]},
+                    {"type": "null"}
+                ]},
+                "source_names": {"anyOf": [
+                    {"type": "array", "minItems": 1, "maxItems": 2, "items": {"type": "string"}},
+                    {"type": "null"}
+                ]},
+                "destination_name": {"type": "string"},
+                "proposed_content": {"type": "string", "description": "Exact raw replacement SKILL.md including frontmatter."}
             }
         })
     }
 
     async fn execute(&self, input: Value, ctx: ToolContext) -> Result<ToolOutput> {
         let params: SkillInput = serde_json::from_value(input)?;
+        validate_action_fields(&params)?;
+        evolution::recover_if_needed(&self.registry).await?;
         let action_label = params.action.clone();
         let name_label = params.name.clone().unwrap_or_else(|| "<none>".to_string());
         let _args = params.args.as_deref();
 
         match params.action.as_str() {
-            "load" => {
-                self.load_skill(params.name, ctx.working_dir.as_deref())
-                    .await
-            }
+            "load" => self.load_skill(params.name, &ctx).await,
             "list" => self.list_skills(ctx.working_dir.as_deref()).await,
             "reload" => self.reload_skill(params.name).await,
             "reload_all" => self.reload_all_skills(ctx.working_dir.as_deref()).await,
@@ -94,8 +379,32 @@ impl Tool for SkillTool {
                 self.read_skill(params.name, ctx.working_dir.as_deref())
                     .await
             }
+            "crystallize" => {
+                self.crystallize(
+                    params.name,
+                    params.description,
+                    params.content,
+                    params.evidence,
+                )
+                .await
+            }
+            "approve_crystallization" => {
+                self.approve_crystallization(
+                    params.proposal_id,
+                    params.confirmed == Some(true),
+                    params.approval_evidence,
+                )
+                .await
+            }
+            "discover_crystallization" => self.discover_crystallization().await,
+            "review_crystallization" => self.review_crystallization(params.suggestion_id).await,
+            "dismiss_crystallization" => self.dismiss_crystallization(params.suggestion_id).await,
+            "suppress_crystallization" => self.suppress_crystallization(params.suggestion_id).await,
+            "record_skill_outcome" => self.record_skill_outcome(&params, &ctx).await,
+            "propose_skill_evolution" => self.propose_skill_evolution(&params).await,
+            "approve_skill_evolution" => self.approve_skill_evolution(&params).await,
             _ => Ok(ToolOutput::new(format!(
-                "Unknown action: {}. Use 'load', 'list', 'reload', 'reload_all', or 'read'.",
+                "Unknown action: {}. Use a documented skill_manage action.",
                 params.action
             ))),
         }
@@ -110,14 +419,232 @@ impl Tool for SkillTool {
 }
 
 impl SkillTool {
-    async fn load_skill(
+    async fn record_skill_outcome(
+        &self,
+        params: &SkillInput,
+        ctx: &ToolContext,
+    ) -> Result<ToolOutput> {
+        if ctx.execution_mode != jcode_tool_core::ToolExecutionMode::AgentTurn {
+            anyhow::bail!("Skill outcomes require an ordinary persisted agent turn");
+        }
+        let outcome =
+            evolution::OutcomeClass::parse(params.outcome.as_deref().unwrap_or_default())?;
+        let record = evolution::record_outcome(
+            &ctx.session_id,
+            &ctx.message_id,
+            &ctx.tool_call_id,
+            params.usage_id.as_deref().unwrap_or_default(),
+            outcome,
+            params.confidence.unwrap_or(f64::NAN),
+            params.rationale.as_deref().unwrap_or_default(),
+            params.related_skill.as_deref(),
+        )?;
+        Ok(ToolOutput::new(format!(
+            "Recorded verified skill outcome {} for usage {}.",
+            record.outcome_id, record.usage_id
+        )))
+    }
+
+    async fn propose_skill_evolution(&self, params: &SkillInput) -> Result<ToolOutput> {
+        let _operation = CRYSTALLIZATION_OPERATION_LOCK
+            .get_or_init(|| tokio::sync::Mutex::new(()))
+            .lock()
+            .await;
+        let _file_lock = crystallization::acquire_operation_lock()?;
+        let kind =
+            evolution::EvolutionKind::parse(params.evolution_kind.as_deref().unwrap_or_default())?;
+        let proposal = evolution::propose(
+            params.suggestion_id.as_deref().unwrap_or_default(),
+            kind,
+            params.source_names.clone().unwrap_or_default(),
+            params.destination_name.clone(),
+            params.proposed_content.clone(),
+        )?;
+        let preview = proposal
+            .proposed_content
+            .as_deref()
+            .unwrap_or("[archive the source skill without replacement]");
+        Ok(ToolOutput::new(format!(
+            "Created immutable skill evolution proposal {}.\n\nKind: {:?}\nSources: {}\nDestination: {}\n\nExact mutation preview:\n```markdown\n{}\n```\n\nTo approve, persist the exact user sentence: I approve skill evolution proposal {}.",
+            proposal.proposal_id,
+            proposal.kind,
+            proposal.source_names.join(", "),
+            proposal.destination_name.as_deref().unwrap_or("archive only"),
+            preview,
+            proposal.proposal_id
+        ))
+        .with_metadata(json!({
+            "schema_version": 1,
+            "status": "pending_approval",
+            "proposal_id": proposal.proposal_id,
+            "kind": proposal.kind,
+            "source_names": proposal.source_names,
+            "destination_name": proposal.destination_name,
+            "proposed_fingerprint": proposal.proposed_fingerprint
+        })))
+    }
+
+    async fn approve_skill_evolution(&self, params: &SkillInput) -> Result<ToolOutput> {
+        let _operation = CRYSTALLIZATION_OPERATION_LOCK
+            .get_or_init(|| tokio::sync::Mutex::new(()))
+            .lock()
+            .await;
+        let _file_lock = crystallization::acquire_operation_lock()?;
+        let approval = params
+            .approval_evidence
+            .as_ref()
+            .context("approval_evidence is required")?;
+        let result = evolution::approve_unlocked(
+            &self.registry,
+            params.proposal_id.as_deref().unwrap_or_default(),
+            params.confirmed == Some(true),
+            approval,
+        )
+        .await?;
+        Ok(ToolOutput::new(format!(
+            "Applied skill evolution proposal {} ({:?}). Sources: {}. Destination: {}.",
+            result.proposal_id,
+            result.kind,
+            result.source_names.join(", "),
+            result
+                .destination_name
+                .as_deref()
+                .unwrap_or("archived only")
+        )))
+    }
+
+    async fn discover_crystallization(&self) -> Result<ToolOutput> {
+        let _operation = CRYSTALLIZATION_OPERATION_LOCK
+            .get_or_init(|| tokio::sync::Mutex::new(()))
+            .lock()
+            .await;
+        let _file_lock = crystallization::acquire_operation_lock()?;
+        match discovery::discover()? {
+            Some(suggestion) => Ok(discovery::suggestion_output(&suggestion, "suggested")),
+            None => Ok(discovery::no_suggestion_output()),
+        }
+    }
+
+    async fn review_crystallization(&self, suggestion_id: Option<String>) -> Result<ToolOutput> {
+        let suggestion = discovery::review(&required_suggestion_id(suggestion_id)?)?;
+        Ok(discovery::suggestion_output(&suggestion, "reviewed"))
+    }
+
+    async fn dismiss_crystallization(&self, suggestion_id: Option<String>) -> Result<ToolOutput> {
+        let _operation = CRYSTALLIZATION_OPERATION_LOCK
+            .get_or_init(|| tokio::sync::Mutex::new(()))
+            .lock()
+            .await;
+        let _file_lock = crystallization::acquire_operation_lock()?;
+        let suggestion = discovery::dismiss(&required_suggestion_id(suggestion_id)?)?;
+        Ok(discovery::state_output(&suggestion, "dismissed"))
+    }
+
+    async fn suppress_crystallization(&self, suggestion_id: Option<String>) -> Result<ToolOutput> {
+        let _operation = CRYSTALLIZATION_OPERATION_LOCK
+            .get_or_init(|| tokio::sync::Mutex::new(()))
+            .lock()
+            .await;
+        let _file_lock = crystallization::acquire_operation_lock()?;
+        let suggestion = discovery::suppress(&required_suggestion_id(suggestion_id)?)?;
+        Ok(discovery::state_output(&suggestion, "suppressed"))
+    }
+
+    async fn crystallize(
         &self,
         name: Option<String>,
-        working_dir: Option<&std::path::Path>,
+        description: Option<String>,
+        content: Option<String>,
+        evidence: Option<Vec<EvidenceReference>>,
     ) -> Result<ToolOutput> {
+        let _operation = CRYSTALLIZATION_OPERATION_LOCK
+            .get_or_init(|| tokio::sync::Mutex::new(()))
+            .lock()
+            .await;
+        let _file_lock = crystallization::acquire_operation_lock()?;
+        let registry = self.registry.read().await;
+        let proposal = crystallization::propose(&registry, name, description, content, evidence)?;
+        let preview = crystallization::skill_preview(&proposal);
+        Ok(crystallization_output(&proposal, &preview, false, None))
+    }
+
+    async fn approve_crystallization(
+        &self,
+        proposal_id: Option<String>,
+        confirmed: bool,
+        approval_evidence: Option<EvidenceReference>,
+    ) -> Result<ToolOutput> {
+        let _operation = CRYSTALLIZATION_OPERATION_LOCK
+            .get_or_init(|| tokio::sync::Mutex::new(()))
+            .lock()
+            .await;
+        let _file_lock = crystallization::acquire_operation_lock()?;
+        let proposal_id = proposal_id
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| {
+                anyhow::anyhow!("'proposal_id' is required for approve_crystallization action")
+            })?;
+        let proposal = crystallization::load_for_approval(&proposal_id)?;
+        let preview = crystallization::skill_preview(&proposal);
+        if !confirmed {
+            return Ok(crystallization_output(&proposal, &preview, false, None));
+        }
+        let approval_evidence = approval_evidence.context(
+            "'approval_evidence' is required for confirmed approve_crystallization action",
+        )?;
+        crystallization::verify_approval(&proposal, &approval_evidence)?;
+        {
+            let registry = self.registry.read().await;
+            crystallization::revalidate_for_approval(&registry, &proposal)?;
+        }
+        let (installed_path, installed_preview) = crystallization::install_skill(&proposal)?;
+        let candidate = match SkillRegistry::load_global() {
+            Ok(candidate) => candidate,
+            Err(error) => {
+                return Ok(crystallization_incomplete_output(
+                    &proposal,
+                    &installed_preview,
+                    &installed_path,
+                    "installed_registry_incomplete",
+                    &error.to_string(),
+                ));
+            }
+        };
+        if let Err(error) = crystallization::verify_reloaded(&candidate, &proposal, &installed_path)
+        {
+            return Ok(crystallization_incomplete_output(
+                &proposal,
+                &installed_preview,
+                &installed_path,
+                "installed_registry_incomplete",
+                &error.to_string(),
+            ));
+        }
+        *self.registry.write().await = candidate;
+        let archive_path = match crystallization::archive(&proposal) {
+            Ok(path) => path,
+            Err(error) => {
+                return Ok(crystallization_incomplete_output(
+                    &proposal,
+                    &installed_preview,
+                    &installed_path,
+                    "installed_archive_incomplete",
+                    &error.to_string(),
+                ));
+            }
+        };
+        Ok(crystallization_output(
+            &proposal,
+            &installed_preview,
+            true,
+            Some((installed_path, archive_path)),
+        ))
+    }
+
+    async fn load_skill(&self, name: Option<String>, ctx: &ToolContext) -> Result<ToolOutput> {
         let name = normalize_skill_name(name, "load")?;
 
-        let registry = self.effective_registry(working_dir).await;
+        let registry = self.effective_registry(ctx.working_dir.as_deref()).await;
         let skill = registry.get(&name).ok_or_else(|| {
             // Endorsed skills are advertised in `list` but are not bundled;
             // a bare "not found" here reads like a bug (issue #445). Point at
@@ -150,11 +677,31 @@ impl SkillTool {
             .map(|p| p.display().to_string())
             .unwrap_or_else(|| ".".to_string());
 
+        let tracking = if ctx.execution_mode == jcode_tool_core::ToolExecutionMode::AgentTurn {
+            match evolution::record_usage(
+                &ctx.session_id,
+                &ctx.message_id,
+                &ctx.tool_call_id,
+                &skill.name,
+                &skill.path,
+            ) {
+                Ok(usage) => format!(
+                    "\n\n**Skill evolution tracking**: usage_id=`{}`. After applying this skill, report exactly one outcome with `skill_manage record_skill_outcome` from a later assistant message.",
+                    usage.usage_id
+                ),
+                Err(error) => format!(
+                    "\n\n**Skill evolution tracking**: unavailable ({error}). The skill loaded normally."
+                ),
+            }
+        } else {
+            "\n\n**Skill evolution tracking**: unavailable for direct execution.".to_string()
+        };
+
         Ok(ToolOutput::new(format!(
             "## Skill: {}\n\n**Base directory**: {}\n\n{}",
             skill.name,
             base_dir,
-            skill.get_prompt()
+            format!("{}{}", skill.get_prompt(), tracking)
         ))
         .with_title(format!("skill: {}", skill.name)))
     }
@@ -373,6 +920,116 @@ fn normalize_skill_name(name: Option<String>, action: &str) -> Result<String> {
     Ok(trimmed)
 }
 
+fn required_suggestion_id(suggestion_id: Option<String>) -> Result<String> {
+    suggestion_id
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| anyhow::anyhow!("'suggestion_id' is required for this discovery action"))
+}
+
+fn crystallization_output(
+    proposal: &crystallization::Proposal,
+    preview: &str,
+    installed: bool,
+    paths: Option<(std::path::PathBuf, std::path::PathBuf)>,
+) -> ToolOutput {
+    let evidence = proposal
+        .evidence
+        .iter()
+        .map(|item| {
+            format!(
+                "- session={} message={} role={}: {}",
+                item.session_id, item.message_id, item.role, item.excerpt
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let confirmation = json!({
+        "action": "approve_crystallization",
+        "proposal_id": proposal.proposal_id,
+        "confirmed": true,
+        "approval_evidence": {
+            "session_id": "<session containing the explicit user approval>",
+            "message_id": "<persisted user approval message ID>"
+        }
+    });
+    let (status, note) = if installed {
+        (
+            "installed",
+            "The skill was created, reloaded, verified, and the proposal was archived.",
+        )
+    } else {
+        (
+            "pending_confirmation",
+            "No skill was created. Explicit confirmation is required.",
+        )
+    };
+    let mut metadata = json!({
+        "kind": "skill_crystallization",
+        "schema_version": 1,
+        "status": status,
+        "proposal_id": proposal.proposal_id,
+        "name": proposal.name,
+        "content_fingerprint": proposal.content_fingerprint,
+        "preview": preview,
+        "evidence": proposal.evidence,
+        "confirmation": confirmation,
+        "installed": installed
+    });
+    if let Some((installed_path, archive_path)) = paths {
+        metadata["installed_path"] = json!(installed_path);
+        metadata["archive_path"] = json!(archive_path);
+    }
+    ToolOutput::new(format!(
+        "Skill crystallization proposal: {}\n\n## Exact SKILL.md preview\n\n```markdown\n{}\n```\n\n## Verified evidence\n{}\n\n{}\n\nApproval call:\n```json\n{}\n```",
+        proposal.proposal_id,
+        preview,
+        evidence,
+        note,
+        serde_json::to_string_pretty(&confirmation).expect("JSON serialization cannot fail")
+    ))
+    .with_title(if installed {
+        format!("Skill crystallized: {}", proposal.name)
+    } else {
+        format!("Skill proposal: {}", proposal.name)
+    })
+    .with_metadata(metadata)
+}
+
+fn crystallization_incomplete_output(
+    proposal: &crystallization::Proposal,
+    preview: &str,
+    installed_path: &std::path::Path,
+    status: &str,
+    error: &str,
+) -> ToolOutput {
+    let retry = json!({
+        "action": "approve_crystallization",
+        "proposal_id": proposal.proposal_id,
+        "confirmed": true,
+        "approval_evidence": {
+            "session_id": "<session containing the explicit user approval>",
+            "message_id": "<persisted user approval message ID>"
+        }
+    });
+    ToolOutput::new(format!(
+        "Skill installation requires recovery. The exact skill exists at {}, but the workflow stopped in state `{status}`: {error}\n\nRetry with the same verified approval call.",
+        installed_path.display()
+    ))
+    .with_title(format!("Skill recovery required: {}", proposal.name))
+    .with_metadata(json!({
+        "kind": "skill_crystallization",
+        "schema_version": 1,
+        "status": status,
+        "proposal_id": proposal.proposal_id,
+        "name": proposal.name,
+        "preview": preview,
+        "installed": true,
+        "installed_path": installed_path,
+        "retry": retry,
+        "error": error
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -430,6 +1087,23 @@ mod tests {
         assert_eq!(schema["type"], "object");
         assert!(schema["properties"]["action"].is_object());
         assert!(schema["properties"]["name"].is_object());
+        for field in ["outcome", "evolution_kind", "source_names"] {
+            assert!(
+                schema["properties"][field]["anyOf"]
+                    .as_array()
+                    .is_some_and(|variants| variants.iter().any(|value| value["type"] == "null")),
+                "{field} must remain optional for unrelated actions"
+            );
+        }
+        let ordinary: SkillInput = serde_json::from_value(json!({
+            "action": "load",
+            "name": "demo",
+            "outcome": null,
+            "evolution_kind": null,
+            "source_names": null
+        }))
+        .unwrap();
+        validate_action_fields(&ordinary).unwrap();
     }
 
     #[tokio::test]
@@ -645,5 +1319,508 @@ mod tests {
             "skill edits must be visible without daemon restart, got: {}",
             read.output
         );
+    }
+
+    struct TestHome {
+        previous: Option<std::ffi::OsString>,
+        _dir: tempfile::TempDir,
+    }
+
+    impl TestHome {
+        fn new() -> Self {
+            let dir = tempfile::tempdir().unwrap();
+            let previous = std::env::var_os("JCODE_HOME");
+            unsafe { std::env::set_var("JCODE_HOME", dir.path()) };
+            Self {
+                previous,
+                _dir: dir,
+            }
+        }
+    }
+
+    impl Drop for TestHome {
+        fn drop(&mut self) {
+            if let Some(previous) = self.previous.take() {
+                unsafe { std::env::set_var("JCODE_HOME", previous) };
+            } else {
+                unsafe { std::env::remove_var("JCODE_HOME") };
+            }
+        }
+    }
+
+    fn save_evidence_session(id: &str, text: &str) -> String {
+        use crate::message::{ContentBlock, Role};
+        let mut session = crate::session::Session::create_with_id(id.to_string(), None, None);
+        let message_id = session.add_message(
+            Role::User,
+            vec![ContentBlock::Text {
+                text: text.to_string(),
+                cache_control: None,
+            }],
+        );
+        session.save().unwrap();
+        message_id
+    }
+
+    #[tokio::test]
+    async fn proactive_discovery_requires_three_sessions_and_supports_all_controls() {
+        let _env_lock = crate::storage::lock_test_env();
+        let _home = TestHome::new();
+        let workflow = "Run the release checklist, verify every artifact, and summarize failures.";
+        save_evidence_session("discovery-session-a", workflow);
+        save_evidence_session("discovery-session-b", workflow);
+        let tool = create_test_tool();
+
+        let none = tool
+            .execute(
+                json!({"action": "discover_crystallization"}),
+                create_test_context(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(none.metadata.unwrap()["status"], "no_suggestion");
+
+        save_evidence_session("discovery-session-c", workflow);
+        let suggested = tool
+            .execute(
+                json!({"action": "discover_crystallization"}),
+                create_test_context(),
+            )
+            .await
+            .unwrap();
+        let metadata = suggested.metadata.as_ref().unwrap();
+        assert_eq!(metadata["status"], "suggested");
+        assert_eq!(metadata["evidence"].as_array().unwrap().len(), 3);
+        assert!(suggested.output.contains("**Review**"));
+        assert!(suggested.output.contains("**Dismiss**"));
+        assert!(suggested.output.contains("**Never suggest this**"));
+        assert!(metadata["actions"]["propose"].is_null());
+        let first_id = metadata["suggestion_id"].as_str().unwrap().to_string();
+
+        let reviewed = tool
+            .execute(
+                json!({
+                    "action": "review_crystallization",
+                    "suggestion_id": first_id
+                }),
+                create_test_context(),
+            )
+            .await
+            .unwrap();
+        let reviewed_metadata = reviewed.metadata.unwrap();
+        assert_eq!(reviewed_metadata["status"], "reviewed");
+        assert_eq!(
+            reviewed_metadata["actions"]["propose"]["action"],
+            "crystallize"
+        );
+
+        let dismissed = tool
+            .execute(
+                json!({
+                    "action": "dismiss_crystallization",
+                    "suggestion_id": first_id
+                }),
+                create_test_context(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(dismissed.metadata.unwrap()["status"], "dismissed");
+        let dismissed_scan = tool
+            .execute(
+                json!({"action": "discover_crystallization"}),
+                create_test_context(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(dismissed_scan.metadata.unwrap()["status"], "no_suggestion");
+
+        save_evidence_session("discovery-session-d", workflow);
+        let newer = tool
+            .execute(
+                json!({"action": "discover_crystallization"}),
+                create_test_context(),
+            )
+            .await
+            .unwrap();
+        let newer_metadata = newer.metadata.as_ref().unwrap();
+        assert_eq!(newer_metadata["status"], "suggested");
+        assert_ne!(newer_metadata["suggestion_id"], first_id);
+        let newer_id = newer_metadata["suggestion_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let suppressed = tool
+            .execute(
+                json!({
+                    "action": "suppress_crystallization",
+                    "suggestion_id": newer_id
+                }),
+                create_test_context(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(suppressed.metadata.unwrap()["status"], "suppressed");
+        save_evidence_session("discovery-session-e", workflow);
+        let suppressed_scan = tool
+            .execute(
+                json!({"action": "discover_crystallization"}),
+                create_test_context(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(suppressed_scan.metadata.unwrap()["status"], "no_suggestion");
+    }
+
+    #[tokio::test]
+    async fn proactive_discovery_rejects_unknown_or_tampered_suggestions() {
+        let _env_lock = crate::storage::lock_test_env();
+        let home = TestHome::new();
+        let workflow = "Always run the focused migration check before changing the schema.";
+        save_evidence_session("tamper-discovery-a", workflow);
+        save_evidence_session("tamper-discovery-b", workflow);
+        save_evidence_session("tamper-discovery-c", workflow);
+        let tool = create_test_tool();
+        let suggested = tool
+            .execute(
+                json!({"action": "discover_crystallization"}),
+                create_test_context(),
+            )
+            .await
+            .unwrap();
+        let suggestion_id = suggested.metadata.unwrap()["suggestion_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let path = home
+            ._dir
+            .path()
+            .join("skill-crystallization/discovery/suggestions")
+            .join(format!("{suggestion_id}.json"));
+        let persisted = std::fs::read_to_string(&path).unwrap();
+        std::fs::write(
+            &path,
+            persisted.replace("focused migration check", "different migration check"),
+        )
+        .unwrap();
+        let error = tool
+            .execute(
+                json!({
+                    "action": "review_crystallization",
+                    "suggestion_id": suggestion_id
+                }),
+                create_test_context(),
+            )
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("fingerprint"));
+
+        let unsafe_id = tool
+            .execute(
+                json!({
+                    "action": "review_crystallization",
+                    "suggestion_id": "../unsafe"
+                }),
+                create_test_context(),
+            )
+            .await
+            .unwrap_err();
+        assert!(unsafe_id.to_string().contains("64 lowercase hexadecimal"));
+    }
+
+    #[tokio::test]
+    async fn proactive_discovery_ignores_jcode_control_plane_messages() {
+        let _env_lock = crate::storage::lock_test_env();
+        let _home = TestHome::new();
+        for suffix in ["a", "b", "c"] {
+            save_evidence_session(
+                &format!("control-plane-{suffix}"),
+                "[auto] Quality checks passed. Give the user a concise final response now.",
+            );
+        }
+        let output = create_test_tool()
+            .execute(
+                json!({"action": "discover_crystallization"}),
+                create_test_context(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(output.metadata.unwrap()["status"], "no_suggestion");
+    }
+
+    #[tokio::test]
+    async fn crystallization_public_workflow_requires_confirmation_and_reloads() {
+        let _env_lock = crate::storage::lock_test_env();
+        let home = TestHome::new();
+        let first = save_evidence_session(
+            "crystal-session-a",
+            "Repeated workflow evidence A and private unrelated tail.",
+        );
+        let second = save_evidence_session("crystal-session-b", "Repeated workflow evidence B.");
+        let registry = Arc::new(RwLock::new(SkillRegistry::load_global().unwrap()));
+        let tool = SkillTool::new(registry);
+        let input = json!({
+            "action": "crystallize",
+            "name": "repeatable-check",
+            "description": "Run a repeatable verified check.",
+            "content": "# Repeatable check\n\nRun the focused verification.",
+            "evidence": [
+                {"session_id": "crystal-session-b", "message_id": second},
+                {"session_id": "crystal-session-a", "message_id": first}
+            ]
+        });
+        let proposed = tool
+            .execute(input.clone(), create_test_context())
+            .await
+            .unwrap();
+        let metadata = proposed.metadata.as_ref().unwrap();
+        let proposal_id = metadata["proposal_id"].as_str().unwrap();
+        assert_eq!(metadata["status"], "pending_confirmation");
+        assert!(
+            !home
+                ._dir
+                .path()
+                .join("skills/repeatable-check/SKILL.md")
+                .exists()
+        );
+        assert!(proposed.output.contains("No skill was created"));
+
+        let not_found = tool
+            .execute(
+                json!({"action": "read", "name": "repeatable-check"}),
+                create_test_context(),
+            )
+            .await
+            .unwrap();
+        assert!(not_found.output.contains("not found"));
+
+        let unconfirmed = tool
+            .execute(
+                json!({
+                    "action": "approve_crystallization",
+                    "proposal_id": proposal_id
+                }),
+                create_test_context(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(unconfirmed.metadata.unwrap()["installed"], false);
+        assert!(
+            !home
+                ._dir
+                .path()
+                .join("skills/repeatable-check/SKILL.md")
+                .exists()
+        );
+
+        let missing_approval = tool
+            .execute(
+                json!({
+                    "action": "approve_crystallization",
+                    "proposal_id": proposal_id,
+                    "confirmed": true
+                }),
+                create_test_context(),
+            )
+            .await
+            .unwrap_err();
+        assert!(missing_approval.to_string().contains("approval_evidence"));
+
+        let rejected_approval = save_evidence_session(
+            "crystal-rejected-approval",
+            &format!("Do not approve skill crystallization proposal {proposal_id}."),
+        );
+        let rejected = tool
+            .execute(
+                json!({
+                    "action": "approve_crystallization",
+                    "proposal_id": proposal_id,
+                    "confirmed": true,
+                    "approval_evidence": {
+                        "session_id": "crystal-rejected-approval",
+                        "message_id": rejected_approval
+                    }
+                }),
+                create_test_context(),
+            )
+            .await
+            .unwrap_err();
+        assert!(rejected.to_string().contains("must exactly match"));
+
+        let staging = home
+            ._dir
+            .path()
+            .join("skills")
+            .join(format!(".crystallize-{proposal_id}"));
+        std::fs::create_dir_all(&staging).unwrap();
+        std::fs::write(
+            staging.join("SKILL.md"),
+            metadata["preview"].as_str().unwrap(),
+        )
+        .unwrap();
+
+        let approval_message = save_evidence_session(
+            "crystal-approval-session",
+            &format!("I approve skill crystallization proposal {proposal_id}."),
+        );
+        let approved = tool
+            .execute(
+                json!({
+                    "action": "approve_crystallization",
+                    "proposal_id": proposal_id,
+                    "confirmed": true,
+                    "approval_evidence": {
+                        "session_id": "crystal-approval-session",
+                        "message_id": approval_message
+                    }
+                }),
+                create_test_context(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(approved.metadata.as_ref().unwrap()["status"], "installed");
+        let installed =
+            std::fs::read_to_string(home._dir.path().join("skills/repeatable-check/SKILL.md"))
+                .unwrap();
+        assert_eq!(installed, metadata["preview"].as_str().unwrap());
+
+        let read = tool
+            .execute(
+                json!({"action": "read", "name": "repeatable-check"}),
+                create_test_context(),
+            )
+            .await
+            .unwrap();
+        assert!(read.output.contains("Run the focused verification"));
+        assert!(
+            tool.execute(input, create_test_context())
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("already exists")
+        );
+        assert!(
+            tool.execute(
+                json!({
+                    "action": "approve_crystallization",
+                    "proposal_id": proposal_id,
+                    "confirmed": true,
+                    "approval_evidence": {
+                        "session_id": "crystal-approval-session",
+                        "message_id": approval_message
+                    }
+                }),
+                create_test_context()
+            )
+            .await
+            .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn crystallization_rejects_unsafe_and_unverified_evidence() {
+        let _env_lock = crate::storage::lock_test_env();
+        let _home = TestHome::new();
+        let tool = create_test_tool();
+        let error = tool
+            .execute(
+                json!({
+                    "action": "crystallize",
+                    "name": "../unsafe",
+                    "description": "Description",
+                    "content": "Body",
+                    "evidence": [
+                        {"session_id": "../session", "message_id": "a"},
+                        {"session_id": "other", "message_id": "b"}
+                    ]
+                }),
+                create_test_context(),
+            )
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("lowercase kebab-case"));
+    }
+
+    #[tokio::test]
+    async fn crystallization_detects_full_message_changes_outside_the_excerpt() {
+        let _env_lock = crate::storage::lock_test_env();
+        let _home = TestHome::new();
+        let long_prefix = "stable ".repeat(100);
+        let first = save_evidence_session("digest-session-a", &format!("{long_prefix}tail-a"));
+        let second = save_evidence_session("digest-session-b", "Second repeated workflow example.");
+        let tool = SkillTool::new(Arc::new(RwLock::new(SkillRegistry::load_global().unwrap())));
+        let proposed = tool
+            .execute(
+                json!({
+                    "action": "crystallize",
+                    "name": "digest-bound-workflow",
+                    "description": "Capture a digest-bound workflow.",
+                    "content": "# Digest-bound workflow\n\nRun the verified steps.",
+                    "evidence": [
+                        {"session_id": "digest-session-a", "message_id": first},
+                        {"session_id": "digest-session-b", "message_id": second}
+                    ]
+                }),
+                create_test_context(),
+            )
+            .await
+            .unwrap();
+        let proposal_id = proposed.metadata.unwrap()["proposal_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let session_path = crate::session::session_path("digest-session-a").unwrap();
+        let persisted = std::fs::read_to_string(&session_path).unwrap();
+        assert!(persisted.contains("tail-a"));
+        std::fs::write(&session_path, persisted.replace("tail-a", "tail-b")).unwrap();
+        let approval = save_evidence_session(
+            "digest-approval-session",
+            &format!("I approve skill crystallization proposal {proposal_id}."),
+        );
+        let error = tool
+            .execute(
+                json!({
+                    "action": "approve_crystallization",
+                    "proposal_id": proposal_id,
+                    "confirmed": true,
+                    "approval_evidence": {
+                        "session_id": "digest-approval-session",
+                        "message_id": approval
+                    }
+                }),
+                create_test_context(),
+            )
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("evidence changed"));
+    }
+
+    #[tokio::test]
+    async fn concurrent_crystallization_proposals_are_serialized_and_deduplicated() {
+        let _env_lock = crate::storage::lock_test_env();
+        let _home = TestHome::new();
+        let first = save_evidence_session("concurrent-session-a", "Repeated workflow A.");
+        let second = save_evidence_session("concurrent-session-b", "Repeated workflow B.");
+        let tool = Arc::new(SkillTool::new(Arc::new(RwLock::new(
+            SkillRegistry::load_global().unwrap(),
+        ))));
+        let input = json!({
+            "action": "crystallize",
+            "name": "serialized-workflow",
+            "description": "Serialize proposal creation.",
+            "content": "# Serialized workflow\n\nRun once.",
+            "evidence": [
+                {"session_id": "concurrent-session-a", "message_id": first},
+                {"session_id": "concurrent-session-b", "message_id": second}
+            ]
+        });
+        let (left, right) = tokio::join!(
+            tool.execute(input.clone(), create_test_context()),
+            tool.execute(input, create_test_context())
+        );
+        assert_eq!(usize::from(left.is_ok()) + usize::from(right.is_ok()), 1);
+        let error = left.err().or_else(|| right.err()).unwrap();
+        assert!(error.to_string().contains("pending proposal"));
     }
 }

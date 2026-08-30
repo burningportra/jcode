@@ -397,6 +397,24 @@ pub fn openai_compatible_profile_static_models(profile: OpenAiCompatibleProfile)
             push("claude-haiku-4-5");
             push("qwen3-235b-a22b-instruct-2507");
         }
+        // Vercel's unauthenticated `/v1/models` catalog is refreshed at runtime,
+        // but key activation and route rebuilding can complete before that async
+        // fetch. Keep a compact set of current agent-capable models available so
+        // login never leaves the provider with an empty model picker.
+        "vercel-ai-gateway" => {
+            push("anthropic/claude-opus-5");
+            push("anthropic/claude-sonnet-5");
+            push("anthropic/claude-opus-4.8");
+            push("anthropic/claude-sonnet-4.6");
+            push("openai/gpt-5.5");
+            push("openai/gpt-5.4");
+            push("openai/gpt-5.3-codex");
+            push("google/gemini-3.1-pro-preview");
+            push("moonshotai/kimi-k2.7-code");
+            push("moonshotai/kimi-k2.6");
+            push("zai/glm-5.2");
+            push("alibaba/qwen3-coder-next");
+        }
         // Issue #79: DeepSeek's live model catalog is not always available during
         // TUI startup, but both models should still be selectable once the direct
         // provider is configured.

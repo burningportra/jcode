@@ -391,6 +391,27 @@ pub enum SessionUpdateStatus {
     },
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LearningInboxUpdated {
+    pub session_id: String,
+    pub suggestion_id: Option<String>,
+    pub suggestion_kind: Option<String>,
+    pub workflow_text: Option<String>,
+    pub evidence_count: usize,
+    pub error: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LearningInboxCommandCompleted {
+    pub session_id: String,
+    pub action: String,
+    pub suggestion_id: Option<String>,
+    pub suggestion_kind: Option<String>,
+    pub review_prompt: Option<String>,
+    pub output: Option<String>,
+    pub error: Option<String>,
+}
+
 #[derive(Clone, Debug)]
 pub enum BusEvent {
     ToolUpdated(ToolEvent),
@@ -466,6 +487,10 @@ pub enum BusEvent {
     MermaidRenderCompleted,
     /// Productivity report finished generating off the UI thread
     ProductivityReportReady(ProductivityReportReady),
+    /// A background Learning Inbox refresh completed for one TUI session.
+    LearningInboxUpdated(LearningInboxUpdated),
+    /// A user-requested Learning Inbox control completed off the UI thread.
+    LearningInboxCommandCompleted(LearningInboxCommandCompleted),
 }
 
 pub struct Bus {

@@ -26,6 +26,7 @@ use crate::logging;
 mod auth;
 pub mod control;
 mod registry;
+mod web_assets;
 use auth::{
     AuthorizedDevice, WsAuth, WsAuthSource, authorize_ws_device, extract_ws_auth, ws_error_response,
 };
@@ -33,7 +34,7 @@ use auth::{
 pub(crate) use auth::{is_valid_hex_token, parse_bearer_token, parse_query_token};
 pub use control::{
     PairingInvite, RemoteCommand, RemoteStatus, ToggleOutcome, create_pairing_invite,
-    parse_remote_command, revoke_device, set_gateway_enabled,
+    create_pairing_invite_for_session, parse_remote_command, revoke_device, set_gateway_enabled,
 };
 pub use jcode_gateway_types::{PairedDevice, PairingCode};
 pub use registry::DeviceRegistry;
@@ -160,7 +161,7 @@ async fn handle_ws_connection(
     let ws_stream = tokio_tungstenite::accept_hdr_async(
         tcp_stream,
         |request: &tokio_tungstenite::tungstenite::handshake::server::Request,
-         response: tokio_tungstenite::tungstenite::handshake::server::Response| {
+         mut response: tokio_tungstenite::tungstenite::handshake::server::Response| {
             if request.uri().path() != "/ws" {
                 return Err(ws_error_response(
                     404,
@@ -172,6 +173,17 @@ async fn handle_ws_connection(
             let ws_auth = extract_ws_auth(request)?;
             // Reload from disk to pick up newly paired or revoked devices.
             let device = authorize_ws_device(&DeviceRegistry::load(), &ws_auth.token)?;
+            // When the browser authenticated via Sec-WebSocket-Protocol, echo the
+            // agreed non-secret subprotocol back, or the browser rejects the
+            // upgrade. The bearer token protocol itself is never echoed, so the
+            // secret stays out of the response.
+            if let Some(proto) = ws_auth.selected_protocol.as_deref()
+                && let Ok(value) = proto.parse()
+            {
+                response
+                    .headers_mut()
+                    .insert("sec-websocket-protocol", value);
+            }
             let mut guard = auth_cb
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -329,8 +341,10 @@ fn find_header_end(data: &[u8]) -> Option<usize> {
 }
 
 fn http_response(status: u16, status_text: &str, body: &str) -> Vec<u8> {
+    // `no-store` on every JSON response (notably 404s) so a browser can never
+    // pin a stale error, e.g. a 404 cached from before the PWA route existed.
     format!(
-        "HTTP/1.1 {} {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Headers: Content-Type\r\n\r\n{}",
+        "HTTP/1.1 {} {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Headers: Content-Type\r\n\r\n{}",
         status, status_text, body.len(), body
     ).into_bytes()
 }
@@ -416,10 +430,18 @@ async fn handle_http(
 
     let response = match (method, path_base) {
         ("GET", "/health") => {
+            // Report the server home so the browser client can send it as its
+            // subscribe working_dir. The server's home-dir guard then ignores it
+            // when attaching to a session with its own cwd, so a browser attach
+            // never re-pins a live session's directory.
+            let home = dirs::home_dir()
+                .map(|p| p.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "/".to_string());
             let body = serde_json::json!({
                 "status": "ok",
                 "version": jcode_build_meta::version(),
                 "gateway": true,
+                "home": home,
             });
             http_response(200, "OK", &body.to_string())
         }
@@ -437,8 +459,20 @@ async fn handle_http(
         }
 
         _ => {
-            let body = serde_json::json!({"error": "Not found"});
-            http_response(404, "Not Found", &body.to_string())
+            // Serve the embedded PWA for GET/HEAD of a known asset path.
+            // serve_asset returns None for /health, /pair, /ws, and unknowns,
+            // so those keep their existing behavior below.
+            if matches!(method, "GET" | "HEAD") {
+                if let Some(asset) = web_assets::serve_asset(path_base) {
+                    asset.bytes
+                } else {
+                    let body = serde_json::json!({"error": "Not found"});
+                    http_response(404, "Not Found", &body.to_string())
+                }
+            } else {
+                let body = serde_json::json!({"error": "Not found"});
+                http_response(404, "Not Found", &body.to_string())
+            }
         }
     };
 
