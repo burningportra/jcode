@@ -1274,7 +1274,7 @@ pub const GOOGLE_LOGIN_PROVIDER: LoginProviderDescriptor = LoginProviderDescript
     order: LoginProviderSurfaceOrder::new(Some(13), None, None, None, None),
 };
 
-pub(crate) const LOGIN_PROVIDERS: [LoginProviderDescriptor; 53] = [
+pub(crate) const LOGIN_PROVIDERS: [LoginProviderDescriptor; 55] = [
     AUTO_IMPORT_LOGIN_PROVIDER,
     CLAUDE_LOGIN_PROVIDER,
     ANTHROPIC_API_LOGIN_PROVIDER,

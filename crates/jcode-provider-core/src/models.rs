@@ -467,14 +467,39 @@ pub fn open_weight_family_context_limit(model: &str) -> Option<usize> {
         return Some(131_072);
     }
 
-    // --- Mistral small 3.x: 128K context ---
-    if m.contains("mistral-small-3") {
+    // --- xAI grok family: grok-4.x (256K), grok-code-fast (256K) ---
+    if m.contains("grok-4") || m.contains("grok-code-fast") {
+        return Some(256_000);
+    }
+
+    // --- ByteDance Seed 2.0 / StepFun Step 3.7 / Hunyuan hy3 / Ling / Inkling: 256K context ---
+    if m.contains("seed-2")
+        || m.contains("step-3.7")
+        || m.contains("hy3")
+        || m.contains("ling-3")
+        || m.contains("inkling")
+    {
+        return Some(262_144);
+    }
+
+    // --- NVIDIA Nemotron 3 / 3.5 family: 128K context ---
+    if m.contains("nemotron-3") {
         return Some(131_072);
     }
 
-    // --- xAI grok-code-fast: 256K context ---
-    if m.contains("grok-code-fast") {
-        return Some(256_000);
+    // --- Mistral family: 128K context ---
+    if m.contains("mistral") {
+        return Some(131_072);
+    }
+
+    // --- Cohere Command family: 256K context ---
+    if m.contains("command-a") || m.contains("command-r") {
+        return Some(262_144);
+    }
+
+    // --- Meta Llama 4 family: 1M context ---
+    if m.contains("llama-4") {
+        return Some(1_048_576);
     }
 
     // --- Perplexity Sonar: 128K context ---
