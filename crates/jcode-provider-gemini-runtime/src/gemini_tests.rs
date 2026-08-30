@@ -66,6 +66,7 @@ fn fallback_models_skip_current_model() {
     assert_eq!(
         gemini_fallback_models("gemini-2.5-flash"),
         vec![
+            "gemini-3.7-flash",
             "gemini-3.1-pro-preview",
             "gemini-3-pro-preview",
             "gemini-2.5-pro",
@@ -800,6 +801,37 @@ fn missing_thought_signature_errors_are_recognized_from_backend_bodies() {
     assert!(!jcode_provider_gemini::is_missing_thought_signature_error(
         "MALFORMED_FUNCTION_CALL"
     ));
+}
+
+#[test]
+fn native_generate_content_400_triggers_downgrade_recovery_predicate() {
+    // The exact native Developer-API body users hit when a model-switched or
+    // imported session has no signature to replay. `complete()` routes this
+    // through the `is_missing_thought_signature_error` arm, which retries with
+    // `SignaturePolicy::DowngradeToolCallsToText` instead of dead-ending.
+    let err = anyhow::anyhow!(
+        "Gemini generateContent failed: Gemini request generateContent failed \
+         (HTTP 400 Bad Request): {{\"error\": {{\"code\": 400, \"message\": \"Function call \
+         is missing a thought_signature in functionCall parts. This is required for tools \
+         to work correctly, and missing thought_signature may lead to degraded model \
+         performance. Additional data, function call `default_api:memory` , position 517. \
+         Please refer to https://ai.google.dev/gemini-api/docs/thought-signatures for more \
+         details.\", \"status\": \"INVALID_ARGUMENT\"}}}}"
+    );
+    assert!(
+        jcode_provider_gemini::is_missing_thought_signature_error(&err.to_string()),
+        "the native generateContent 400 body must be classified so the runtime downgrades"
+    );
+    // A different 400 (schema rejection) must NOT be treated as a missing
+    // signature, so it falls through to the schema-dialect recovery instead.
+    let schema_err = anyhow::anyhow!(
+        "Gemini generateContent failed (HTTP 400 Bad Request): Invalid JSON payload \
+         received. Unknown name \"additionalProperties\""
+    );
+    assert!(
+        !jcode_provider_gemini::is_missing_thought_signature_error(&schema_err.to_string()),
+        "a schema rejection must not trigger the lossy downgrade retry"
+    );
 }
 
 /// An assistant tool call plus its result, with no thought signature anywhere.
