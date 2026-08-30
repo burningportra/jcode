@@ -138,7 +138,7 @@ impl Tool for InitiativeTool {
                     "enum": ["create", "list", "show", "resume", "update", "checkpoint", "review", "delete", "focus"],
                     "description": "Action."
                 },
-                "id": {"type": "string"},
+                "id": {"type": "string", "description": "Initiative ID. Required for show, focus, update, checkpoint, review, and delete. The id is returned in the create response (in backticks)."},
                 "title": {"type": "string"},
                 "scope": {"type": "string"},
                 "status": {"type": "string"},
@@ -235,15 +235,18 @@ impl Tool for InitiativeTool {
                 )?;
                 let metadata = serde_json::to_value(&goal)?;
                 let output = if display == crate::goal::GoalDisplayMode::None {
-                    ToolOutput::new(format!("Created initiative `{}` ({})", goal.id, goal.title))
+                    ToolOutput::new(format!(
+                        "Created initiative `{}` ({}).\nid=`{}` — pass this id to update, checkpoint, review, show, and delete.",
+                        goal.id, goal.title, goal.id
+                    ))
                 } else {
                     let snapshot =
                         crate::goal::write_goal_page(&ctx.session_id, working_dir, &goal, display)?;
                     publish_side_panel_snapshot(&ctx.session_id, &snapshot);
                     maybe_publish_goals_overview_refresh(&ctx.session_id, working_dir)?;
                     ToolOutput::new(format!(
-                        "Created initiative `{}` ({}) and opened it in the side panel.",
-                        goal.id, goal.title
+                        "Created initiative `{}` ({}) and opened it in the side panel.\nid=`{}` — pass this id to update, checkpoint, review, show, and delete.",
+                        goal.id, goal.title, goal.id
                     ))
                 };
                 Ok(output
