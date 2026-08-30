@@ -1,6 +1,7 @@
 use super::{BuildInfo, SourceState};
 use anyhow::Result;
 use chrono::Utc;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -153,8 +154,41 @@ pub fn repo_build_version(repo_dir: &Path) -> Result<String> {
     Ok(current_source_state(repo_dir)?.version_label)
 }
 
+/// Read and resolve `.git/HEAD` directly from the filesystem without spawning
+/// `git`.  Falls back to `git rev-parse` only when the file is missing or
+/// malformed.
+fn parse_git_head_file(repo_dir: &Path) -> Option<String> {
+    // `.git/HEAD` format: "ref: refs/heads/<branch>" or a bare 40-char hex.
+    // We resolve refs first; bare hex is rare (detached HEAD / shallow clone).
+    let head_path = repo_dir.join(".git").join("HEAD");
+    let head_content = fs::read_to_string(&head_path).ok()?;
+    let trimmed = head_content.trim();
+
+    if trimmed.starts_with("ref: ") {
+        // Resolve ref: refs/heads/<name> → actual packfile or loose ref
+        let ref_path = repo_dir.join(trimmed.strip_prefix("ref: ").unwrap().trim());
+        let ref_content = fs::read_to_string(&ref_path).ok()?
+            .trim()
+            .to_string();
+        // Validate it looks like a 40-char hex SHA
+        if ref_content.len() == 40 && ref_content.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return Some(ref_content);
+        }
+    } else if trimmed.len() == 40 && trimmed.bytes().all(|b| b.is_ascii_hexdigit()) {
+        // Detached HEAD: file contains the raw SHA directly
+        return Some(trimmed.to_string());
+    }
+    // Fallback: file was malformed or unexpected format
+    None
+}
+
 /// Get the current git hash
 pub fn current_git_hash(repo_dir: &Path) -> Result<String> {
+    // Fast path: read .git/HEAD directly (no child process).
+    if let Some(full) = parse_git_head_file(repo_dir) {
+        return Ok(full[..8].to_string());
+    }
+    // Slow fallback: spawn `git` if file parse failed.
     let output = Command::new("git")
         .args(["rev-parse", "--short", "HEAD"])
         .current_dir(repo_dir)
@@ -169,6 +203,11 @@ pub fn current_git_hash(repo_dir: &Path) -> Result<String> {
 
 /// Get the full git hash
 pub fn current_git_hash_full(repo_dir: &Path) -> Result<String> {
+    // Fast path shared with current_git_hash.
+    if let Some(full) = parse_git_head_file(repo_dir) {
+        return Ok(full);
+    }
+    // Slow fallback.
     let output = Command::new("git")
         .args(["rev-parse", "HEAD"])
         .current_dir(repo_dir)
