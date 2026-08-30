@@ -702,7 +702,12 @@ impl MemoryAgent {
         // fused with RRF). Benchmarking showed the old dense-only path with a
         // 0.5 cosine floor surfaced essentially nothing on real session windows;
         // hybrid recovers recall and lets the sidecar/rerank do the filtering.
-        let candidates = memory_manager.find_similar_hybrid(
+        //
+        // Auto-recall is scoped to this project plus only the globally-shareable
+        // global memories (durable preferences/corrections). Project-specific
+        // facts/entities that other repos wrote into the global store are
+        // excluded so they cannot surface as irrelevant candidates here.
+        let candidates = memory_manager.find_similar_hybrid_auto_recall(
             &retrieval_text,
             &retrieval_embedding,
             memory::EMBEDDING_MAX_HITS,

@@ -637,7 +637,7 @@ fn scoped_retrieval_respects_project_vs_global() {
             .expect("remember project");
         manager
             .remember_global(MemoryEntry::new(
-                MemoryCategory::Fact,
+                MemoryCategory::Preference,
                 "global coffee preference",
             ))
             .expect("remember global");
@@ -952,4 +952,97 @@ fn focus_query_text_falls_back_when_all_stripped() {
     let focused = super::focus_query_text(raw);
     // Nothing substantive survives -> fall back to raw rather than empty.
     assert_eq!(focused, raw);
+}
+
+#[test]
+fn remember_global_redirects_project_specific_categories() {
+    with_temp_home(|_home| {
+        let manager = MemoryManager::new().with_project_dir("/tmp/jcode-global-gating");
+
+        // Facts and entities must not land in the global store.
+        let fact_id = manager
+            .remember_global(MemoryEntry::new(
+                MemoryCategory::Fact,
+                "commit deadbeef fixed the parser",
+            ))
+            .expect("remember fact");
+        let entity_id = manager
+            .remember_global(MemoryEntry::new(
+                MemoryCategory::Entity,
+                "CheenTickerService is the pricing daemon",
+            ))
+            .expect("remember entity");
+
+        let global = manager.load_global_graph().expect("load global");
+        assert!(
+            global.get_memory(&fact_id).is_none(),
+            "fact leaked into global store"
+        );
+        assert!(
+            global.get_memory(&entity_id).is_none(),
+            "entity leaked into global store"
+        );
+
+        let project = manager.load_project_graph().expect("load project");
+        assert!(
+            project.get_memory(&fact_id).is_some(),
+            "fact was not redirected to project store"
+        );
+        assert!(
+            project.get_memory(&entity_id).is_some(),
+            "entity was not redirected to project store"
+        );
+
+        // Preferences and corrections are genuinely global.
+        let pref_id = manager
+            .remember_global(MemoryEntry::new(
+                MemoryCategory::Preference,
+                "Kevin prefers profile-driven rigor",
+            ))
+            .expect("remember preference");
+        let global = manager.load_global_graph().expect("reload global");
+        assert!(
+            global.get_memory(&pref_id).is_some(),
+            "preference should be stored globally"
+        );
+    });
+}
+
+#[test]
+fn auto_recall_excludes_project_specific_globals() {
+    with_temp_home(|_home| {
+        let manager = MemoryManager::new().with_project_dir("/tmp/jcode-auto-recall-scope");
+
+        // A project fact and a global preference share the query space; a
+        // project-specific fact sitting in the global store (from another repo)
+        // must be excluded from auto-recall.
+        let project_fact = MemoryEntry::new(MemoryCategory::Fact, "build uses cargo selfdev profile")
+            .with_embedding(vec![0.0, 1.0]);
+        let project_id = manager.remember_project(project_fact).expect("remember project");
+
+        let global_pref = MemoryEntry::new(MemoryCategory::Preference, "prefers cargo selfdev builds")
+            .with_embedding(vec![0.0, 1.0]);
+        let pref_id = manager.remember_global(global_pref).expect("remember pref");
+
+        // Force a project-scoped fact directly into the global graph, simulating
+        // legacy pollution that predates the write-time gating.
+        let mut global = manager.load_global_graph().expect("load global");
+        let leaked = MemoryEntry::new(MemoryCategory::Fact, "cargo selfdev build detail from other repo")
+            .with_embedding(vec![0.0, 1.0]);
+        let leaked_id = global.add_memory(leaked);
+        manager.save_global_graph(&global).expect("save global");
+
+        let results = manager
+            .find_similar_hybrid_auto_recall("cargo selfdev build", &[0.0, 1.0], 10)
+            .expect("auto recall");
+        let ids: Vec<&str> = results.iter().map(|(e, _)| e.id.as_str()).collect();
+
+        assert!(ids.contains(&project_id.as_str()), "project fact should surface; got {:?}", ids);
+        assert!(ids.contains(&pref_id.as_str()), "global preference should surface; got {:?}", ids);
+        assert!(
+            !ids.contains(&leaked_id.as_str()),
+            "project-specific global fact must be excluded from auto-recall; got {:?}",
+            ids
+        );
+    });
 }

@@ -510,6 +510,18 @@ impl MemoryCategory {
             _ => MemoryCategory::Fact,
         }
     }
+
+    /// Whether a memory of this category is appropriate to store in and recall
+    /// from the cross-project global store.
+    ///
+    /// Preferences and corrections tend to describe the user's durable working
+    /// style and universal lessons that apply everywhere. Facts and entities are
+    /// almost always project-specific (file paths, commit hashes, service names),
+    /// so allowing them into global pollutes auto-recall in unrelated repos.
+    /// Custom categories are treated as project-specific by default.
+    pub fn is_globally_shareable(&self) -> bool {
+        matches!(self, MemoryCategory::Preference | MemoryCategory::Correction)
+    }
 }
 
 use std::collections::{BTreeMap, HashMap, HashSet};

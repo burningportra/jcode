@@ -116,7 +116,7 @@ impl Tool for MemoryTool {
                 "query": { "type": "string" },
                 "id": { "type": "string", "description": "Memory ID returned by remember. Required for forget, tag, and link actions." },
                 "tags": { "type": "array", "items": { "type": "string" } },
-                "scope": { "type": "string", "enum": ["project", "global", "all"] },
+                "scope": { "type": "string", "enum": ["project", "global", "all"], "description": "Storage/search scope. On remember, only preference and correction categories can be stored globally; facts and entities are always project-scoped." },
                 "from_id": { "type": "string", "description": "Source memory ID for link action." },
                 "to_id": { "type": "string", "description": "Target memory ID for link action." },
                 "limit": { "type": "integer", "description": "Max results." }
@@ -160,6 +160,14 @@ impl Tool for MemoryTool {
                 } else {
                     manager.remember_project(entry)?
                 };
+                // remember_global redirects project-specific categories
+                // (facts/entities/custom) to the project store, so report the
+                // scope that actually applied rather than what was requested.
+                let effective_scope = if scope == "global" && !category.is_globally_shareable() {
+                    "project"
+                } else {
+                    scope
+                };
                 // The agent just wrote this memory itself; the content is in
                 // the transcript (tool call + result), so auto-recall should
                 // not inject it back into this session.
@@ -170,13 +178,18 @@ impl Tool for MemoryTool {
                 );
                 memory::add_event(MemoryEventKind::ToolRemembered {
                     content: truncate_for_widget(&content, 60),
-                    scope: scope.to_string(),
+                    scope: effective_scope.to_string(),
                     category: category.to_string(),
                 });
                 memory::set_state(MemoryState::Idle);
+                let scope_note = if effective_scope != scope {
+                    " (requested global; facts/entities are project-scoped)"
+                } else {
+                    ""
+                };
                 Ok(ToolOutput::new(format!(
-                    "Remembered {} ({}): \"{}\" [id: {}]",
-                    category, scope, content, id
+                    "Remembered {} ({}): \"{}\" [id: {}]{}",
+                    category, effective_scope, content, id, scope_note
                 )))
             }
             "recall" => {

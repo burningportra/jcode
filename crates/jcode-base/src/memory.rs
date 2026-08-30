@@ -429,6 +429,14 @@ impl MemoryManager {
     }
 
     pub fn remember_global(&self, entry: MemoryEntry) -> Result<String> {
+        // Category gating: only durable, universal categories (preferences and
+        // corrections) belong in the cross-project global store. Project-specific
+        // categories (facts, entities, and custom) are redirected to the project
+        // store so they cannot pollute auto-recall in unrelated repositories.
+        if !entry.category.is_globally_shareable() {
+            return self.remember_project(entry);
+        }
+
         let mut entry = entry;
         if self.should_generate_embedding_for_entry(&entry) {
             entry.ensure_embedding();
@@ -662,6 +670,50 @@ impl MemoryManager {
             query_embedding,
             limit,
         ))
+    }
+
+    /// Hybrid retrieval for automatic recall. Includes every project memory but
+    /// only the globally-shareable global memories (durable preferences and
+    /// corrections). Project-specific facts/entities that leaked into the global
+    /// store from other repositories are excluded so they cannot surface as
+    /// irrelevant candidates here. Explicit `recall` still reaches all global
+    /// memories via the scoped API.
+    pub fn find_similar_hybrid_auto_recall(
+        &self,
+        query_text: &str,
+        query_embedding: &[f32],
+        limit: usize,
+    ) -> Result<Vec<(MemoryEntry, f32)>> {
+        let entries = self.collect_auto_recall_candidates_with_embeddings()?;
+        Ok(Self::hybrid_fuse(
+            entries,
+            query_text,
+            query_embedding,
+            limit,
+        ))
+    }
+
+    /// Candidate pool for automatic recall: all embedded project memories plus
+    /// the embedded global memories whose category is globally shareable.
+    fn collect_auto_recall_candidates_with_embeddings(&self) -> Result<Vec<MemoryEntry>> {
+        let mut entries: Vec<MemoryEntry> = Vec::new();
+        if let Ok(project) = self.load_project_graph() {
+            entries.extend(
+                project
+                    .active_memories()
+                    .filter(|m| m.embedding.is_some())
+                    .cloned(),
+            );
+        }
+        if let Ok(global) = self.load_global_graph() {
+            entries.extend(
+                global
+                    .active_memories()
+                    .filter(|m| m.embedding.is_some() && m.category.is_globally_shareable())
+                    .cloned(),
+            );
+        }
+        Ok(entries)
     }
 
     /// Pull pool, rank by dense and BM25 separately, fuse with RRF.
