@@ -1194,11 +1194,96 @@ fn open_weight_family_context_limits_match_published_windows() {
     assert_eq!(f("deepseek-v4-pro"), Some(1_000_000));
     assert_eq!(f("qwen3-235b-a22b-instruct-2507"), Some(262_144));
     assert_eq!(f("gpt-oss-120b"), Some(131_072));
+    assert_eq!(f("gemma-4-31b"), Some(262_144));
     assert_eq!(f("llama-3.3-70b-instruct"), Some(131_072));
     assert_eq!(f("sonar-pro"), Some(128_000));
 
     // Unknown families stay unresolved so the dynamic cache/default can act.
     assert_eq!(f("some-unknown-model"), None);
+}
+
+#[test]
+fn registry_backed_providers_derive_static_models_and_context_limits() {
+    // Fireworks is registered in the declarative registry; its static model
+    // list and per-model context windows must flow through the shared
+    // profile functions without a legacy match arm.
+    let fireworks = jcode_provider_metadata::FIREWORKS_PROFILE;
+    let models = crate::provider_catalog::openai_compatible_profile_static_models(fireworks);
+    assert_eq!(
+        models,
+        vec![
+            "accounts/fireworks/routers/kimi-k2p5-turbo",
+            "accounts/fireworks/models/kimi-k2p5",
+            "accounts/fireworks/models/kimi-k2p6",
+            "accounts/fireworks/models/glm-4p7",
+            "accounts/fireworks/models/glm-5p1",
+            "accounts/fireworks/models/deepseek-v3p2",
+        ]
+    );
+
+    // Registry context limits win over the fuzzy family classifier and are
+    // keyed by the provider's exact model ids.
+    assert_eq!(
+        crate::provider_catalog::openai_compatible_profile_context_limit(
+            "fireworks",
+            "accounts/fireworks/models/kimi-k2p6"
+        ),
+        Some(262_144)
+    );
+    assert_eq!(
+        crate::provider_catalog::openai_compatible_profile_context_limit(
+            "fireworks",
+            "accounts/fireworks/models/deepseek-v3p2"
+        ),
+        Some(163_840)
+    );
+
+    // Non-registry providers are untouched by the registry path.
+    assert_eq!(
+        crate::provider_catalog::openai_compatible_profile_context_limit(
+            "cerebras",
+            "gpt-oss-120b"
+        ),
+        Some(131_072)
+    );
+}
+
+#[test]
+fn registry_stays_in_sync_with_login_provider_metadata() {
+    // Every registry entry must correspond to a real profile with the same id,
+    // and its pricing/env wiring must match the hand-written tables. When
+    // these drift, the registry and legacy tables disagree about provider
+    // identity, so fail loudly instead of silently picking one.
+    for entry in jcode_provider_metadata::registry::REGISTRY {
+        let profile = crate::provider_catalog::resolve_openai_compatible_profile(
+            jcode_provider_metadata::openai_compatible_profiles()
+                .iter()
+                .copied()
+                .find(|p| p.id == entry.id)
+                .unwrap_or_else(|| panic!("registry id {} has no profile", entry.id)),
+        );
+        assert_eq!(profile.id, entry.id);
+        assert_eq!(profile.api_key_env, entry.api_key_env);
+
+        // Pricing lookup must resolve the same models.dev id.
+        assert_eq!(
+            crate::model_pricing::models_dev_provider_id(entry.id),
+            Some(entry.models_dev_id),
+            "registry models_dev_id for {} drifted from model_pricing",
+            entry.id
+        );
+
+        // Static models must round-trip through the profile pipeline.
+        let static_models = crate::provider_catalog::openai_compatible_profile_static_models(
+            jcode_provider_metadata::openai_compatible_profiles()
+                .iter()
+                .copied()
+                .find(|p| p.id == entry.id)
+                .expect("checked above"),
+        );
+        let registry_models: Vec<&str> = entry.models.iter().map(|m| m.model_id).collect();
+        assert_eq!(static_models, registry_models);
+    }
 }
 
 #[test]

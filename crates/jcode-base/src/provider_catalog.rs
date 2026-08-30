@@ -348,6 +348,17 @@ pub fn openai_compatible_profile_static_models(profile: OpenAiCompatibleProfile)
         }
     };
 
+    // Providers registered in the declarative registry derive their static
+    // fallback list from `ProviderRegistryEntry::models`. Fireworks is the
+    // proof case: adding a model is a one-line registry change and the parity
+    // test below flags any drift from the legacy match arms.
+    if let Some(entry) = jcode_provider_metadata::registry_entry(profile.id) {
+        for model in entry.models {
+            push(model.model_id);
+        }
+        return models;
+    }
+
     match profile.id {
         "opencode" => {
             push("minimax-m2.7");
@@ -500,14 +511,8 @@ pub fn openai_compatible_profile_static_models(profile: OpenAiCompatibleProfile)
             push("zai-org/GLM-5.1");
             push("meta-llama/Llama-3.1-70B-Instruct");
         }
-        "fireworks" => {
-            push("accounts/fireworks/routers/kimi-k2p5-turbo");
-            push("accounts/fireworks/models/kimi-k2p5");
-            push("accounts/fireworks/models/kimi-k2p6");
-            push("accounts/fireworks/models/glm-4p7");
-            push("accounts/fireworks/models/glm-5p1");
-            push("accounts/fireworks/models/deepseek-v3p2");
-        }
+        // Fireworks is served from the declarative registry (see
+        // jcode-provider-metadata::registry); no legacy match arm needed.
         "cerebras" => {
             push("gpt-oss-120b");
             push("zai-glm-4.7");
@@ -589,12 +594,15 @@ pub fn openai_compatible_profile_context_limit(profile_id: &str, model: &str) ->
         // direct profile runs through the OpenRouter/OpenAI-compatible provider
         // implementation, whose live catalog can be unavailable during startup.
         "deepseek" if model.starts_with("deepseek-v4-") => Some(1_000_000),
-        // Fall back to the shared open-weight family classifier. Many bundled
-        // OpenAI-compatible gateways (Z.AI/GLM, Moonshot/Kimi, MiniMax, Qwen,
-        // etc.) serve `/v1/models` entries without a `context_length`, so this
-        // static table is the only reliable source before a live catalog (or an
-        // explicit user `context_window` override) is available.
-        _ => jcode_provider_core::models::open_weight_family_context_limit(&model),
+        // Registry-backed providers (proof case: fireworks) carry per-model
+        // context windows in the declarative registry, keyed by the exact model
+        // id the provider serves. This wins over the fuzzy family classifier
+        // because `accounts/fireworks/...` ids embed the upstream family name
+        // and deserve provider-verified limits.
+        _ => {
+            jcode_provider_metadata::registry_context_limit(&profile_id, &model)
+                .or_else(|| jcode_provider_core::models::open_weight_family_context_limit(&model))
+        }
     }
 }
 

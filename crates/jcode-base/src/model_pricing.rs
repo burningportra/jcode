@@ -104,6 +104,11 @@ pub fn models_dev_provider_id(jcode_provider: &str) -> Option<&'static str> {
         .trim()
         .strip_prefix("openai-compatible:")
         .unwrap_or_else(|| jcode_provider.trim());
+    // Registry-backed providers (proof case: fireworks) declare their models.dev
+    // id in the declarative registry; legacy match arms handle the rest.
+    if let Some(entry) = jcode_provider_metadata::registry_entry(key) {
+        return Some(entry.models_dev_id);
+    }
     Some(match key {
         "anthropic" | "claude" | "claude:api-key" | "anthropic-api" => "anthropic",
         "openai" | "openai:api-key" | "openai-api" => "openai",
@@ -120,7 +125,6 @@ pub fn models_dev_provider_id(jcode_provider: &str) -> Option<&'static str> {
         "xai" => "xai",
         "minimax" => "minimax",
         "togetherai" => "togetherai",
-        "fireworks" => "fireworks-ai",
         "deepinfra" => "deepinfra",
         "perplexity" => "perplexity",
         "nebius" => "nebius",

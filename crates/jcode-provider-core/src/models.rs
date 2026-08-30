@@ -325,6 +325,15 @@ pub fn context_limit_for_model_with_provider_and_cache(
         return Some(1_000_000);
     }
 
+    // OpenRouter-routed first-party OpenAI models (`openai/gpt-5.5` etc.) have
+    // had their provider prefix stripped above, so the published GPT-5 window
+    // applies even though the route is not the built-in OpenAI provider.
+    if matches!(provider, Some("openrouter")) {
+        if let Some(published) = openai_published_context_limit(model) {
+            return Some(published);
+        }
+    }
+
     // Open-weight model families served by many OpenAI-compatible gateways
     // (Z.AI, Moonshot, MiniMax, Alibaba, etc.). Their `/v1/models` endpoints
     // frequently omit `context_length`, so without this classifier these models
@@ -352,8 +361,14 @@ pub fn open_weight_family_context_limit(model: &str) -> Option<usize> {
 
     // --- Z.AI GLM family ---
     if m.contains("glm") {
-        // GLM-5.2: first GLM with a truly usable 1M-token context window.
-        if m.contains("glm-5.2") || m.contains("glm-52") || m.contains("glm-5p2") {
+        // GLM-5.2 / GLM-5.3 (including Flash): 1M-token context window.
+        if m.contains("glm-5.3")
+            || m.contains("glm-53")
+            || m.contains("glm-5p3")
+            || m.contains("glm-5.2")
+            || m.contains("glm-52")
+            || m.contains("glm-5p2")
+        {
             return Some(1_000_000);
         }
         // GLM-5 / GLM-5.1 and GLM-4.6 / GLM-4.7: 200K context.
@@ -444,8 +459,11 @@ pub fn open_weight_family_context_limit(model: &str) -> Option<usize> {
         return Some(131_072);
     }
 
-    // --- Google Gemma 3: 128K context ---
-    if m.contains("gemma-3") {
+    // --- Google Gemma family: Gemma 4 (256K), Gemma 3 (128K) ---
+    if m.contains("gemma-4") || m.contains("gemma4") {
+        return Some(262_144);
+    }
+    if m.contains("gemma-3") || m.contains("gemma3") {
         return Some(131_072);
     }
 
