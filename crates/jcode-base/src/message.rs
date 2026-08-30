@@ -105,6 +105,7 @@ pub fn redact_secrets(text: &str) -> String {
         compile_static_regexes(&[
             r"(?m)^\s*(OPENROUTER_API_KEY\s*=\s*)[^\r\n]+",
             r"(?m)^\s*(AI_GATEWAY_API_KEY\s*=\s*)[^\r\n]+",
+            r"(?m)^\s*(CONIFER_API_KEY\s*=\s*)[^\r\n]+",
             r"(?m)^\s*(OPENCODE_API_KEY\s*=\s*)[^\r\n]+",
             r"(?m)^\s*(OPENCODE_GO_API_KEY\s*=\s*)[^\r\n]+",
             r"(?m)^\s*(ZHIPU_API_KEY\s*=\s*)[^\r\n]+",
@@ -129,6 +130,7 @@ pub fn redact_secrets(text: &str) -> String {
             r"(?m)^\s*(OLLAMA_API_KEY\s*=\s*)[^\r\n]+",
             r"(?m)^\s*(CHUTES_API_KEY\s*=\s*)[^\r\n]+",
             r"(?m)^\s*(CEREBRAS_API_KEY\s*=\s*)[^\r\n]+",
+            r"(?m)^\s*(BELVEDIR_API_KEY\s*=\s*)[^\r\n]+",
             r"(?m)^\s*(OPENAI_COMPAT_API_KEY\s*=\s*)[^\r\n]+",
             r"(?m)^\s*(ANTHROPIC_API_KEY\s*=\s*)[^\r\n]+",
             r"(?m)^\s*(OPENAI_API_KEY\s*=\s*)[^\r\n]+",
@@ -144,6 +146,7 @@ pub fn redact_secrets(text: &str) -> String {
     let mut redacted_keys: HashSet<String> = [
         "OPENROUTER_API_KEY",
         "AI_GATEWAY_API_KEY",
+        "CONIFER_API_KEY",
         "OPENCODE_API_KEY",
         "OPENCODE_GO_API_KEY",
         "ZHIPU_API_KEY",
@@ -168,6 +171,7 @@ pub fn redact_secrets(text: &str) -> String {
         "OLLAMA_API_KEY",
         "CHUTES_API_KEY",
         "CEREBRAS_API_KEY",
+        "BELVEDIR_API_KEY",
         "OPENAI_COMPAT_API_KEY",
         "ANTHROPIC_API_KEY",
         "OPENAI_API_KEY",

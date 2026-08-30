@@ -3,8 +3,8 @@ use super::selection_highlight::highlight_line_selection;
 use super::tools_ui::{get_tool_activity_detail, summarize_batch_running_tools_compact};
 use super::visual_debug::{self, FrameCaptureBuilder};
 use super::{
-    ProcessingStatus, TuiState, accent_color, ai_color, animated_tool_color, asap_color, dim_color,
-    pending_color, queued_color, rainbow_prompt_color, user_color,
+    ProcessingStatus, TuiState, accent_color, ai_color, asap_color, dim_color, pending_color,
+    queued_color, rainbow_prompt_color, user_color,
 };
 use crate::message::ConnectionPhase;
 use crate::tui::app;
@@ -922,32 +922,7 @@ pub(super) fn draw_status(frame: &mut Frame, app: &dyn TuiState, area: Rect, pen
                 Line::from(spans)
             }
             ProcessingStatus::RunningTool(ref name) => {
-                let half_width = 3;
-                let decorative = crate::perf::tui_policy().enable_decorative_animations;
-                // When decorative animations are disabled we still nudge the bar
-                // forward at a slow "liveness" rate so a long-running tool (e.g.
-                // bash) reads as alive instead of frozen.
-                let bar_speed = if decorative {
-                    2.0
-                } else {
-                    jcode_tui_style::theme::LIVENESS_INDICATOR_FPS / half_width as f32
-                };
-                let progress = elapsed * bar_speed % 1.0;
-                let filled_pos = ((progress * half_width as f32) as usize) % half_width;
-                let left_bar: String = (0..half_width)
-                    .map(|i| if i == filled_pos { '●' } else { '·' })
-                    .collect();
-                let right_bar: String = (0..half_width)
-                    .map(|i| {
-                        if i == (half_width - 1 - filled_pos) {
-                            '●'
-                        } else {
-                            '·'
-                        }
-                    })
-                    .collect();
-
-                let anim_color = animated_tool_color(elapsed);
+                let anim_color = ai_color();
                 let batch_prog = app.batch_progress();
                 let is_batch = name == "batch";
                 // For batch: compute initial total from the streaming tool call input
@@ -971,13 +946,8 @@ pub(super) fn draw_status(frame: &mut Frame, app: &dyn TuiState, area: Rect, pen
                 let experimental_notice = app.active_experimental_feature_notice();
                 let subagent = app.subagent_status();
 
-                let mut spans = vec![
-                    Span::styled(left_bar, Style::default().fg(anim_color)),
-                    Span::styled(" ", Style::default()),
-                    Span::styled(name.to_string(), Style::default().fg(anim_color).bold()),
-                    Span::styled(" ", Style::default()),
-                    Span::styled(right_bar, Style::default().fg(anim_color)),
-                ];
+                let mut spans =
+                    running_tool_header_spans(spinner, name, tool_detail.as_deref(), anim_color);
 
                 // For batch tool: show "completed/total · last_tool" progress
                 if is_batch {
@@ -987,11 +957,6 @@ pub(super) fn draw_status(frame: &mut Frame, app: &dyn TuiState, area: Rect, pen
                         batch_prog,
                         batch_total_initial,
                     );
-                } else if let Some(detail) = tool_detail {
-                    spans.push(Span::styled(
-                        format!(" · {}", detail),
-                        Style::default().fg(dim_color()),
-                    ));
                 }
 
                 if let Some(notice) = experimental_notice {
@@ -1092,6 +1057,28 @@ pub(super) fn draw_status(frame: &mut Frame, app: &dyn TuiState, area: Rect, pen
     frame.render_widget(Paragraph::new(line), area);
 }
 
+fn running_tool_header_spans(
+    spinner: &'static str,
+    name: &str,
+    detail: Option<&str>,
+    anim_color: Color,
+) -> Vec<Span<'static>> {
+    let mut spans = vec![
+        Span::styled(spinner, Style::default().fg(anim_color)),
+        Span::styled(
+            format!(" running {}", name),
+            Style::default().fg(dim_color()),
+        ),
+    ];
+    if let Some(detail) = detail {
+        spans.push(Span::styled(
+            format!(" · {}", detail),
+            Style::default().fg(anim_color).bold(),
+        ));
+    }
+    spans
+}
+
 /// Append the "+N queued" suffix span (in the queued accent color) when there
 /// are queued follow-up messages. Centralizes the repeated check/styling shared
 /// by every processing-status branch in `draw_status`.
@@ -1129,6 +1116,22 @@ fn streaming_status_spans(
 mod tests {
     use super::*;
     use ratatui::style::Modifier;
+
+    #[test]
+    fn running_tool_header_emphasizes_detail_over_tool_name() {
+        let accent = Color::Rgb(12, 34, 56);
+        let spans = running_tool_header_spans("*", "bash", Some("cargo test"), accent);
+
+        assert_eq!(spans.len(), 3);
+        assert_eq!(spans[0].content.as_ref(), "*");
+        assert_eq!(spans[0].style.fg, Some(accent));
+        assert_eq!(spans[1].content.as_ref(), " running bash");
+        assert_eq!(spans[1].style.fg, Some(dim_color()));
+        assert!(!spans[1].style.add_modifier.contains(Modifier::BOLD));
+        assert_eq!(spans[2].content.as_ref(), " · cargo test");
+        assert_eq!(spans[2].style.fg, Some(accent));
+        assert!(spans[2].style.add_modifier.contains(Modifier::BOLD));
+    }
 
     #[test]
     fn visual_line_move_follows_soft_wrapped_rows() {
