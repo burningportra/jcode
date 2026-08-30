@@ -97,6 +97,26 @@ pub fn build_chat_messages(
     let mut pending_tool_results: HashMap<String, String> = HashMap::new();
     let mut used_tool_results: HashSet<String> = HashSet::new();
 
+    // Gemini-3 (served via this OpenAI-compatible path) rejects an assistant turn
+    // whose function calls are ALL unsigned with `Function call is missing a
+    // thought_signature in functionCall parts` (HTTP 400). Parallel multi-call
+    // turns only sign their first call, and locally synthesized/imported tool
+    // calls carry no signature at all. The backend accepts a previously emitted
+    // signature replayed on later calls, so we carry the most recent real
+    // signature forward onto any function call that lacks one. To also cover
+    // calls that appear *before* the first signed call in the transcript, seed
+    // the carry with the earliest real signature found anywhere in history.
+    let mut last_signature: Option<String> = messages
+        .iter()
+        .flat_map(|msg| msg.content.iter())
+        .find_map(|block| match block {
+            ContentBlock::ToolUse {
+                thought_signature: Some(sig),
+                ..
+            } if !sig.is_empty() => Some(sig.clone()),
+            _ => None,
+        });
+
     // Convert messages
     for (idx, msg) in messages.iter().enumerate() {
         match msg.role {
@@ -218,7 +238,20 @@ pub fn build_chat_messages(
                                     "arguments": args
                                 }
                             });
-                            if let Some(signature) = thought_signature {
+                            // Carry the most recent real signature forward onto
+                            // calls that lack their own so a fully-unsigned turn
+                            // (parallel siblings, synthesized/imported calls) is
+                            // not rejected by Gemini's OpenAI-compatible backend.
+                            let own_signature = thought_signature
+                                .as_ref()
+                                .filter(|sig| !sig.is_empty())
+                                .cloned();
+                            if own_signature.is_some() {
+                                last_signature = own_signature.clone();
+                            }
+                            if let Some(signature) =
+                                own_signature.or_else(|| last_signature.clone())
+                            {
                                 tool_call["extra_content"] = serde_json::json!({
                                     "google": { "thought_signature": signature }
                                 });
@@ -666,6 +699,188 @@ mod request_tests {
         assert_eq!(
             assistant_calls[1]["extra_content"]["google"]["thought_signature"],
             "signature-two"
+        );
+    }
+
+    #[test]
+    fn unsigned_tool_call_after_signed_one_carries_signature_forward() {
+        // Reproduces the `Function call is missing a thought_signature` 400: a
+        // later synthesized/unsigned call (e.g. `todo`) must inherit the most
+        // recent real signature so Gemini's OpenAI-compatible backend accepts it.
+        let signed = Message {
+            role: Role::Assistant,
+            content: vec![ContentBlock::ToolUse {
+                id: "call_1".to_string(),
+                name: "read".to_string(),
+                input: json!({"path": "a.txt"}),
+                thought_signature: Some("real-signature".to_string()),
+            }],
+            timestamp: None,
+            tool_duration_ms: None,
+        };
+        let unsigned = Message {
+            role: Role::Assistant,
+            content: vec![ContentBlock::ToolUse {
+                id: "call_2".to_string(),
+                name: "todo".to_string(),
+                input: json!({"intent": "x"}),
+                thought_signature: None,
+            }],
+            timestamp: None,
+            tool_duration_ms: None,
+        };
+        let messages = vec![
+            Message::user("first"),
+            signed,
+            Message::tool_result("call_1", "ok", false),
+            Message::user("second"),
+            unsigned,
+            Message::tool_result("call_2", "ok", false),
+        ];
+
+        let api_messages = build_chat_messages(&messages, "", false, false, false);
+        let assistant_calls = api_messages
+            .iter()
+            .filter(|message| message["role"] == "assistant")
+            .map(|message| message["tool_calls"][0].clone())
+            .collect::<Vec<_>>();
+
+        assert_eq!(assistant_calls.len(), 2);
+        assert_eq!(
+            assistant_calls[0]["extra_content"]["google"]["thought_signature"],
+            "real-signature"
+        );
+        assert_eq!(
+            assistant_calls[1]["extra_content"]["google"]["thought_signature"],
+            "real-signature",
+            "an unsigned later call must inherit the most recent real signature"
+        );
+    }
+
+    #[test]
+    fn parallel_tool_calls_all_receive_a_signature() {
+        // A single assistant turn with parallel calls only signs its first call;
+        // the siblings must inherit that signature so the turn is not rejected.
+        let parallel = Message {
+            role: Role::Assistant,
+            content: vec![
+                ContentBlock::ToolUse {
+                    id: "call_a".to_string(),
+                    name: "read".to_string(),
+                    input: json!({"path": "a.txt"}),
+                    thought_signature: Some("sig-a".to_string()),
+                },
+                ContentBlock::ToolUse {
+                    id: "call_b".to_string(),
+                    name: "read".to_string(),
+                    input: json!({"path": "b.txt"}),
+                    thought_signature: None,
+                },
+            ],
+            timestamp: None,
+            tool_duration_ms: None,
+        };
+        let messages = vec![Message::user("go"), parallel];
+
+        let api_messages = build_chat_messages(&messages, "", false, false, false);
+        let assistant = api_messages
+            .iter()
+            .find(|message| message["role"] == "assistant")
+            .expect("assistant message");
+        let calls = assistant["tool_calls"].as_array().expect("tool_calls");
+
+        assert_eq!(calls.len(), 2);
+        assert_eq!(
+            calls[0]["extra_content"]["google"]["thought_signature"],
+            "sig-a"
+        );
+        assert_eq!(
+            calls[1]["extra_content"]["google"]["thought_signature"],
+            "sig-a",
+            "parallel sibling call must inherit the turn's signature"
+        );
+    }
+
+    #[test]
+    fn unsigned_call_before_first_signed_call_is_seeded_with_earliest_signature() {
+        // A synthesized/imported call that appears BEFORE the first signed call
+        // in the transcript must still be signed, via the pre-scan seed.
+        let unsigned_first = Message {
+            role: Role::Assistant,
+            content: vec![ContentBlock::ToolUse {
+                id: "call_early".to_string(),
+                name: "todo".to_string(),
+                input: json!({"intent": "x"}),
+                thought_signature: None,
+            }],
+            timestamp: None,
+            tool_duration_ms: None,
+        };
+        let signed_later = Message {
+            role: Role::Assistant,
+            content: vec![ContentBlock::ToolUse {
+                id: "call_late".to_string(),
+                name: "read".to_string(),
+                input: json!({"path": "a.txt"}),
+                thought_signature: Some("later-signature".to_string()),
+            }],
+            timestamp: None,
+            tool_duration_ms: None,
+        };
+        let messages = vec![
+            Message::user("first"),
+            unsigned_first,
+            Message::tool_result("call_early", "ok", false),
+            Message::user("second"),
+            signed_later,
+            Message::tool_result("call_late", "ok", false),
+        ];
+
+        let api_messages = build_chat_messages(&messages, "", false, false, false);
+        let assistant_calls = api_messages
+            .iter()
+            .filter(|message| message["role"] == "assistant")
+            .map(|message| message["tool_calls"][0].clone())
+            .collect::<Vec<_>>();
+
+        assert_eq!(assistant_calls.len(), 2);
+        assert_eq!(
+            assistant_calls[0]["extra_content"]["google"]["thought_signature"],
+            "later-signature",
+            "a call before the first signed one must be seeded with the earliest signature"
+        );
+        assert_eq!(
+            assistant_calls[1]["extra_content"]["google"]["thought_signature"],
+            "later-signature"
+        );
+    }
+
+    #[test]
+    fn tool_calls_without_any_signature_emit_no_extra_content() {
+        // Non-Gemini transcripts (no signatures anywhere) must not gain a bogus
+        // empty `extra_content.google.thought_signature`.
+        let unsigned = Message {
+            role: Role::Assistant,
+            content: vec![ContentBlock::ToolUse {
+                id: "call_1".to_string(),
+                name: "read".to_string(),
+                input: json!({"path": "a.txt"}),
+                thought_signature: None,
+            }],
+            timestamp: None,
+            tool_duration_ms: None,
+        };
+        let messages = vec![Message::user("go"), unsigned];
+
+        let api_messages = build_chat_messages(&messages, "", false, false, false);
+        let assistant = api_messages
+            .iter()
+            .find(|message| message["role"] == "assistant")
+            .expect("assistant message");
+
+        assert!(
+            assistant["tool_calls"][0].get("extra_content").is_none(),
+            "no signature anywhere should mean no extra_content is attached"
         );
     }
 }
