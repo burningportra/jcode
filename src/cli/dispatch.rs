@@ -606,7 +606,9 @@ fn resolve_resume_arg(args: &mut Args) -> Result<()> {
                 args.resume = Some(full_id);
             }
             Err(e) => {
-                match resume_resolution_failure_action(&resume_id, |key| std::env::var_os(key)) {
+                match resume_resolution_failure_action(&resume_id, args.fresh_spawn, |key| {
+                    std::env::var_os(key)
+                }) {
                     // During a reload/update/restart handoff the client re-execs
                     // itself with `--resume <id>` and `JCODE_RESUMING=1`. In the
                     // client/server architecture the shared server is the authority
@@ -614,14 +616,22 @@ fn resolve_resume_arg(args: &mut Args) -> Result<()> {
                     // can still be valid server-side. Hard-exiting here dumped the
                     // user back to a shell with "No session found matching ...",
                     // making jcode unusable after an auto-update (issue #328).
+                    //
+                    // A `--fresh-spawn` resume is the same situation: the shared
+                    // server just minted this session id (e.g. a visible swarm
+                    // spawn) and always drives the fresh-spawn client, so a local
+                    // store miss (a save/read race, or the session still
+                    // propagating) must defer to the server rather than killing the
+                    // freshly spawned pane with "No session found matching ...".
+                    //
                     // Instead, keep the raw id and let the remote connection resolve
                     // it; if the server cannot find it either, the TUI surfaces a
                     // recoverable message and falls back to a fresh session rather
                     // than killing the process.
                     ResumeResolutionFailureAction::DeferToServer => {
                         crate::logging::warn(&format!(
-                            "Resume id '{}' not found locally during reload handoff ({}); deferring resolution to the server instead of exiting",
-                            resume_id, e
+                            "Resume id '{}' not found locally (fresh_spawn={}); deferring resolution to the server instead of exiting ({})",
+                            resume_id, args.fresh_spawn, e
                         ));
                         // Leave args.resume as the raw id for the server to resolve.
                     }
@@ -653,12 +663,16 @@ enum ResumeResolutionFailureAction {
 
 fn resume_resolution_failure_action<F, V>(
     _resume_id: &str,
+    fresh_spawn: bool,
     var_os: F,
 ) -> ResumeResolutionFailureAction
 where
     F: Fn(&str) -> Option<V>,
 {
-    if var_os("JCODE_RESUMING").is_some() {
+    // A reload/update/restart handoff (JCODE_RESUMING) or a `--fresh-spawn`
+    // re-entry both connect to the shared server that owns session lifecycle, so
+    // a local-store miss should defer to the server rather than hard-exit.
+    if fresh_spawn || var_os("JCODE_RESUMING").is_some() {
         ResumeResolutionFailureAction::DeferToServer
     } else {
         ResumeResolutionFailureAction::Exit

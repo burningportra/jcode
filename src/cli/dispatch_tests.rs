@@ -176,18 +176,32 @@ fn resume_failure_defers_to_server_during_reload_handoff() {
         }
     };
     assert_eq!(
-        resume_resolution_failure_action("ses_1780655839703_174710856", with_resuming),
+        resume_resolution_failure_action("ses_1780655839703_174710856", false, with_resuming),
+        ResumeResolutionFailureAction::DeferToServer,
+    );
+}
+
+#[test]
+fn resume_failure_defers_to_server_for_fresh_spawn() {
+    // A `--fresh-spawn` resume (e.g. a visible swarm pane) is always driven by
+    // the shared server that just minted the session id. A local-store miss (a
+    // save/read race, or the session still propagating) must defer to the server
+    // rather than kill the freshly spawned pane with "No session found matching".
+    let no_env = |_key: &str| Option::<std::ffi::OsString>::None;
+    assert_eq!(
+        resume_resolution_failure_action("session_duckling_1788143227398_622", true, no_env),
         ResumeResolutionFailureAction::DeferToServer,
     );
 }
 
 #[test]
 fn resume_failure_exits_when_no_handoff_in_progress() {
-    // Without a reload handoff, an unresolved id is a genuine user error and
-    // should still surface the actionable "use --resume to list" message + exit.
+    // Without a reload handoff and not a fresh-spawn, an unresolved id is a
+    // genuine user error and should still surface the actionable
+    // "use --resume to list" message + exit.
     let no_env = |_key: &str| Option::<std::ffi::OsString>::None;
     assert_eq!(
-        resume_resolution_failure_action("totally-bogus-id", no_env),
+        resume_resolution_failure_action("totally-bogus-id", false, no_env),
         ResumeResolutionFailureAction::Exit,
     );
 }
