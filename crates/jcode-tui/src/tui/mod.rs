@@ -430,6 +430,7 @@ pub trait TuiState {
     }
     fn active_skill(&self) -> Option<String>;
     fn subagent_status(&self) -> Option<String>;
+    fn selfdev_build_status(&self) -> Option<String>;
     /// Progress of a currently-running batch tool call.
     fn batch_progress(&self) -> Option<crate::bus::BatchProgress>;
     fn time_since_activity(&self) -> Option<Duration>;

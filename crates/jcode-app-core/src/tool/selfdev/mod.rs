@@ -102,7 +102,7 @@ impl SelfDevLaunchResult {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-enum BuildRequestState {
+pub enum BuildRequestState {
     Queued,
     Building,
     Attached,
@@ -113,40 +113,40 @@ enum BuildRequestState {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct BuildRequest {
-    request_id: String,
-    background_task_id: Option<String>,
-    session_id: String,
-    session_short_name: Option<String>,
-    session_title: Option<String>,
-    reason: String,
-    repo_dir: String,
+pub struct BuildRequest {
+    pub request_id: String,
+    pub background_task_id: Option<String>,
+    pub session_id: String,
+    pub session_short_name: Option<String>,
+    pub session_title: Option<String>,
+    pub reason: String,
+    pub repo_dir: String,
     #[serde(default)]
-    repo_scope: String,
+    pub repo_scope: String,
     #[serde(default)]
-    worktree_scope: String,
-    command: String,
-    requested_at: String,
-    started_at: Option<String>,
-    completed_at: Option<String>,
-    state: BuildRequestState,
-    version: Option<String>,
+    pub worktree_scope: String,
+    pub command: String,
+    pub requested_at: String,
+    pub started_at: Option<String>,
+    pub completed_at: Option<String>,
+    pub state: BuildRequestState,
+    pub version: Option<String>,
     #[serde(default)]
-    dedupe_key: Option<String>,
+    pub dedupe_key: Option<String>,
     #[serde(default)]
-    requested_source: Option<build::SourceState>,
+    pub requested_source: Option<build::SourceState>,
     #[serde(default)]
-    built_source: Option<build::SourceState>,
+    pub built_source: Option<build::SourceState>,
     #[serde(default)]
-    published_version: Option<String>,
+    pub published_version: Option<String>,
     #[serde(default)]
-    last_progress: Option<String>,
+    pub last_progress: Option<String>,
     #[serde(default)]
-    validated: bool,
-    error: Option<String>,
-    output_file: Option<String>,
-    status_file: Option<String>,
-    attached_to_request_id: Option<String>,
+    pub validated: bool,
+    pub error: Option<String>,
+    pub output_file: Option<String>,
+    pub status_file: Option<String>,
+    pub attached_to_request_id: Option<String>,
 }
 
 impl BuildRequest {
@@ -265,7 +265,7 @@ impl BuildRequest {
         Ok(requests)
     }
 
-    fn pending_requests() -> Result<Vec<Self>> {
+    pub fn pending_requests() -> Result<Vec<Self>> {
         // Compact legacy history before entering the 500 ms queue polling loop.
         // Reuse this poll's loaded requests so history maintenance does not double
         // the number of JSON files parsed on every pass.

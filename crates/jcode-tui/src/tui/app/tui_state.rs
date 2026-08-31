@@ -797,6 +797,20 @@ impl crate::tui::TuiState for App {
         self.subagent_status.clone()
     }
 
+    fn selfdev_build_status(&self) -> Option<String> {
+        let requests = jcode_app_core::tool::selfdev::BuildRequest::pending_requests().ok()?;
+        let active = requests
+            .iter()
+            .find(|r| r.session_id == self.session.id);
+        active.map(|r| match r.state {
+            jcode_app_core::tool::selfdev::BuildRequestState::Queued => format!("Build queued ({})", r.reason),
+            jcode_app_core::tool::selfdev::BuildRequestState::Building => {
+                r.last_progress.clone().unwrap_or_else(|| "building".to_string())
+            }
+            _ => format!("Build status: {:?}", r.state),
+        })
+    }
+
     fn batch_progress(&self) -> Option<crate::bus::BatchProgress> {
         self.batch_progress.clone()
     }
