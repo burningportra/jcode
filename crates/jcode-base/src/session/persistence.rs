@@ -583,6 +583,31 @@ impl Session {
         }
         result
     }
+
+    /// Force a durable snapshot even for a brand-new, message-less session.
+    ///
+    /// `save()` deliberately writes nothing for a freshly created session that
+    /// has no visible conversation message yet (it avoids turning the hidden
+    /// session-context message into an on-disk transcript). That is wrong for a
+    /// *spawned* session whose id is immediately handed to a new `--fresh-spawn
+    /// --resume <id>` client: the pane resolves the id against the local session
+    /// store first, and with no snapshot on disk it used to hard-exit with
+    /// "No session found matching ...". Persisting a real snapshot here lets the
+    /// spawned pane resolve locally on the first try instead of depending on a
+    /// server round trip.
+    pub fn persist_startup_snapshot(&mut self) -> Result<()> {
+        self.updated_at = Utc::now();
+        let path = session_path(&self.id)?;
+        let journal_path = session_journal_path_from_snapshot(&path);
+        self.checkpoint_snapshot(&path, &journal_path)?;
+        if let Err(error) = crate::recent_session_index::upsert_session(self) {
+            crate::logging::warn(&format!(
+                "Failed to update recent-session metadata for {}: {error}",
+                self.id
+            ));
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]

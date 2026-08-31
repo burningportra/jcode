@@ -258,6 +258,22 @@ fn prepare_visible_spawn_session_persists_startup_before_launch() {
         Some(startup),
         |session_id, _cwd: &std::path::Path, _selfdev, provider_key| {
             assert_eq!(provider_key, None);
+            // Regression: the spawned `--fresh-spawn --resume <id>` pane resolves
+            // this id against the local session store, so the snapshot must exist
+            // on disk by the time the launch runs (previously save() no-oped for a
+            // message-less session and the pane exited "No session found").
+            let session_path =
+                crate::session::session_path(session_id).expect("session path");
+            assert!(
+                session_path.exists(),
+                "spawn session snapshot must be persisted before launch so --resume resolves locally"
+            );
+            assert_eq!(
+                crate::session::find_session_by_name_or_id(session_id)
+                    .expect("spawn session resolves by id"),
+                session_id,
+                "freshly spawned session id must resolve from the local store"
+            );
             let path = crate::storage::jcode_dir()
                 .expect("jcode dir")
                 .join(format!("client-input-{}", session_id));

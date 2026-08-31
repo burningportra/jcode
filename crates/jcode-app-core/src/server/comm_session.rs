@@ -99,7 +99,11 @@ fn create_visible_spawn_session(
     if selfdev_requested {
         session.set_canary("self-dev");
     }
-    session.save()?;
+    // Persist a real snapshot now (not the no-op empty-session save) so the
+    // freshly spawned `--fresh-spawn --resume <id>` pane can resolve this id
+    // against the local session store on its first try instead of hard-exiting
+    // with "No session found matching ...".
+    session.persist_startup_snapshot()?;
 
     Ok((session.id.clone(), cwd))
 }
