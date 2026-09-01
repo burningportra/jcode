@@ -224,10 +224,20 @@ pub struct McpServerConfig {
 }
 
 impl McpServerConfig {
-    /// jcode currently only supports stdio (command-based) MCP servers. A config
-    /// entry is stdio when it has a command and is not explicitly an http/sse
-    /// transport.
+    /// Whether this entry targets a TCP/HTTP MCP endpoint rather than a child
+    /// process. HTTP/SSE server entries carry a `url` (possibly a streamable-http
+    /// endpoint) and are served over the network.
+    pub fn is_http(&self) -> bool {
+        self.url.as_deref().is_some_and(|u| !u.trim().is_empty())
+    }
+
+    /// Whether this entry is a runnable stdio server. A config entry is stdio
+    /// when it has a command and is not explicitly an http/sse/streamable-http
+    /// transport, unless it also declares a URL (in which case the URL wins).
     pub fn is_stdio(&self) -> bool {
+        if Self::is_http(self) {
+            return false;
+        }
         if let Some(t) = &self.transport {
             let t = t.to_ascii_lowercase();
             if t == "http" || t == "sse" || t == "streamable-http" {
@@ -669,16 +679,16 @@ impl McpConfig {
         // support receives already-expanded URLs and headers as well.
         merged.expand_environment_variables();
 
-        // jcode only supports stdio servers today. Drop HTTP/SSE entries (common
-        // in Claude Code configs) so they don't fail to spawn, but log them so
-        // the omission is visible.
+        // jcode supports stdio (command-based) and HTTP/streamable-http (URL)
+        // server entries today. Drop anything with neither a command nor a URL
+        // so it doesn't fail to spawn, but log the omission.
         merged.servers.retain(|name, cfg| {
-            let keep = cfg.is_stdio();
+            let keep = cfg.is_stdio() || cfg.is_http();
             if !keep {
                 crate::logging::info(&format!(
-                    "MCP: Skipping non-stdio server '{}' ({}); HTTP/SSE transports are not yet supported",
+                    "MCP: Skipping unrunnable server '{}' (transport {}, no command or URL)",
                     name,
-                    cfg.transport.as_deref().unwrap_or("http")
+                    cfg.transport.as_deref().unwrap_or("stdio")
                 ));
             }
             keep

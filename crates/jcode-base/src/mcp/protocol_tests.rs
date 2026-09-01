@@ -143,7 +143,37 @@ fn test_mcp_http_server_is_not_stdio() {
     let config: McpConfig = serde_json::from_str(json).unwrap();
     let server = config.servers.get("remote").unwrap();
     assert!(!server.is_stdio());
+    assert!(server.is_http());
     assert_eq!(server.url.as_deref(), Some("https://example.com/mcp"));
+}
+
+#[test]
+fn http_server_entry_is_retained_by_load_for_dir() {
+    // HTTP entries with a URL are supported (not dropped like before). Load a
+    // project-local config with an HTTP server and confirm it survives.
+    let _guard = crate::storage::lock_test_env();
+    let previous_home = std::env::var_os("JCODE_HOME");
+    let home = tempfile::tempdir().expect("home tempdir");
+    let project = tempfile::tempdir().expect("project tempdir");
+    crate::env::set_var("JCODE_HOME", home.path());
+    std::fs::write(
+        project.path().join(".mcp.json"),
+        r#"{"mcpServers":{"remote":{"type":"http","url":"https://example.com/mcp","headers":{"Authorization":"Bearer xyz"}}}}"#,
+    )
+    .unwrap();
+
+    let result = std::panic::catch_unwind(|| {
+        let config = McpConfig::load_for_dir(Some(project.path()));
+        let server = config.servers.get("remote").expect("HTTP server retained");
+        assert!(server.is_http());
+        assert_eq!(server.url.as_deref(), Some("https://example.com/mcp"));
+    });
+
+    match previous_home {
+        Some(value) => crate::env::set_var("JCODE_HOME", value),
+        None => crate::env::remove_var("JCODE_HOME"),
+    }
+    result.expect("HTTP entry retained by load_for_dir");
 }
 
 #[test]

@@ -11,6 +11,79 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::sync::{Mutex, mpsc, oneshot};
 
+/// HTTP/streamable-http transport for an MCP server. Each JSON-RPC request is
+/// a POST to the endpoint URL; responses come back in the HTTP response body
+/// (single JSON document when `Accept: application/json`, or an SSE stream).
+pub(crate) struct HttpTransport {
+    pub(crate) client: reqwest::Client,
+    pub(crate) url: String,
+    pub(crate) headers: HashMap<String, String>,
+}
+
+impl HttpTransport {
+    /// POST a JSON-RPC message and parse the single JSON-RPC response body.
+    /// Used for requests that expect a response (or requests that may return
+    /// one). Notifications (no `id`) are sent with `post_notification`.
+    async fn post(&self, body: &str) -> Result<Value> {
+        let mut req = self
+            .client
+            .post(&self.url)
+            .header("content-type", "application/json")
+            .header("accept", "application/json, text/event-stream");
+        for (k, v) in &self.headers {
+            req = req.header(k, v);
+        }
+        let resp = req
+            .body(body.to_string())
+            .send()
+            .await
+            .with_context(|| format!("MCP HTTP request to '{}' failed", self.url))?;
+        let status = resp.status();
+        let text = resp
+            .text()
+            .await
+            .with_context(|| format!("MCP HTTP read body from '{}' failed", self.url))?;
+        if !status.is_success() {
+            anyhow::bail!(
+                "MCP HTTP server '{}' returned {}: {}",
+                self.url,
+                status,
+                text.chars().take(300).collect::<String>()
+            );
+        }
+        parse_mcp_body(&text, &self.url)
+    }
+}
+
+/// Parse an MCP endpoint response. Handles a plain JSON-RPC body and SSE
+/// envelopes (`data: {...}` lines) uniformly.
+fn parse_mcp_body(text: &str, url: &str) -> Result<Value> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        anyhow::bail!("MCP HTTP server '{}' returned an empty body", url);
+    }
+    // SSE envelope: overall text may contain event/data/blank lines; collect
+    // the `data:` payloads and parse the last one (responses come once).
+    if trimmed.contains("\ndata:") || trimmed.starts_with("data:") || trimmed.starts_with("event:") {
+        let mut last_data = None;
+        for line in trimmed.lines() {
+            if let Some(payload) = line.strip_prefix("data:") {
+                last_data = Some(payload.trim());
+            }
+        }
+        let payload = last_data.ok_or_else(|| {
+            anyhow::anyhow!("MCP HTTP server '{}' sent an SSE body with no data frame", url)
+        })?;
+        if payload == "[DONE]" {
+            anyhow::bail!("MCP HTTP server '{}' sent [DONE] without a response", url);
+        }
+        return serde_json::from_str(payload)
+            .map_err(|e| anyhow::anyhow!("MCP HTTP '{}' SSE payload invalid: {e}", url));
+    }
+    serde_json::from_str(trimmed)
+        .map_err(|e| anyhow::anyhow!("MCP HTTP '{}' body parse error: {e}", url))
+}
+
 /// Shared communication handle for an MCP server.
 /// Multiple sessions can hold clones of this and send concurrent requests.
 /// Request/response correlation by ID ensures no interference.
@@ -23,6 +96,9 @@ pub struct McpHandle {
     server_info: Arc<std::sync::RwLock<Option<ServerInfo>>>,
     capabilities: Arc<std::sync::RwLock<ServerCapabilities>>,
     tools: Arc<std::sync::RwLock<Vec<McpToolDef>>>,
+    /// Optional HTTP/streamable-http transport. When present, `request` and
+    /// `post_notification` use it instead of the stdio writer/reader tasks.
+    http: Option<Arc<HttpTransport>>,
 }
 
 impl McpHandle {
@@ -30,6 +106,18 @@ impl McpHandle {
     pub async fn request(&self, method: &str, params: Option<Value>) -> Result<JsonRpcResponse> {
         let id = self.request_id.fetch_add(1, Ordering::SeqCst);
         let request = JsonRpcRequest::new(id, method, params);
+
+        if let Some(http) = self.http.as_ref() {
+            let body = serde_json::to_string(&request)?;
+            let value = http.post(&body).await?;
+            let response: JsonRpcResponse = serde_json::from_value(value).with_context(|| {
+                format!("MCP HTTP response from '{}' was not a JSON-RPC response", self.name)
+            })?;
+            if let Some(err) = &response.error {
+                anyhow::bail!("MCP error {}: {}", err.code, err.message);
+            }
+            return Ok(response);
+        }
 
         let (tx, rx) = oneshot::channel();
         {
@@ -53,6 +141,43 @@ impl McpHandle {
         }
 
         Ok(response)
+    }
+
+    /// Send a JSON-RPC notification (no awaited response). Over HTTP this is a
+    /// POST with `Accept: application/json`; over stdio it's a writer line.
+    pub async fn send_notification(&self, method: &str, params: Option<Value>) -> Result<()> {
+        let notif = JsonRpcNotification::new(method, params);
+        if let Some(http) = self.http.as_ref() {
+            let body = serde_json::to_string(&notif)?;
+            let mut req = http
+                .client
+                .post(&http.url)
+                .header("content-type", "application/json")
+                .header("accept", "application/json");
+            for (k, v) in &http.headers {
+                req = req.header(k, v);
+            }
+            let resp = req
+                .body(body)
+                .send()
+                .await
+                .with_context(|| format!("MCP HTTP notification to '{}' failed", http.url))?;
+            let status = resp.status();
+            if !status.is_success() {
+                anyhow::bail!(
+                    "MCP HTTP notification to '{}' returned {}",
+                    http.url,
+                    status
+                );
+            }
+            return Ok(());
+        }
+        let msg = serde_json::to_string(&notif)? + "\n";
+        self.writer_tx
+            .send(msg)
+            .await
+            .context("Failed to send notification")?;
+        Ok(())
     }
 
     /// Call a tool
@@ -114,12 +239,13 @@ impl McpHandle {
     }
 }
 
-/// MCP Client - owns the child process and provides shared handles.
-/// Only one McpClient exists per MCP server process, but many McpHandle
-/// clones can be distributed to different sessions.
+/// MCP Client - owns the transport (child process for stdio, HTTP endpoint)
+/// and provides shared handles. Only one McpClient exists per MCP server
+/// (or endpoint), but many McpHandle clones can be distributed to sessions.
 pub struct McpClient {
+    /// Populated only for stdio servers; `None` for HTTP/streamable-http.
+    child: Option<Child>,
     handle: McpHandle,
-    child: Child,
 }
 
 impl McpClient {
@@ -132,7 +258,71 @@ impl McpClient {
     ///
     /// The working directory is only applied when it exists; otherwise the
     /// subprocess falls back to inheriting the current process cwd (issue #557).
+    /// For HTTP servers the working directory is ignored (no subprocess).
     pub async fn connect_in_dir(
+        name: String,
+        config: &McpServerConfig,
+        working_dir: Option<&std::path::Path>,
+    ) -> Result<Self> {
+        if config.is_http() {
+            return Self::connect_http(name, config).await;
+        }
+        Self::connect_stdio(name, config, working_dir).await
+    }
+
+    /// Connect to an HTTP/streamable-http MCP endpoint.
+    async fn connect_http(name: String, config: &McpServerConfig) -> Result<Self> {
+        let url = config
+            .url
+            .as_deref()
+            .context("HTTP MCP server config missing a URL")?
+            .trim()
+            .to_string();
+        crate::logging::info(&format!("MCP: Connecting to HTTP server '{}' at {}", name, url));
+
+        let client = reqwest::Client::builder().build().with_context(|| {
+            format!("Failed to build HTTP client for MCP server '{}'", name)
+        })?;
+        let http = Arc::new(HttpTransport {
+            client,
+            url,
+            headers: config.headers.clone(),
+        });
+        let handle = McpHandle {
+            name: name.clone(),
+            request_id: Arc::new(AtomicU64::new(1)),
+            pending: Arc::new(Mutex::new(HashMap::new())),
+            // Unused for HTTP; keep a detached sender so struct shape is uniform.
+            writer_tx: mpsc::channel(32).0,
+            server_info: Arc::new(std::sync::RwLock::new(None)),
+            capabilities: Arc::new(std::sync::RwLock::new(ServerCapabilities::default())),
+            tools: Arc::new(std::sync::RwLock::new(Vec::new())),
+            http: Some(http),
+        };
+
+        let mut client = Self {
+            child: None,
+            handle,
+        };
+        client
+            .initialize()
+            .await
+            .with_context(|| format!("MCP HTTP server '{}' failed to initialize", name))?;
+        client
+            .handle
+            .refresh_tools()
+            .await
+            .with_context(|| format!("MCP HTTP server '{}' failed to list tools", name))?;
+        crate::logging::info(&format!(
+            "MCP: Connected to HTTP '{}' with {} tools",
+            name,
+            client.handle.tools().len()
+        ));
+        Ok(client)
+    }
+
+    /// Connect to a stdio (child-process) MCP server.
+    async fn connect_stdio(
         name: String,
         config: &McpServerConfig,
         working_dir: Option<&std::path::Path>,
@@ -256,9 +446,13 @@ impl McpClient {
             server_info: Arc::new(std::sync::RwLock::new(None)),
             capabilities: Arc::new(std::sync::RwLock::new(ServerCapabilities::default())),
             tools: Arc::new(std::sync::RwLock::new(Vec::new())),
+            http: None,
         };
 
-        let mut client = Self { handle, child };
+        let mut client = Self {
+            child: Some(child),
+            handle,
+        };
 
         client
             .initialize()
@@ -316,33 +510,39 @@ impl McpClient {
         }
 
         // Send initialized notification
-        let notif = JsonRpcNotification::new("notifications/initialized", None);
-        let msg = serde_json::to_string(&notif)? + "\n";
-        self.handle.writer_tx.send(msg).await?;
+        self.handle
+            .send_notification("notifications/initialized", None)
+            .await?;
 
         Ok(())
     }
 
-    /// Check if server is still running
+    /// Check if server is still running. HTTP endpoints have no child process,
+    /// so they are always considered "running" here.
     pub fn is_running(&mut self) -> bool {
-        match self.child.try_wait() {
-            Ok(None) => true,
-            Ok(Some(_)) => false,
-            Err(_) => false,
+        match self.child.as_mut() {
+            None => true,
+            Some(child) => match child.try_wait() {
+                Ok(None) => true,
+                Ok(Some(_)) => false,
+                Err(_) => false,
+            },
         }
     }
 
-    /// Shutdown the server
+    /// Shutdown the server. For stdio this sends `shutdown` then kills the
+    /// child; for HTTP there is nothing to terminate (the endpoint is remote).
     pub async fn shutdown(&mut self) {
         let _ = self
             .handle
-            .writer_tx
-            .send("{\"jsonrpc\":\"2.0\",\"method\":\"shutdown\"}\n".to_string())
+            .send_notification("shutdown", None)
             .await;
 
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
-        let _ = self.child.kill().await;
+        if let Some(child) = self.child.as_mut() {
+            let _ = child.kill().await;
+        }
     }
 
     // === Legacy compatibility methods that delegate to handle ===
@@ -398,15 +598,50 @@ fn mcp_child_env(
 
 impl Drop for McpClient {
     fn drop(&mut self) {
-        let _ = self.child.start_kill();
+        if let Some(child) = self.child.as_mut() {
+            let _ = child.start_kill();
+        }
     }
 }
 
 #[cfg(all(test, unix))]
 mod tests {
-    use super::{McpClient, is_sensitive_inherited_env_key, mcp_child_env};
+    use super::{McpClient, is_sensitive_inherited_env_key, mcp_child_env, parse_mcp_body};
     use crate::mcp::protocol::McpServerConfig;
     use std::collections::HashMap;
+
+    #[test]
+    fn parse_mcp_body_handles_plain_json_and_sse() {
+        let url = "http://mcp.test/mcp";
+        // Plain JSON-RPC response body.
+        let plain = parse_mcp_body(r#"{"jsonrpc":"2.0","id":1,"result":{"ok":true}}"#, url).unwrap();
+        assert_eq!(plain["result"]["ok"], serde_json::json!(true));
+
+        // Single-line SSE data frame.
+        let sse = parse_mcp_body(
+            "data: {\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"n\":4}}\n\n",
+            url,
+        )
+        .unwrap();
+        assert_eq!(sse["result"]["n"], serde_json::json!(4));
+
+        // Multi-frame SSE; last data frame carries the response.
+        let multi = parse_mcp_body(
+            "event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":3,\"result\":{\"s\":\"hi\"}}\n\n",
+            url,
+        )
+        .unwrap();
+        assert_eq!(multi["result"]["s"], serde_json::json!("hi"));
+    }
+
+    #[test]
+    fn parse_mcp_body_rejects_empty_and_done() {
+        let url = "http://mcp.test/mcp";
+        assert!(parse_mcp_body("", url).is_err());
+        assert!(parse_mcp_body("  ", url).is_err());
+        assert!(parse_mcp_body("data: [DONE]\n", url).is_err());
+        assert!(parse_mcp_body("this is not json", url).is_err());
+    }
 
     #[test]
     fn inherited_mcp_env_scrubs_provider_credentials() {
