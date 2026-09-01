@@ -35,6 +35,9 @@ default thread count, with no global mutex, no new unsafe, no suite slowdown.
 - `crates/jcode-tui/src/tui/ui_frame_metrics.rs:419` —
   `static FLICKER_FRAME_HISTORY: OnceLock<Mutex<FlickerFrameHistory>>` — the last
   process-global store that test render output observes.
+- `ui_frame_metrics.rs:403` — `FlickerFrameHistory` derives `Default`, so a
+  `thread_local! { static TEST_...: RefCell<FlickerFrameHistory> =
+  RefCell::new(FlickerFrameHistory::default()) }` needs no const-init tricks.
 - `ui_frame_metrics.rs:456` — `flicker_detection_enabled()` returns `true` in
   tests unconditionally, so every test render records samples into the shared
   history (this is deliberate: the changelog-stability test asserts samples are
@@ -50,6 +53,19 @@ default thread count, with no global mutex, no new unsafe, no suite slowdown.
   by the flicker-sensitive tests themselves.
 - `ui_frame_metrics.rs:1159` `debug_flicker_frame_history` — the count/read path
   asserted by `frame_flicker.rs:460-464` (`buffered_samples == 3` after 3 draws).
+- **Draw-call history audit (pass 1)**: `DRAW_CALL_HISTORY`
+  (`ui_frame_metrics.rs:250`) is also process-global and has exact-count test
+  assertions (`ui_frame_metrics.rs:1384-1417`, in-module unit tests). Its write
+  path (`record_draw_call_attribution`, `note_frame_painted`) is reachable only
+  from `run_shell.rs::draw_full` (`run_shell.rs:517,545`), which no lib test
+  drives (tests use `full_frame_invalidation` / `invalidate_previous_terminal_buffer`
+  helpers and `status_spinner_only_symbol`, none of which write history; verified
+  by grepping all call sites). The in-module draw-call unit tests record and read
+  on their own thread, but parallel sibling tests never write draw-call history,
+  so exact-count assertions there are already race-free in practice.
+  **Decision**: leave draw-call history process-global in this change; re-verify
+  during the validation matrix (if any draw-call test flakes in the 10 runs,
+  thread-localize it in a follow-up with the same pattern).
 - The doc's "suggested direction" (thread-local render state) is the fix we are
   implementing; its "single global lock" alternative was already measured and
   reverted (12s → 10+ min suite) and is forbidden by the user.
@@ -229,7 +245,11 @@ calls back into `with_flicker_history` while borrowed.
 
 1. `cargo test -p jcode-tui --lib` — **10 consecutive green runs at the default
    thread count** on this machine, recorded (pass/fail + duration each run).
-   Prior baseline: 1-4 failures per run, varying set.
+   Prior baseline: 1-4 failures per run, varying set. Caveat: the host is under
+   heavy unrelated load at times (load average 17+ vs 12 cores observed during
+   plan inspection); if a run fails, capture the failing test names and re-run
+   that test alone before concluding the race persists — under-memory-pressure
+   SIGTERM of cargo is a *different*, documented failure mode in the doc.
 2. Single-threaded sanity: `-- --test-threads=1` still 2006+/green (no behavior
    change under serialization either).
 3. `cargo check --all-targets --all-features` and
