@@ -379,3 +379,66 @@ All 9 findings from the verified cross-model review were processed:
 8. **Low, folded**: edge case 7 reworded to rely only on `cfg(test)` semantics.
 9. **Low, folded**: panic-while-borrowed semantics documented as R3 with the
    unwinding-release reasoning.
+
+## Addendum (implementation discovery, 2026-09-01): second, distinct parallel-run defect
+
+**Validation revealed a pre-existing deadlock unrelated to the flicker fix.**
+Full-suite parallel runs hang indefinitely (50+ min at 0% CPU, all worker threads
+blocked on `__psynch_mutexwait`). Proof it is pre-existing: the reverted build
+(commit `12d92a384`, flicker fix removed) deadlocks identically at 12 threads,
+and the deadlocked stacks never reference the new thread-locals.
+
+### Mechanism (from `sample(1)` forensics, /tmp/s3.txt, /tmp/s4.txt)
+
+- Thread A (`startup_check_is_noop_once_committed`, onboarding_flow.rs:804):
+  holds **env lock** (`with_temp_jcode_home` → `lock_test_env`) → calls
+  `create_test_app` → `clear_test_render_state_for_tests` → **waits render lock**.
+- 8 threads: wait **render lock** via the same `create_test_app` → clear path,
+  holding nothing.
+- 4 threads: wait **env lock** (e.g. `with_reasoning_current_home` →
+  `with_temp_jcode_home`), holding nothing.
+- No sampled thread holds the render lock. The holder is invisible in samples:
+  either a thread that acquired render then blocked on env outside the sampled
+  window (true ABBA), or a lost-ownership edge in the
+  `with_render_state_lock`/`RENDER_STATE_LOCK_HELD` thread-local skip logic
+  (ui.rs:1541) — e.g. nested-lock detection erroneously skipping a needed lock
+  or the guard being released on a different thread than it was acquired.
+
+Both locks are non-reentrant `std::sync::Mutex`; commit `438fc31fd` (2026-07-31)
+previously fixed the *self*-deadlock variant of exactly this class ("6b0dba4b7
+made create_test_app take render_state_test_lock and lock_test_env
+unconditionally. Both mutexes are non-reentrant and..."). The cross-test ABBA
+variant survived that fix because the skip-if-held logic only protects
+same-thread re-entry, not cross-thread inversion.
+
+### Fix path (follow-up change, same initiative)
+
+The structural fix is to stop tests from acquiring these two locks in different
+orders. Options, in preference order:
+
+1. **Make `clear_test_render_state_for_tests` never block on the render lock
+   when called from `create_test_app`.** Per the flakiness doc's own analysis,
+   only rendering tests depend on the clear-under-lock semantics; app-construction
+   tests do not need the render lock at all. Change `create_test_app` to call a
+   lock-free `clear_test_render_state_for_current_thread()` (with thread-local
+   state from this change, clearing only the calling thread's copies requires no
+   cross-thread coordination). This removes the render-lock acquisition from the
+   env-held region entirely: env → render inversion becomes impossible.
+2. If some app-construction test is proven to depend on cross-thread render
+   state, establish a strict lock hierarchy: env lock must always be acquired
+   BEFORE render lock (never after), and make `render_state_test_lock` return
+   immediately if env is held by the caller (documented order) — weaker, more
+   fragile.
+
+Option 1 is consistent with the methodology's own recommendation ("remove the
+shared mutable state instead of adding coordination") and with the existing
+thread-local conversion.
+
+### Updated validation strategy
+
+The 10-run default-thread matrix cannot pass while this deadlock exists; it
+supersedes flakiness as the DoD blocker. Order: (1) land the inversion fix,
+(2) then run the full matrix (10x default threads + 5x 16-thread stress +
+5x frame_flicker lane). Single-threaded runs and the flicker-named tests are
+already green with the flicker fix applied (`679e3828a` reapplied after the
+control experiment).
