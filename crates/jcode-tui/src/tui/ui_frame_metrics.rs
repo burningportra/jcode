@@ -419,6 +419,27 @@ static SLOW_FRAME_HISTORY: OnceLock<Mutex<SlowFrameHistory>> = OnceLock::new();
 static FLICKER_FRAME_HISTORY: OnceLock<Mutex<FlickerFrameHistory>> = OnceLock::new();
 static FRAME_RESOURCE_START: OnceLock<Mutex<Option<FrameResourceStart>>> = OnceLock::new();
 
+#[cfg(test)]
+thread_local! {
+    /// Per-thread frame metrics for tests: flicker history plus the perf-stats
+    /// snapshot that flicker samples are built from. Parallel test threads each
+    /// get their own copies, so `create_test_app()`'s render-state clear (or any
+    /// sibling test's frames) can never inject a "⚠ flicker detected"
+    /// notification into another test's render, and `buffered_samples`
+    /// assertions observe only this thread's frames.
+    ///
+    /// Splitting only the history would leave sample *contents*
+    /// cross-thread-contaminated: every `FlickerFrameSample` field is read from
+    /// `frame_perf_stats_snapshot()`, and a sibling test's `note_viewport_metrics`
+    /// write landing between two of this thread's frames fabricates a flicker
+    /// event in our own history. Both storages must be thread-scoped together.
+    static TEST_FLICKER_FRAME_HISTORY: RefCell<FlickerFrameHistory> =
+        RefCell::new(FlickerFrameHistory::default());
+    static TEST_FRAME_PERF_STATS: RefCell<FramePerfStats> =
+        RefCell::new(FramePerfStats::default());
+}
+
+#[cfg(not(test))]
 fn frame_perf_stats() -> &'static Mutex<FramePerfStats> {
     FRAME_PERF_STATS.get_or_init(|| Mutex::new(FramePerfStats::default()))
 }
@@ -427,8 +448,27 @@ fn slow_frame_history() -> &'static Mutex<SlowFrameHistory> {
     SLOW_FRAME_HISTORY.get_or_init(|| Mutex::new(SlowFrameHistory::default()))
 }
 
-fn flicker_frame_history() -> &'static Mutex<FlickerFrameHistory> {
-    FLICKER_FRAME_HISTORY.get_or_init(|| Mutex::new(FlickerFrameHistory::default()))
+/// Run `body` with exclusive access to the flicker history.
+///
+/// Test builds operate on the calling thread's thread-local history; production
+/// builds lock the process-global mutex. The closure must not re-enter
+/// `with_flicker_history` (RefCell borrow would panic); operate on the passed
+/// `&mut FlickerFrameHistory` reference instead. A panic inside `body` releases
+/// the borrow/critical section via the guard's `Drop` during unwinding, so a
+/// failing test cannot poison later tests on the same thread.
+fn with_flicker_history<T>(body: impl FnOnce(&mut FlickerFrameHistory) -> T) -> T {
+    #[cfg(test)]
+    {
+        TEST_FLICKER_FRAME_HISTORY.with(|cell| body(&mut cell.borrow_mut()))
+    }
+    #[cfg(not(test))]
+    {
+        let mut history = FLICKER_FRAME_HISTORY
+            .get_or_init(|| Mutex::new(FlickerFrameHistory::default()))
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        body(&mut history)
+    }
 }
 
 fn frame_resource_start() -> &'static Mutex<Option<FrameResourceStart>> {
@@ -477,10 +517,17 @@ fn flicker_detection_enabled() -> bool {
 }
 
 fn with_frame_perf_stats_mut(f: impl FnOnce(&mut FramePerfStats)) {
-    let mut stats = frame_perf_stats()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    f(&mut stats);
+    #[cfg(test)]
+    {
+        TEST_FRAME_PERF_STATS.with(|cell| f(&mut cell.borrow_mut()));
+    }
+    #[cfg(not(test))]
+    {
+        let mut stats = frame_perf_stats()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        f(&mut stats);
+    }
 }
 
 pub(super) fn reset_frame_perf_stats() {
@@ -498,10 +545,17 @@ pub(super) fn begin_frame_resource_sample() {
 }
 
 fn frame_perf_stats_snapshot() -> FramePerfStats {
-    frame_perf_stats()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .clone()
+    #[cfg(test)]
+    {
+        TEST_FRAME_PERF_STATS.with(|cell| cell.borrow().clone())
+    }
+    #[cfg(not(test))]
+    {
+        frame_perf_stats()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
+    }
 }
 
 pub(super) fn note_full_prep_request() {
@@ -1075,14 +1129,13 @@ pub(crate) fn record_flicker_frame_sample(sample: FlickerFrameSample) {
         return;
     }
 
-    let mut history = flicker_frame_history()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    maybe_record_flicker_event(&mut history, &sample);
-    history.samples.push_back(sample);
-    while history.samples.len() > FLICKER_HISTORY_MAX_SAMPLES {
-        history.samples.pop_front();
-    }
+    with_flicker_history(|history| {
+        maybe_record_flicker_event(history, &sample);
+        history.samples.push_back(sample);
+        while history.samples.len() > FLICKER_HISTORY_MAX_SAMPLES {
+            history.samples.pop_front();
+        }
+    });
 }
 
 pub(super) fn finalize_frame_metrics(
@@ -1157,10 +1210,8 @@ pub(super) fn finalize_frame_metrics(
 }
 
 pub(crate) fn debug_flicker_frame_history(limit: usize) -> serde_json::Value {
-    let history = flicker_frame_history()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let take_samples = limit.clamp(1, FLICKER_HISTORY_MAX_SAMPLES);
+    let payload = with_flicker_history(|history| {
     let samples: Vec<FlickerFrameSample> = history
         .samples
         .iter()
@@ -1197,6 +1248,8 @@ pub(crate) fn debug_flicker_frame_history(limit: usize) -> serde_json::Value {
         "events": events,
         "samples": samples,
     })
+    });
+    payload
 }
 
 fn flicker_event_label(kind: &str) -> &str {
@@ -1228,11 +1281,7 @@ pub(crate) fn recent_flicker_ui_notice() -> Option<FlickerUiNotice> {
         return None;
     }
 
-    let history = flicker_frame_history()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let event = history.events.back()?.clone();
-    drop(history);
+    let event = with_flicker_history(|history| history.events.back().cloned())?;
 
     #[cfg(not(test))]
     {
@@ -1348,12 +1397,11 @@ pub(crate) fn clear_slow_frame_history_for_tests() {
 
 #[cfg(test)]
 pub(crate) fn clear_flicker_frame_history_for_tests() {
-    let mut history = flicker_frame_history()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    history.samples.clear();
-    history.events.clear();
-    history.last_log_at_ms = None;
+    with_flicker_history(|history| {
+        history.samples.clear();
+        history.events.clear();
+        history.last_log_at_ms = None;
+    });
     set_last_chat_scrollbar_visible(false);
 }
 
