@@ -1790,6 +1790,33 @@ impl Provider for MultiProvider {
     }
 
     fn name(&self) -> &str {
+        // An anthropic-compatible named profile (e.g. [providers.wafer]) binds
+        // the Claude slot. Report the profile's own name so failure/fallback
+        // messages say "wafer" instead of the generic "Claude".
+        if matches!(self.active_provider(), ActiveProvider::Claude)
+            && let Ok(profile_name) = std::env::var("JCODE_NAMED_PROVIDER_PROFILE")
+            && crate::config::config()
+                .providers
+                .get(profile_name.trim())
+                .is_some_and(|profile| {
+                    matches!(
+                        profile.provider_type,
+                        crate::config::NamedProviderType::AnthropicCompatible
+                    )
+                })
+        {
+            // `name()` must return &str; intern profile names in a small
+            // process-wide map so repeated calls do not leak per invocation.
+            static INTERNED: std::sync::OnceLock<
+                std::sync::Mutex<std::collections::HashMap<String, &'static str>>,
+            > = std::sync::OnceLock::new();
+            let cache = INTERNED.get_or_init(Default::default);
+            let mut cache = cache.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            let key = profile_name.trim().to_string();
+            return *cache
+                .entry(key)
+                .or_insert_with(|| Box::leak(profile_name.trim().to_string().into_boxed_str()));
+        }
         match self.active_provider() {
             ActiveProvider::Claude => "Claude",
             ActiveProvider::OpenAI => "OpenAI",
