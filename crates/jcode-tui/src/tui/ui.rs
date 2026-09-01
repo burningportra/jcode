@@ -1497,32 +1497,29 @@ pub fn last_layout_snapshot() -> Option<LayoutSnapshot> {
     }
 }
 
-/// The one lock guarding process-global render state in tests.
+/// Historical render-state test lock (now a per-thread flag, never blocks).
 ///
-/// Render snapshots, scroll metrics, flicker history, and prompt positions all
-/// live in process globals, so *every* test that renders must serialize on the
-/// same mutex. Two separate helpers previously each defined their own private
-/// lock, which serialized nothing between them and produced failures that
-/// appeared only under parallelism (same root cause as issue #593). Both now
-/// delegate here.
+/// Historical note: this lock used to serialize process-global render state in
+/// tests (issue #593). Every piece of state it guarded is now thread-local in
+/// test builds (the `TEST_*` storages here, plus flicker history and perf
+/// stats in `ui_frame_metrics`), so there is nothing left to serialize across
+/// threads. The "lock" is therefore a per-thread flag only: it preserves the
+/// nested-clear re-entrancy detection (`with_render_state_lock` skip) and the
+/// existing `RenderStateTestGuard` API, but never blocks. This removes the
+/// cross-thread env-lock/render-lock inversion that deadlocked full parallel
+/// suite runs (forensics: docs/plans/PLAN_TUI_THREAD_LOCAL_FLICKER_STATE.md
+/// addendum).
 #[cfg(test)]
 pub(crate) fn render_state_test_lock() -> RenderStateTestGuard {
-    static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
-    let guard = LOCK
-        .get_or_init(|| std::sync::Mutex::new(()))
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
     RENDER_STATE_LOCK_HELD.with(|held| held.set(true));
-    RenderStateTestGuard { _guard: guard }
+    RenderStateTestGuard
 }
 
-/// Guard for [`render_state_test_lock`] that also records ownership on this
-/// thread, so a nested `clear_test_render_state_for_tests` can tell it is
-/// already inside the lock instead of deadlocking on it.
+/// Guard for [`render_state_test_lock`] that records ownership on this thread,
+/// so a nested `clear_test_render_state_for_tests` can tell it is already
+/// inside the (now notional) lock instead of double-clearing.
 #[cfg(test)]
-pub(crate) struct RenderStateTestGuard {
-    _guard: std::sync::MutexGuard<'static, ()>,
-}
+pub(crate) struct RenderStateTestGuard;
 
 #[cfg(test)]
 impl Drop for RenderStateTestGuard {
