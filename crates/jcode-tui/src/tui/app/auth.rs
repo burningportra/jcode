@@ -7,8 +7,10 @@ mod auth_types;
 pub(crate) use self::auth_account_commands::{
     account_command_from_picker, execute_account_command_local, execute_account_command_remote,
     handle_account_command_remote, handle_auth_command, resolve_account_provider_descriptor,
-    resolve_named_profile_selection, save_openai_fast_setting_local,
+    save_openai_fast_setting_local,
 };
+#[cfg(test)]
+pub(crate) use self::auth_account_commands::resolve_named_profile_selection;
 pub(super) use self::auth_types::{AccountCommand, PendingAccountInput, PendingLogin};
 
 use super::*;
