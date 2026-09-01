@@ -1211,45 +1211,46 @@ pub(super) fn finalize_frame_metrics(
 
 pub(crate) fn debug_flicker_frame_history(limit: usize) -> serde_json::Value {
     let take_samples = limit.clamp(1, FLICKER_HISTORY_MAX_SAMPLES);
-    let payload = with_flicker_history(|history| {
-    let samples: Vec<FlickerFrameSample> = history
-        .samples
-        .iter()
-        .rev()
-        .take(take_samples)
-        .cloned()
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .collect();
-    let events: Vec<FlickerEvent> = history
-        .events
-        .iter()
-        .rev()
-        .take(limit.clamp(1, FLICKER_HISTORY_MAX_EVENTS))
-        .cloned()
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .collect();
+    with_flicker_history(|history| {
+        let samples: Vec<FlickerFrameSample> = history
+            .samples
+            .iter()
+            .rev()
+            .take(take_samples)
+            .cloned()
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect();
+        let events: Vec<FlickerEvent> = history
+            .events
+            .iter()
+            .rev()
+            .take(limit.clamp(1, FLICKER_HISTORY_MAX_EVENTS))
+            .cloned()
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect();
 
-    serde_json::json!({
-        "enabled": flicker_detection_enabled(),
-        "buffered_samples": history.samples.len(),
-        "returned_samples": samples.len(),
-        "buffered_events": history.events.len(),
-        "returned_events": events.len(),
-        "summary": {
+        let summary = serde_json::json!({
             "layout_toggle_events": events.iter().filter(|event| event.kind == "layout_toggle_same_state").count(),
             "layout_oscillation_events": events.iter().filter(|event| event.kind == "layout_oscillation").count(),
             "layout_feedback_oscillation_events": events.iter().filter(|event| event.kind == "layout_feedback_oscillation").count(),
             "visible_hash_change_events": events.iter().filter(|event| event.kind == "visible_hash_changed_same_state").count(),
-        },
-        "events": events,
-        "samples": samples,
+        });
+
+        serde_json::json!({
+            "enabled": flicker_detection_enabled(),
+            "buffered_samples": history.samples.len(),
+            "returned_samples": samples.len(),
+            "buffered_events": history.events.len(),
+            "returned_events": events.len(),
+            "summary": summary,
+            "events": events,
+            "samples": samples,
+        })
     })
-    });
-    payload
 }
 
 fn flicker_event_label(kind: &str) -> &str {
