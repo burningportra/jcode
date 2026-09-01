@@ -74,27 +74,47 @@ default thread count, with no global mutex, no new unsafe, no suite slowdown.
 
 ### Core change (one file: `ui_frame_metrics.rs`)
 
-Split the flicker history storage by cfg, mirroring the `ui.rs` pattern:
+**Perf-stats storage must be thread-local in test builds too (review finding 1,
+high).** Every `FlickerFrameSample` field is built from `frame_perf_stats_snapshot()`
+(`ui_frame_metrics.rs:1102-1128`), and the viewport/layout fields of those stats
+are written per-frame by every render test through `note_viewport_metrics`
+(`ui_viewport.rs:612`) and `note_chat_layout` (`ui.rs:3314`), both inside `draw()`.
+With thread-local flicker history but shared perf stats, a concurrent test's
+`note_viewport_metrics` write can land between thread A's two frames and change
+A's *next* sample's `visible_hash`/`content_width`/`chat_scrollbar_visible`,
+fabricating a flicker event **inside A's own thread-local history** — the exact
+row-shift failure we are fixing. Therefore the same cfg-split applied to the
+flicker history must also cover `FRAME_PERF_STATS` (and its
+`with_frame_perf_stats_mut` / `frame_perf_stats_snapshot` accessors).
+
+Split both storages by cfg, mirroring the `ui.rs` pattern:
 
 ```rust
 #[cfg(test)]
 thread_local! {
-    /// Per-thread flicker history for tests. Parallel test threads each get
-    /// their own history, so `create_test_app()`'s render-state clear (or any
-    /// sibling test's frames) can never inject a "⚠ flicker detected"
-    /// notification into another test's render, and `buffered_samples`
-    /// assertions observe only this thread's frames.
+    /// Per-thread frame metrics for tests: flicker history plus the perf-stats
+    /// snapshot that flicker samples are built from. Splitting only the history
+    /// would leave sample *contents* cross-thread-contaminated (a sibling's
+    /// `note_viewport_metrics` write landing between two of this thread's
+    /// frames fabricates a flicker event in our own history).
     static TEST_FLICKER_FRAME_HISTORY: RefCell<FlickerFrameHistory> =
         RefCell::new(FlickerFrameHistory::default());
+    static TEST_FRAME_PERF_STATS: RefCell<FramePerfStats> =
+        RefCell::new(FramePerfStats::default());
 }
 
 #[cfg(not(test))]
 static FLICKER_FRAME_HISTORY: OnceLock<Mutex<FlickerFrameHistory>> = OnceLock::new();
-
-fn flicker_frame_history_slot() -> ... // cfg-split accessor:
-  - #[cfg(test)]: operate directly on the thread-local RefCell via a closure API
-  - #[cfg(not(test))]: lock the Mutex and operate
+#[cfg(not(test))]
+static FRAME_PERF_STATS: OnceLock<Mutex<FramePerfStats>> = OnceLock::new();
 ```
+
+(`FlickerFrameHistory` and `FramePerfStats` both derive `Default`, verified at
+`ui_frame_metrics.rs:403` and the `FramePerfStats` definition.)
+
+The single-frame boundary is intact in tests: each test renders its frames
+synchronously on its own thread, so note_* → snapshot → sample all happen on one
+thread between that thread's draws.
 
 To avoid duplicating the history-manipulation logic, express each public function
 as: `with_flicker_history(|history| { ... })` where the cfg split lives only in
@@ -117,33 +137,40 @@ fn with_flicker_history<T>(body: impl FnOnce(&mut FlickerFrameHistory) -> T) -> 
 }
 ```
 
-Functions converted to this shape (bodies unchanged):
-- `record_flicker_frame_sample` (needs the `flicker_detection_enabled()` early
-  return kept outside the with-closure, exactly as today)
-- `recent_flicker_ui_notice` — reads need `&FlickerFrameHistory`, not `&mut`;
-  the closure takes `&mut` which coerces. It clones `events.back()` and drops the
-  borrow before the log-path work; preserve that ordering (clone inside closure,
-  return the clone, do notice construction outside).
-- `recent_flicker_copy_target_for_key` — calls `recent_flicker_ui_notice`; no
-  direct history access.
-- `clear_flicker_frame_history_for_tests`
-- `debug_flicker_frame_history` — builds its JSON from immutable reads; build the
-  summary/serialization inside the closure and return the `serde_json::Value`
-  (clone cost is identical to today's per-item clones under the mutex).
-- `debug_flicker_frame_history`'s siblings that read samples for other debug
-  output paths (`debug_slow_frame_history` is out of scope: slow-frame history is
-  not read by render-output assertions; see Scope).
+The **actual accessor to delete/convert is `flicker_frame_history()` (line 430)**
+— all its call sites move to `with_flicker_history`; the raw accessor function is
+removed rather than kept as a drift trap (review finding 4).
+
+Functions converted to this shape (bodies otherwise unchanged):
+- `record_flicker_frame_sample` (keeps the `flicker_detection_enabled()` early
+  return outside the with-closure, exactly as today)
+- `recent_flicker_ui_notice` — clones `events.back()` inside the closure and
+  returns the clone; notice construction (log path, formatting) stays outside.
+- `clear_flicker_frame_history_for_tests` — **note**: this function also calls
+  `set_last_chat_scrollbar_visible(false)` (review finding 3); that call stays
+  *outside* the with-closure (it already writes thread-local
+  `TEST_LAST_CHAT_SCROLLBAR_VISIBLE` in tests and has no flicker-history
+  dependency). Preserve the existing call order.
+- `debug_flicker_frame_history` — JSON built inside the closure from immutable
+  reads. Its `flicker_detection_enabled()` call inside the closure is a read-only
+  env/static check, not a re-entrant history access (review finding 5).
 
 ### What stays shared (deliberately)
 
-- `SLOW_FRAME_HISTORY`, `FRAME_PERF_STATS`, `FRAME_RESOURCE_START` remain
+- `SLOW_FRAME_HISTORY`, `FRAME_RESOURCE_START`, and `DRAW_CALL_HISTORY` remain
   process-global `OnceLock<Mutex<..>>` even in tests: nothing asserted from
-  rendered output reads them (verified: only `debug_slow_frame_history` /
-  perf stats readers are debug commands and the smoothness benchmark, which is
-  `#[ignore]`-gated and sequential). Sharing them keeps concurrency semantics
-  identical for metrics that no render assertion observes, and shrinks the diff.
-- The single-frame `flicker_detection_enabled()` semantics: still `true` under
-  `#[cfg(test)]`.
+  rendered output reads them (verified: `debug_slow_frame_history` /
+  `debug_draw_call_history` readers are debug commands and the smoothness
+  benchmark, which is `#[ignore]`-gated and sequential; the draw-call write path
+  `run_shell.rs::draw_full` is not driven by any lib test — see the Grounding
+  draw-call audit). Sharing them keeps concurrency semantics identical for
+  metrics that no render assertion observes, and shrinks the diff. Re-check
+  during validation; if any of their tests flake in the 10 runs, thread-localize
+  with the same pattern in a follow-up.
+- `reset_frame_perf_stats` via `clear_slow_frame_history_for_tests`
+  (`frame_flicker.rs:339` and elsewhere): with thread-local perf stats this
+  now resets only the calling thread's stats — correct isolation, and the
+  "sibling reset corrupts our stats" vector disappears along with the rest.
 - `RENDER_STATE_LOCK_HELD`, `render_state_test_lock`,
   `clear_test_render_state_for_tests`, and all `TEST_*` thread-locals in `ui.rs`:
   unchanged. `clear_test_render_state_locked` keeps calling
@@ -250,6 +277,15 @@ calls back into `with_flicker_history` while borrowed.
    plan inspection); if a run fails, capture the failing test names and re-run
    that test alone before concluding the race persists — under-memory-pressure
    SIGTERM of cargo is a *different*, documented failure mode in the doc.
+   **Stress mode (review finding 2, high):** a 10-run default-thread matrix alone
+   is weak statistics for a race that needs "enough concurrent load to
+   interleave". Add `RUST_TEST_THREADS=16 cargo test -p jcode-tui --lib -q` as an
+   additional stress lane (5 runs, above-core oversubscription), and re-run the
+   historically-frequent victim module first:
+   `cargo test -p jcode-tui --lib frame_flicker -- --test-threads=16` (5 runs).
+   All lanes must be green. Compare parallel-to-parallel timing only: the doc's
+   ~12s is the *parallel* suite time; `--test-threads=1` takes longer and is not
+   the comparison baseline (review finding 7).
 2. Single-threaded sanity: `-- --test-threads=1` still 2006+/green (no behavior
    change under serialization either).
 3. `cargo check --all-targets --all-features` and
@@ -260,7 +296,7 @@ calls back into `with_flicker_history` while borrowed.
 5. `cargo build --profile selfdev -p jcode --bin jcode` to confirm production
    build unaffected; diff inspection confirms all touched lines are test-gated or
    the cfg-split accessor.
-6. If (1) reproduces a failure at any point, bisect with `--test-threads=1`
+6. If any lane reproduces a failure at any point, bisect with `--test-threads=1`
    per-module before touching the design (loop back to plan space if the race
    survives thread-localization — that would falsify the documented root cause).
 
@@ -282,12 +318,12 @@ calls back into `with_flicker_history` while borrowed.
 
 | Approach | Verdict | Why |
 |---|---|---|
-| **Thread-local flicker history (test builds)** — this plan | **Chosen** | Matches the established `TEST_*` pattern in `ui.rs`; removes the shared mutable state instead of coordinating around it; zero prod impact; doc-recommended |
+| Make flicker history + perf stats thread-local | **Chosen** | Removes the shared mutable state (both the history and the sample-source stats); zero prod impact |
 | Single global render lock around `create_test_app` | Rejected (measured) | 12s → 10+ min suite; user forbids; already tried and reverted |
 | Assert floors instead of exact counts in flicker tests | Rejected (measured) | Still failed 5/5 with and without; doc records this |
 | Disable flicker detection in tests | Rejected | Changelog test asserts samples ARE recorded; would trade flake for lost coverage |
 | Per-test unique session IDs filtering | Rejected | `maybe_record_flicker_event` keys on layout state, not session; adds cross-cutting plumbing for less isolation than thread-locality |
-| Make ALL frame metrics thread-local | Deferred | Larger blast radius; slow-frame/perf stats unobserved by render assertions; unnecessary for the DoD |
+| Thread-local history only (not perf stats) | Rejected (review finding 1) | Sample contents still cross-thread-contaminated via `frame_perf_stats_snapshot()` |
 
 ## Risks and open questions
 
@@ -298,10 +334,48 @@ calls back into `with_flicker_history` while borrowed.
   thread's flicker events. Verified no such test exists (the only cross-thread
   observation documented is the *bug*). The validation matrix would surface it
   as a new single-thread failure.
+- **R3 (low, review finding 9)**: A test that panics while holding a `borrow_mut`
+  leaves the borrow flag set on its thread if libtest reuses that thread.
+  Today's mutex poisoning is recovered by `into_inner`; `RefCell` has no such
+  recovery. Mitigation: the six converted functions hold the borrow only within
+  their own synchronous body with no user-code callbacks inside, so a panic
+  mid-body propagates out of the test and the borrow is released when the
+  guard's stack frame unwinds — `RefCell` borrow flags are restored by the
+  `Ref`/`RefMut` guard `Drop` even during unwinding. The residual risk is a
+  `body` closure that itself panics *while a second borrow is attempted during
+  unwind*; none of the six bodies can do that (no catch_unwind inside). Document
+  this reasoning on `with_flicker_history`.
 - **Open question O1**: whether `render_state_test_lock` itself can be retired
   later now that flicker is thread-local — out of scope here; noted as follow-up.
 
 ## Out of scope
 
-- Retiring `render_state_test_lock`; slow-frame/perf-stats thread-locality;
-  unrelated 389-item quality backlog; changing any production render behavior.
+- Retiring `render_state_test_lock`; slow-frame-history and draw-call-history
+  thread-locality (write paths unexercised by lib tests; re-check in validation);
+  the unrelated 389-item quality backlog; changing any production render
+  behavior.
+
+## Appendix: review pass 2 (cross-model, claude-fable-5) — findings folded
+
+All 9 findings from the verified cross-model review were processed:
+
+1. **High, folded (core design change)**: shared `FRAME_PERF_STATS` fabricates
+   flicker events in thread-local histories. Design updated to split perf-stats
+   storage too.
+2. **High, folded**: weak 10-run statistics → added RUST_TEST_THREADS=16 stress
+   lane (5 runs) + targeted frame_flicker module lane.
+3. **Medium, folded**: `clear_flicker_frame_history_for_tests` also calls
+   `set_last_chat_scrollbar_visible(false)`; conversion preserves it outside the
+   closure.
+4. **Medium, folded**: function list drift resolved; `flicker_frame_history()`
+   named as the accessor to delete; `recent_flicker_copy_target_for_key` needs
+   no conversion.
+5. **Medium, folded**: `debug_flicker_frame_history`'s
+   `flicker_detection_enabled()` call inside the closure explicitly cleared in
+   the re-entrancy audit.
+6. **Low, folded**: citation corrections; call-site counts flagged approximate;
+   implementer re-verifies counts at implementation time.
+7. **Low, folded**: timing baseline corrected — compare parallel-to-parallel.
+8. **Low, folded**: edge case 7 reworded to rely only on `cfg(test)` semantics.
+9. **Low, folded**: panic-while-borrowed semantics documented as R3 with the
+   unwinding-release reasoning.
