@@ -354,6 +354,22 @@ Compound the learning: `memory remember` any new reusable rules or anti-patterns
 discovered during refinement (category: architecture/testing/security/etc.),
 so the next plan starts smarter.
 
+## Operator library (canonical flywheel moves)
+
+The methodology names its recurring cognitive moves as operators. This skill
+implements all of them; know the mapping so the vocabulary matches the source:
+
+| Operator | Where implemented here |
+|---|---|
+| 1. Plan-first expansion | Phase 3 (draft before code; plan must cover testing, failure paths, sequencing) |
+| 2. Competing-plan triangulation | Phase 3 (multi-model synthesis; integrate only the strongest elements, not every idea) |
+| 3. Overshoot mismatch hunt | Phase 4 (lie-to-them re-pass when review output looks too short) |
+| 4. Plan-to-beads transfer audit | Phase 6 (bidirectional coverage check; rationale/constraints/tests embedded in beads) |
+| 5. Convergence polish loop | Phases 4 and 6 (stop when revisions are small, corrective, coverage checks pass) |
+| 6. Fresh-eyes reset | Phase 4 (fresh sessions when passes get repetitive or shallow) |
+| 7. Fungible swarm launch | Handoff (staggered, coordination in artifacts, no special-agent bottleneck) |
+| 8. Feedback-to-infrastructure closure | Phase 7 (distill lessons into durable rules, skills, and AGENTS.md guidance) |
+
 ## Notes
 
 - This is plan-space/bead-space work: do not write implementation code until
