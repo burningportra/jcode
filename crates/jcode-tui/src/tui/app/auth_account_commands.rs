@@ -1,5 +1,42 @@
 use super::*;
 
+/// Resolve `/login <name>` against config-declared provider profiles.
+/// Statics win: callers must only invoke this after `resolve_login_selection`
+/// (static ids/aliases) failed.
+pub(crate) fn resolve_named_profile_selection(
+    input: &str,
+    providers: &[crate::provider_catalog::LoginProviderDescriptor],
+) -> Option<crate::tui::NamedProfileLogin> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if let Ok(index) = trimmed.parse::<usize>() {
+        let profiles = crate::tui::NamedProfileLogin::all_from_config();
+        let offset = providers.len();
+        return index
+            .checked_sub(1 + offset)
+            .and_then(|idx| profiles.get(idx))
+            .cloned();
+    }
+    crate::tui::NamedProfileLogin::all_from_config()
+        .into_iter()
+        .find(|profile| profile.name.eq_ignore_ascii_case(trimmed))
+}
+
+fn valid_login_targets(providers: &[crate::provider_catalog::LoginProviderDescriptor]) -> String {
+    let mut valid: Vec<String> = providers
+        .iter()
+        .map(|provider| provider.id.to_string())
+        .collect();
+    valid.extend(
+        crate::tui::NamedProfileLogin::all_from_config()
+            .into_iter()
+            .map(|profile| profile.name),
+    );
+    valid.join(", ")
+}
+
 pub(crate) fn handle_auth_command(app: &mut App, trimmed: &str) -> bool {
     if trimmed == "/auth" {
         app.show_auth_status();
@@ -33,12 +70,10 @@ pub(crate) fn handle_auth_command(app: &mut App, trimmed: &str) -> bool {
             crate::provider_catalog::resolve_login_selection(provider, &providers)
         {
             app.start_login_provider(provider);
+        } else if let Some(profile) = resolve_named_profile_selection(provider, &providers) {
+            app.start_named_profile_login(profile);
         } else {
-            let valid = providers
-                .iter()
-                .map(|provider| provider.id)
-                .collect::<Vec<_>>()
-                .join(", ");
+            let valid = valid_login_targets(&providers);
             app.push_display_message(DisplayMessage::error(format!(
                 "Unknown provider '{}'. Use: {}",
                 provider.trim(),
@@ -58,12 +93,10 @@ pub(crate) fn handle_auth_command(app: &mut App, trimmed: &str) -> bool {
             crate::provider_catalog::resolve_login_selection(provider, &providers)
         {
             app.start_logout_provider(provider);
+        } else if let Some(profile) = resolve_named_profile_selection(provider, &providers) {
+            app.start_named_profile_logout(profile);
         } else {
-            let valid = providers
-                .iter()
-                .map(|provider| provider.id)
-                .collect::<Vec<_>>()
-                .join(", ");
+            let valid = valid_login_targets(&providers);
             app.push_display_message(DisplayMessage::error(format!(
                 "Unknown provider '{}'. Use: {}",
                 provider.trim(),

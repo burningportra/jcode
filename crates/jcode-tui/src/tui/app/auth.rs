@@ -7,7 +7,7 @@ mod auth_types;
 pub(crate) use self::auth_account_commands::{
     account_command_from_picker, execute_account_command_local, execute_account_command_remote,
     handle_account_command_remote, handle_auth_command, resolve_account_provider_descriptor,
-    save_openai_fast_setting_local,
+    resolve_named_profile_selection, save_openai_fast_setting_local,
 };
 pub(super) use self::auth_types::{AccountCommand, PendingAccountInput, PendingLogin};
 
@@ -1642,6 +1642,45 @@ impl App {
             api_key_optional,
             openai_compatible_profile,
         });
+    }
+
+    /// Interactive API-key login for a user-defined [providers.<name>] config
+    /// profile. Reuses the generic no-echo key capture and stores the key in
+    /// ~/.config/jcode/<profile>.env.
+    pub(super) fn start_named_profile_login(&mut self, profile: crate::tui::NamedProfileLogin) {
+        self.start_api_key_login(
+            &profile.display_name,
+            &profile.base_url,
+            &profile.env_file,
+            &profile.api_key_env,
+            profile.default_model.as_deref(),
+            (!profile.base_url.is_empty()).then_some(profile.base_url.as_str()),
+            false,
+            None,
+        );
+    }
+
+    /// Clear a stored key for a user-defined [providers.<name>] profile.
+    pub(super) fn start_named_profile_logout(&mut self, profile: crate::tui::NamedProfileLogin) {
+        let result: anyhow::Result<()> = (|| {
+            Self::clear_api_key_login(&profile.api_key_env, &profile.env_file)?;
+            Ok(())
+        })();
+        match result {
+            Ok(message) => {
+                self.push_display_message(DisplayMessage::system(format!(
+                    "Logged out of {}.",
+                    profile.display_name
+                )));
+                let _ = message;
+            }
+            Err(err) => {
+                self.push_display_message(DisplayMessage::error(format!(
+                    "Logout failed for {}: {}",
+                    profile.display_name, err
+                )));
+            }
+        }
     }
 
     fn start_azure_login(&mut self) {

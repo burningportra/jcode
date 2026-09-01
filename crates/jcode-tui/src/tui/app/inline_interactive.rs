@@ -3443,9 +3443,17 @@ impl App {
                         self.inline_interactive_state = None;
                         self.start_login_provider(provider);
                     }
+                    PickerAction::LoginProfile(profile) => {
+                        self.inline_interactive_state = None;
+                        self.start_named_profile_login(profile);
+                    }
                     PickerAction::Logout(provider) => {
                         self.inline_interactive_state = None;
                         self.start_logout_provider(provider);
+                    }
+                    PickerAction::LogoutProfile(profile) => {
+                        self.inline_interactive_state = None;
+                        self.start_named_profile_logout(profile);
                     }
                     PickerAction::LogoutAll => {
                         self.inline_interactive_state = None;

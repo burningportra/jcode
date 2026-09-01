@@ -56,6 +56,7 @@ include!("tests/command_suggestions_cache.rs");
 include!("tests/skill_invocation_multi_word.rs");
 include!("tests/prompt_history_cross_session.rs");
 include!("tests/learning_inbox.rs");
+include!("tests/named_profile_login.rs");
 #[test]
 fn kv_cache_signature_prefix_match_allows_appended_messages() {
     let baseline_messages = vec![

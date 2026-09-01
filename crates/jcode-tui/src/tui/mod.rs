@@ -1292,12 +1292,60 @@ pub enum AgentModelTarget {
     Ambient,
 }
 
+/// A login/logout entry derived from a user-defined `[providers.<name>]`
+/// config profile that declares `api_key_env`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NamedProfileLogin {
+    pub name: String,
+    pub display_name: String,
+    pub api_key_env: String,
+    /// Env-file basename under the app config dir (e.g. "wafer.env").
+    pub env_file: String,
+    pub base_url: String,
+    pub default_model: Option<String>,
+}
+
+impl NamedProfileLogin {
+    /// Snapshot all config-declared profiles eligible for /login, in config
+    /// order. Static providers take precedence on name conflicts.
+    pub fn all_from_config() -> Vec<Self> {
+        crate::config::config()
+            .providers
+            .iter()
+            .filter_map(|(name, profile)| {
+                let api_key_env = profile.api_key_env.as_deref()?.trim();
+                if api_key_env.is_empty() {
+                    return None;
+                }
+                // Static providers win on name conflicts.
+                if crate::provider_catalog::resolve_login_provider(name).is_some() {
+                    return None;
+                }
+                Some(Self {
+                    name: name.clone(),
+                    display_name: format!("{name} (config profile)"),
+                    api_key_env: api_key_env.to_string(),
+                    env_file: format!("{name}.env"),
+                    base_url: profile.base_url.trim().to_string(),
+                    default_model: profile.default_model.clone(),
+                })
+            })
+            .collect()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PickerAction {
     Model,
     Account(AccountPickerAction),
     Login(crate::provider_catalog::LoginProviderDescriptor),
     Logout(crate::provider_catalog::LoginProviderDescriptor),
+    /// Login entry for a user-defined `[providers.<name>]` config profile.
+    /// Owned (unlike `Login`) because the static descriptor catalog cannot
+    /// represent config-defined profiles.
+    LoginProfile(crate::tui::NamedProfileLogin),
+    /// Logout counterpart of `LoginProfile`.
+    LogoutProfile(crate::tui::NamedProfileLogin),
     LogoutAll,
     Usage {
         id: String,
@@ -1380,6 +1428,9 @@ fn estimate_picker_action_bytes(action: &PickerAction) -> usize {
                     .map(|value| value.len())
                     .sum::<usize>()
                 + descriptor.menu_detail.len()
+        }
+        PickerAction::LoginProfile(profile) | PickerAction::LogoutProfile(profile) => {
+            profile.display_name.len() + profile.api_key_env.len() + profile.base_url.len()
         }
         PickerAction::Usage {
             id,

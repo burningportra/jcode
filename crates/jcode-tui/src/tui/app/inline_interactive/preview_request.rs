@@ -90,6 +90,8 @@ pub(super) fn picker_account_provider_scope(picker: &InlineInteractiveState) -> 
         | PickerAction::Model
         | PickerAction::Login(_)
         | PickerAction::Logout(_)
+        | PickerAction::LoginProfile(_)
+        | PickerAction::LogoutProfile(_)
         | PickerAction::LogoutAll
         | PickerAction::Usage { .. }
         | PickerAction::AgentTarget(_)

@@ -132,6 +132,52 @@ impl App {
             })
             .collect::<Vec<_>>();
 
+        // User-defined [providers.<name>] config profiles that declare
+        // api_key_env. Static providers keep precedence; profiles shadowed by
+        // a static id are already excluded in NamedProfileLogin::all_from_config.
+        for profile in crate::tui::NamedProfileLogin::all_from_config() {
+            let has_key = std::env::var(&profile.api_key_env)
+                .map(|value| !value.trim().is_empty())
+                .unwrap_or(false)
+                || crate::provider_catalog::load_env_value_from_config_file(
+                    &profile.api_key_env,
+                    &profile.env_file,
+                )
+                .map(|value| !value.trim().is_empty())
+                .unwrap_or(false);
+            let state_label = if has_key { "configured" } else { "setup" };
+            let mut detail = profile.base_url.clone();
+            if detail.is_empty() {
+                detail = "configured provider profile".to_string();
+            }
+            detail = format!("{detail} · /login {}", profile.name);
+            models.push(PickerEntry {
+                name: profile.display_name.clone(),
+                options: vec![PickerOption {
+                    provider: "API key".to_string(),
+                    api_method: state_label.to_string(),
+                    available: true,
+                    detail,
+                    estimated_reference_cost_micros: None,
+                }],
+                action: if logout {
+                    PickerAction::LogoutProfile(profile)
+                } else {
+                    PickerAction::LoginProfile(profile)
+                },
+                selected_option: 0,
+                is_current: has_key,
+                is_default: false,
+                is_favorite: false,
+                recommended: false,
+                recommendation_rank: usize::MAX,
+                usage_score: 0,
+                old: false,
+                created_date: None,
+                effort: None,
+            });
+        }
+
         if logout {
             // Prepend a synthetic "All providers" entry that logs out everywhere.
             models.insert(
