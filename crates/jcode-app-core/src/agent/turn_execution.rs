@@ -87,8 +87,7 @@ impl Agent {
             );
         }
 
-        self.current_turn_system_reminder =
-            system_reminder.filter(|value| !value.trim().is_empty());
+        self.current_turn_system_reminder = self.consume_turn_reminder_with_compact_recall(system_reminder);
 
         self.append_user_context_message_with_display_role(user_message, images, display_role)?;
         crate::telemetry::record_turn();
@@ -108,6 +107,35 @@ impl Agent {
         images: Vec<(String, String)>,
     ) -> Result<()> {
         self.append_user_context_message_with_display_role(user_message, images, None)
+    }
+
+    /// Fold a one-shot post-compaction re-anchor reminder into the current turn's
+    /// system reminder, then clear the pending flag. If context was compacted since
+    /// the last turn and project instructions (AGENTS.md) exist, prepend a recall
+    /// note telling the agent to re-read them, since the summarized transcript can
+    /// de-emphasize rules that were fresh before compaction.
+    pub(super) fn consume_turn_reminder_with_compact_recall(
+        &mut self,
+        system_reminder: Option<String>,
+    ) -> Option<String> {
+        let mut reminder = system_reminder.filter(|value| !value.trim().is_empty());
+        let anchors_exist = self
+            .agents_md_snapshot
+            .0
+            .as_deref()
+            .is_some_and(|s| !s.trim().is_empty());
+        if self.pending_post_compact_anchor && anchors_exist {
+            self.pending_post_compact_anchor = false;
+            let anchor = "# Context Compaction Recall\n\nYour conversation was compacted. Re-read AGENTS.md (and any skill instructions) so project rules and conventions are fresh before continuing.";
+            reminder = Some(match reminder {
+                Some(existing) => format!("{anchor}\n\n{existing}"),
+                None => anchor.to_string(),
+            });
+        } else if self.pending_post_compact_anchor {
+            // Nothing for the agent to re-read; drop the request so it cannot fire again.
+            self.pending_post_compact_anchor = false;
+        }
+        reminder
     }
 
     fn append_user_context_message_with_display_role(

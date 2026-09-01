@@ -285,6 +285,67 @@ async fn queued_soft_interrupt_images_are_injected_as_image_blocks() {
 }
 
 #[tokio::test]
+async fn post_compact_recall_folds_into_reminder_when_agents_md_exists() {
+    let _guard = crate::storage::lock_test_env();
+    let provider: Arc<dyn Provider> = Arc::new(NativeAutoCompactionProvider);
+    let registry = Registry::new(provider.clone()).await;
+    let mut agent = Agent::new(provider, registry);
+
+    // AGENTS.md present and compaction flag set → recall prepended.
+    agent.agents_md_snapshot = (
+        Some("# Project Rules\nAlways use strict mode.".to_string()),
+        crate::prompt::ContextInfo::default(),
+    );
+    agent.pending_post_compact_anchor = true;
+
+    let out = agent.consume_turn_reminder_with_compact_recall(None);
+    assert!(out.is_some());
+    let text = out.unwrap();
+    assert!(text.contains("Context Compaction Recall"), "got: {text}");
+    assert!(text.contains("Re-read AGENTS.md"), "got: {text}");
+    // Flag cleared after consumption.
+    assert!(!agent.pending_post_compact_anchor);
+
+    // Second turn: no pending flag → no reminder injected.
+    let second = agent.consume_turn_reminder_with_compact_recall(None);
+    assert!(second.is_none());
+}
+
+#[tokio::test]
+async fn post_compact_recall_is_dropped_when_no_agents_md_exists() {
+    let _guard = crate::storage::lock_test_env();
+    let provider: Arc<dyn Provider> = Arc::new(NativeAutoCompactionProvider);
+    let registry = Registry::new(provider.clone()).await;
+    let mut agent = Agent::new(provider, registry);
+
+    // No AGENTS.md snapshot, but flag is set → no reminder, and flag consumed (cannot re-fire).
+    agent.agents_md_snapshot = (None, crate::prompt::ContextInfo::default());
+    agent.pending_post_compact_anchor = true;
+
+    let out = agent.consume_turn_reminder_with_compact_recall(Some("existing reminder".to_string()));
+    assert_eq!(out.as_deref(), Some("existing reminder"));
+    assert!(!agent.pending_post_compact_anchor);
+}
+
+#[tokio::test]
+async fn post_compact_recall_merges_with_existing_reminder() {
+    let _guard = crate::storage::lock_test_env();
+    let provider: Arc<dyn Provider> = Arc::new(NativeAutoCompactionProvider);
+    let registry = Registry::new(provider.clone()).await;
+    let mut agent = Agent::new(provider, registry);
+    agent.agents_md_snapshot = (
+        Some("# Project Rules".to_string()),
+        crate::prompt::ContextInfo::default(),
+    );
+    agent.pending_post_compact_anchor = true;
+
+    let out = agent.consume_turn_reminder_with_compact_recall(Some("keep going".to_string()));
+    let text = out.unwrap();
+    assert!(text.starts_with("# Context Compaction Recall"));
+    assert!(text.ends_with("keep going"));
+}
+
+#[tokio::test]
 async fn run_turn_streaming_mpsc_emits_keepalive_while_provider_is_quiet() {
     let _guard = crate::storage::lock_test_env();
     let provider: Arc<dyn Provider> = Arc::new(DelayedProvider {

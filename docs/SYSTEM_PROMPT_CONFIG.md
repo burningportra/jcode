@@ -36,6 +36,23 @@ empty prompt.
 
 This replaces only the base prompt. AGENTS.md, overlays, skills, and memory still apply.
 
+## Post-compaction AGENTS.md recall
+
+After context compaction, the summarized transcript can de-emphasize project rules that
+were fresh earlier in the session. To counter that drift, the first turn after a
+compaction completes prepends a one-shot **Context Compaction Recall** reminder telling
+the agent to re-read `AGENTS.md` (and any active skill instructions).
+
+Behavior details:
+
+- Fires **once** per compaction, on the next turn that runs a model request.
+- Only injected when project instructions actually exist (`./AGENTS.md` or
+  `~/AGENTS.md` are loaded); with no AGENTS.md the flag is dropped silently so it
+  cannot fire later.
+- The recall is prepended before any other system reminder for that turn. It is
+  transient: it lives on the `current_turn_system_reminder`, is never persisted to
+  session history, and the flag clears whether or not AGENTS.md exists.
+
 ## Notes
 
 - Changes to these files take effect for **new sessions**; a running session keeps the

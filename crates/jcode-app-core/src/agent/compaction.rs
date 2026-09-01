@@ -6,6 +6,10 @@ impl Agent {
         self.locked_tools = None;
         self.provider_session_id = None;
         self.session.provider_session_id = None;
+        // Re-ground the agent on project instructions after compaction: the
+        // summarized transcript can de-emphasize rules that were fresh earlier.
+        // The next turn consumes and clears this one-shot flag.
+        self.pending_post_compact_anchor = true;
     }
 
     pub fn poll_compaction_completion_event(&mut self) -> Option<CompactionEvent> {

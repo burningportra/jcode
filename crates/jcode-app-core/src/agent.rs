@@ -203,6 +203,11 @@ pub struct Agent {
     /// Transient reminder injected into provider requests for the current turn only.
     /// Not persisted to session history.
     current_turn_system_reminder: Option<String>,
+    /// One-shot flag set when context compaction completes. Consumed (and cleared) by
+    /// the next turn so the agent re-reads AGENTS.md and re-grounds on project rules
+    /// that compaction summarization may have de-emphasized (see PCR /
+    /// "Context Mastery" guidance).
+    pending_post_compact_anchor: bool,
     /// Tool call ids observed in the current session transcript.
     tool_call_ids: HashSet<String>,
     /// Tool result ids observed in the current session transcript.
@@ -309,6 +314,7 @@ impl Agent {
             last_status_detail: None,
             pending_alerts: Vec::new(),
             current_turn_system_reminder: None,
+            pending_post_compact_anchor: false,
             tool_call_ids: HashSet::new(),
             tool_result_ids: HashSet::new(),
             tool_output_scan_index: 0,
