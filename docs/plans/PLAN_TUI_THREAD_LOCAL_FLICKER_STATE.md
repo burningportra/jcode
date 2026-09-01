@@ -487,3 +487,13 @@ never held the env lock — previously *masked* by the render lock accidentally
 serializing everything. This pollution is part of the same follow-up scope, not
 a regression introduced by the flicker fix (the pollution was always latent;
 the lock merely hid it while also causing the deadlock).
+
+## Addendum 3 (final confirmation, 2026-09-01)
+
+9-run final matrix: all parallel lanes complete in ~21-22s each (zero hangs).
+Flicker lane: 3/3 green at 16 threads. Full-suite failure counts (42-47) remain
+dominated by the documented pre-existing baseline (38 single-threaded,
+control-proven on the unchanged tree) plus the parallel-only JCODE_HOME/config
+pollution (~5-9, previously masked by the render lock's accidental global
+serialization) — both tracked as the follow-up env-isolation goal, out of this
+initiative's scope.
