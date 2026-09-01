@@ -81,7 +81,12 @@ Judge first whether you need this, and how much:
   Write down the open questions and the assumption you are proceeding under for
   each, put them in the initiative's `why`/description, and mark them as
   assumptions the refine loop must stress-test. Never stall a headless run waiting
-  for input.
+  for input. Escalation path for headless runs: if the ambiguity is
+  goal-forking (you cannot even pick a direction), record the fork explicitly in
+  the initiative, pick the interpretation with the best value/risk ratio, proceed,
+  and surface the fork prominently in every convergence report. If NO
+  interpretation is defensible, stop and report the blocker instead of
+  fabricating a goal.
 
 Aim your questions at what actually forks the plan:
 
@@ -145,6 +150,13 @@ Reproduce the flywheel's competing-plans pattern:
    superior plan (note which idea came from which proposal in a comparison table).
 3. For small or low-risk goals a single draft is acceptable; do not over-invest.
    Scale the ceremony to the stakes.
+
+**Degradation ladder for multi-model drafting.** If `swarm` is unavailable,
+spawned workers fail, or all workers come back same-model, fall back in order:
+(a) one non-coordinator model via any available route, (b) a second independent
+session on your own model, (c) a single self-draft. Record which rung you
+landed on in the plan's comparison table; never claim competing-proposal
+synthesis that did not happen.
 
 The markdown plan is the primary artifact only for goals touching code or
 product behavior in a repo. For non-code goals (a process, a campaign, an
@@ -242,9 +254,21 @@ head:
   and the per-spawn `model` parameter is silently ignored, so a pass can look
   cross-model while being same-model. Read the worker's actual model from its
   session (`~/.jcode/sessions/<id>.json`, field `model`) and compare it to yours.
+  If that file is missing, unreadable, or lacks the `model` field, treat the
+  pass as UNVERIFIED (same-model) rather than assuming; say so in the pass log.
   If they match, record the pass as a same-model fresh-eyes review and say the
   plan still lacks a cross-model check. A same-model reviewer still finds real
   defects; it just cannot supply the independence the convergence signal claims.
+- **Convergence honesty guard.** Because self-scored convergence is
+  inflation-prone, the plan is not "fully converged" unless either (a) at least
+  one verified cross-model pass ran during the loop, or (b) the convergence
+  report explicitly states "no cross-model review was possible" and lists that
+  as a residual risk. Never let an unfalsifiable score be the only evidence of
+  convergence.
+- **Overshoot-hunt bound.** Run the overshoot hunt at most twice per artifact;
+  findings from a third pass are increasingly confabulated. Require each
+  finding to cite the specific plan text it corrects; discard findings that
+  cannot.
 - If `swarm` is unavailable, degrade gracefully: do the fresh-eyes pass yourself
   and note that no independent reviewer model was used. A single-model loop is
   still useful; it just lacks the cross-model check.
@@ -288,10 +312,19 @@ reviewer that returns "no significant issues" is the strongest convergence
 signal available here.
 
 Convergence red flags (rethink rather than iterate):
-- **Oscillation** (alternating between two versions): reframe the problem.
+- **Oscillation** (alternating between two versions): reframe the problem; if
+  the oscillation survives a reframe, surface both variants to the user (or, if
+  headless, pick one, record why, and flag it as an open decision).
 - **Expansion** (output growing instead of shrinking): an agent is adding
   complexity; step back.
-- **Plateau at low quality**: kill the approach and restart fresh.
+- **Plateau at low quality**: kill the approach and restart fresh. When you
+  restart, reset the pass counter; carried-over pass numbers create false
+  convergence history.
+- **Tooling failure mid-loop** (initiative or swarm unavailable): the plan file
+  and its git history are the source of truth. Record pass results as commits
+  with the `pass N (<lens>): score X/100` line in the commit message, and
+  backfill `initiative review` entries when the tool recovers. Never lose pass
+  history to a tool outage.
 
 Do not stop early just because one pass found nothing; confirm with the next
 lens. Do not keep looping past rubric completion just to chase a round number.
@@ -316,7 +349,12 @@ So before reporting convergence, call `initiative update` with rewritten
 design, rewrite the markdown plan body in place to the converged version, then
 read the initiative back with `initiative show` and check that each correction
 actually survived. Reading it back from an independent session is stronger,
-because it cannot be fooled by what you remember writing.
+because it cannot be fooled by what you remember writing. On the compressed
+single-session path (no initiative), the convergence report goes in the final
+summary plus a commit; do not invent an initiative just to satisfy this phase.
+If `initiative update` fails or the tool is unavailable, record the convergence
+report as the body of a git commit on the plan file instead; the durable trail
+matters more than the tool.
 
 Then emit a short convergence report:
 - Final score and the quality progression across passes.
@@ -345,6 +383,13 @@ convergence with an explicit transition into this phase.
 - If `br` is unavailable, seed a `todo` list or `swarm` task-graph with the same
   richness instead: every node self-contained, dependency-ordered, with
   verification steps. Richness matters more than the tool.
+- **Compaction safety:** beads and todos must be writable without conversation
+  memory. If a session compaction hits mid-conversion, the plan file plus the
+  already-created beads are sufficient to resume; re-read the plan and `br
+  list --json` before continuing rather than reconstructing from memory.
+- **Concurrent edits:** if other agents may touch the same plan file, commit
+  after each pass and rebase/pull before each new pass; the pass log in the
+  commit messages is append-only.
 
 **Polish ("check your beads N times, implement once"):** run 3-5+ polishing
 passes until convergence, ideally mixing models (a fresh reviewer per pass):
