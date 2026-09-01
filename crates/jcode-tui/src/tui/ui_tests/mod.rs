@@ -260,6 +260,9 @@ impl crate::tui::TuiState for TestState {
     fn subagent_status(&self) -> Option<String> {
         None
     }
+    fn selfdev_build_status(&self) -> Option<String> {
+        None
+    }
     fn batch_progress(&self) -> Option<crate::bus::BatchProgress> {
         self.batch_progress.clone()
     }

@@ -42,6 +42,8 @@ pub enum ProviderChoice {
     Openrouter,
     #[value(alias = "vercel", alias = "ai-gateway", alias = "vercel-ai")]
     VercelAiGateway,
+    #[value(alias = "orca-router")]
+    Orcarouter,
     #[value(alias = "aws-bedrock", alias = "aws_bedrock")]
     Bedrock,
     #[value(alias = "azure-openai", alias = "aoai")]
@@ -119,6 +121,8 @@ pub enum ProviderChoice {
     MetaMuse,
     #[value(alias = "celeris-ai", alias = "celeris1", alias = "celeris-1")]
     Celeris,
+    #[value(alias = "wafer-ai", alias = "wafer.ai", alias = "wafer-serverless")]
+    Wafer,
     #[value(alias = "lm-studio")]
     Lmstudio,
     Ollama,
@@ -163,6 +167,7 @@ impl ProviderChoice {
             Self::OpenaiApi => "openai-api",
             Self::Openrouter => "openrouter",
             Self::VercelAiGateway => "vercel-ai-gateway",
+            Self::Orcarouter => "orcarouter",
             Self::Bedrock => "bedrock",
             Self::Azure => "azure",
             Self::Opencode => "opencode",
@@ -196,6 +201,7 @@ impl ProviderChoice {
             Self::XiaomiMimo => "xiaomi-mimo",
             Self::MetaMuse => "meta-muse",
             Self::Celeris => "celeris",
+            Self::Wafer => "wafer",
             Self::Lmstudio => "lmstudio",
             Self::Ollama => "ollama",
             Self::Chutes => "chutes",
@@ -247,6 +253,10 @@ const PROVIDER_CHOICE_LOGIN_PROVIDERS: &[(ProviderChoice, LoginProviderDescripto
     (
         ProviderChoice::VercelAiGateway,
         crate::provider_catalog::VERCEL_AI_GATEWAY_LOGIN_PROVIDER,
+    ),
+    (
+        ProviderChoice::Orcarouter,
+        crate::provider_catalog::ORCAROUTER_LOGIN_PROVIDER,
     ),
     (
         ProviderChoice::Bedrock,
@@ -379,6 +389,10 @@ const PROVIDER_CHOICE_LOGIN_PROVIDERS: &[(ProviderChoice, LoginProviderDescripto
     (
         ProviderChoice::Celeris,
         crate::provider_catalog::CELERIS_LOGIN_PROVIDER,
+    ),
+    (
+        ProviderChoice::Wafer,
+        crate::provider_catalog::WAFER_LOGIN_PROVIDER,
     ),
     (
         ProviderChoice::Lmstudio,
@@ -1630,6 +1644,7 @@ async fn init_provider_with_options(
         }
         ProviderChoice::Opencode
         | ProviderChoice::VercelAiGateway
+        | ProviderChoice::Orcarouter
         | ProviderChoice::OpencodeGo
         | ProviderChoice::Zai
         | ProviderChoice::Ai302
@@ -1658,6 +1673,7 @@ async fn init_provider_with_options(
         | ProviderChoice::XiaomiMimo
         | ProviderChoice::MetaMuse
         | ProviderChoice::Celeris
+        | ProviderChoice::Wafer
         | ProviderChoice::Lmstudio
         | ProviderChoice::Ollama
         | ProviderChoice::Chutes

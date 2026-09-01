@@ -481,6 +481,21 @@ pub const CELERIS_PROFILE: OpenAiCompatibleProfile = OpenAiCompatibleProfile {
     requires_api_key: true,
 };
 
+pub const WAFER_PROFILE: OpenAiCompatibleProfile = OpenAiCompatibleProfile {
+    id: "wafer",
+    display_name: "Wafer",
+    // Wafer Serverless exposes an OpenAI-compatible endpoint at
+    // https://pass.wafer.ai/v1 (it also serves an Anthropic-compatible
+    // Messages surface, but jcode drives it through the OpenAI-compatible
+    // path like the other direct profiles).
+    api_base: "https://pass.wafer.ai/v1",
+    api_key_env: "WAFER_API_KEY",
+    env_file: "wafer.env",
+    setup_url: "https://docs.wafer.ai/serverless",
+    default_model: Some("GLM-5.2"),
+    requires_api_key: true,
+};
+
 pub const OPENAI_COMPAT_PROFILE: OpenAiCompatibleProfile = OpenAiCompatibleProfile {
     id: "openai-compatible",
     display_name: "OpenAI-compatible",
@@ -532,6 +547,7 @@ pub(crate) const OPENAI_COMPAT_PROFILES: &[OpenAiCompatibleProfile] = &[
     XIAOMI_MIMO_PROFILE,
     META_MUSE_PROFILE,
     CELERIS_PROFILE,
+    WAFER_PROFILE,
     LMSTUDIO_PROFILE,
     OLLAMA_PROFILE,
     OPENAI_COMPAT_PROFILE,
@@ -1261,6 +1277,19 @@ pub const CELERIS_LOGIN_PROVIDER: LoginProviderDescriptor = LoginProviderDescrip
     order: LoginProviderSurfaceOrder::new(Some(38), Some(38), Some(38), Some(38), Some(38)),
 };
 
+pub const WAFER_LOGIN_PROVIDER: LoginProviderDescriptor = LoginProviderDescriptor {
+    id: "wafer",
+    display_name: "Wafer",
+    auth_kind: LoginProviderAuthKind::ApiKey,
+    auth_state_key: LoginProviderAuthStateKey::OpenRouterLike,
+    auth_status_method: "API key",
+    aliases: &["wafer-ai", "wafer.ai", "wafer-serverless"],
+    menu_detail: "API key, pay-as-you-go fast open models",
+    recommended: false,
+    target: LoginProviderTarget::OpenAiCompatible(WAFER_PROFILE),
+    order: LoginProviderSurfaceOrder::new(Some(41), Some(41), Some(41), Some(41), Some(41)),
+};
+
 pub const GOOGLE_LOGIN_PROVIDER: LoginProviderDescriptor = LoginProviderDescriptor {
     id: "google",
     display_name: "Google/Gmail",
@@ -1321,6 +1350,7 @@ pub(crate) const LOGIN_PROVIDERS: &[LoginProviderDescriptor] = &[
     XIAOMI_MIMO_LOGIN_PROVIDER,
     META_MUSE_LOGIN_PROVIDER,
     CELERIS_LOGIN_PROVIDER,
+    WAFER_LOGIN_PROVIDER,
     LMSTUDIO_LOGIN_PROVIDER,
     OLLAMA_LOGIN_PROVIDER,
     OPENAI_COMPAT_LOGIN_PROVIDER,

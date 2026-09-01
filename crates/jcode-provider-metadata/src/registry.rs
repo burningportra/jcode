@@ -557,6 +557,37 @@ pub const BELVEDIR_MODELS: &[ProviderModelEntry] = &[ProviderModelEntry {
     context_window: 131_072,
 }];
 
+pub const WAFER_MODELS: &[ProviderModelEntry] = &[
+    ProviderModelEntry {
+        model_id: "GLM-5.2",
+        context_window: 1_048_576,
+    },
+    ProviderModelEntry {
+        model_id: "GLM-5.3",
+        context_window: 1_048_576,
+    },
+    ProviderModelEntry {
+        model_id: "GLM-5.3-Flash",
+        context_window: 1_048_576,
+    },
+    ProviderModelEntry {
+        model_id: "Kimi-K3",
+        context_window: 1_048_576,
+    },
+    ProviderModelEntry {
+        model_id: "Kimi-K2.6",
+        context_window: 262_144,
+    },
+    ProviderModelEntry {
+        model_id: "DeepSeek-V4-Flash-0731-Fast",
+        context_window: 1_048_576,
+    },
+    ProviderModelEntry {
+        model_id: "Qwen3.5-397B-A17B",
+        context_window: 262_144,
+    },
+];
+
 // =========================================================================
 // Complete provider registry table
 // =========================================================================
@@ -705,6 +736,12 @@ pub const REGISTRY: &[ProviderRegistryEntry] = &[
         models_dev_id: "belvedir",
         api_key_env: "BELVEDIR_API_KEY",
         models: BELVEDIR_MODELS,
+    },
+    ProviderRegistryEntry {
+        id: "wafer",
+        models_dev_id: "wafer",
+        api_key_env: "WAFER_API_KEY",
+        models: WAFER_MODELS,
     },
 ];
 

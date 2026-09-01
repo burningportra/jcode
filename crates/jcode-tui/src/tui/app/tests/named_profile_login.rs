@@ -2,19 +2,22 @@
 // appear in the /login and /logout pickers, resolve via /login <name> after
 // statics, store keys in ~/.config/jcode/<profile>.env, and clear on logout.
 
-fn wafer_config_toml() -> &'static str {
+fn customlab_config_toml() -> &'static str {
+    // Uses a profile name that is NOT a built-in provider id, so it exercises
+    // the user-defined config-profile path (built-in ids like `wafer` are
+    // filtered out of the config-profile picker by `all_from_config`).
     r#"
-[providers.wafer]
+[providers.customlab]
 type = "anthropic-compatible"
-base_url = "https://pass.wafer.ai"
+base_url = "https://pass.example.invalid"
 auth = "header"
-api_key_env = "WAFER_TEST_KEY_ENV"
+api_key_env = "CUSTOMLAB_TEST_KEY_ENV"
 default_model = "GLM-5.2"
 
-[[providers.wafer.models]]
+[[providers.customlab.models]]
 id = "GLM-5.2"
 
-[[providers.wafer.models]]
+[[providers.customlab.models]]
 id = "Qwen3.5-397B-A17B"
 "#
 }
@@ -34,7 +37,7 @@ impl ProfileEnvGuard {
         crate::env::set_var("JCODE_HOME", temp.path());
         let config_path = crate::config::Config::path().expect("config path");
         std::fs::create_dir_all(config_path.parent().expect("config parent")).expect("mkdir");
-        std::fs::write(&config_path, wafer_config_toml()).expect("write config");
+        std::fs::write(&config_path, customlab_config_toml()).expect("write config");
         crate::config::Config::invalidate_cache();
         let previous_keys = key_envs
             .iter()
@@ -73,7 +76,7 @@ impl Drop for ProfileEnvGuard {
 
 #[test]
 fn named_profile_login_appears_in_login_and_logout_pickers() {
-    let _guard = ProfileEnvGuard::new(&["WAFER_TEST_KEY_ENV"]);
+    let _guard = ProfileEnvGuard::new(&["CUSTOMLAB_TEST_KEY_ENV"]);
     let mut app = create_test_app();
 
     app.open_login_picker_inline();
@@ -82,7 +85,7 @@ fn named_profile_login_appears_in_login_and_logout_pickers() {
         entries
             .entries
             .iter()
-            .any(|entry| entry.name == "wafer (config profile)"
+            .any(|entry| entry.name == "customlab (config profile)"
                 && matches!(entry.action, crate::tui::PickerAction::LoginProfile(_))),
         "login picker must list config profiles"
     );
@@ -97,7 +100,7 @@ fn named_profile_login_appears_in_login_and_logout_pickers() {
         entries
             .entries
             .iter()
-            .any(|entry| entry.name == "wafer (config profile)"
+            .any(|entry| entry.name == "customlab (config profile)"
                 && matches!(entry.action, crate::tui::PickerAction::LogoutProfile(_))),
         "logout picker must list config profiles"
     );
@@ -105,7 +108,7 @@ fn named_profile_login_appears_in_login_and_logout_pickers() {
 
 #[test]
 fn named_profile_selection_resolves_name_after_statics() {
-    let _guard = ProfileEnvGuard::new(&["WAFER_TEST_KEY_ENV"]);
+    let _guard = ProfileEnvGuard::new(&["CUSTOMLAB_TEST_KEY_ENV"]);
     let providers = crate::provider_catalog::tui_login_providers();
 
     // Static provider still resolves through the static path.
@@ -115,11 +118,11 @@ fn named_profile_selection_resolves_name_after_statics() {
     );
 
     // Profile name resolves via the fallback.
-    let profile = crate::tui::app::auth::resolve_named_profile_selection("wafer", &providers)
-        .expect("wafer profile must resolve");
-    assert_eq!(profile.api_key_env, "WAFER_TEST_KEY_ENV");
-    assert_eq!(profile.env_file, "wafer.env");
-    assert_eq!(profile.base_url, "https://pass.wafer.ai");
+    let profile = crate::tui::app::auth::resolve_named_profile_selection("customlab", &providers)
+        .expect("customlab profile must resolve");
+    assert_eq!(profile.api_key_env, "CUSTOMLAB_TEST_KEY_ENV");
+    assert_eq!(profile.env_file, "customlab.env");
+    assert_eq!(profile.base_url, "https://pass.example.invalid");
 
     // Unknown names fail.
     assert!(crate::tui::app::auth::resolve_named_profile_selection("not-a-provider", &providers).is_none());
@@ -127,10 +130,10 @@ fn named_profile_selection_resolves_name_after_statics() {
 
 #[test]
 fn named_profile_login_saves_key_and_logout_clears_it() {
-    let _guard = ProfileEnvGuard::new(&["WAFER_TEST_KEY_ENV"]);
+    let _guard = ProfileEnvGuard::new(&["CUSTOMLAB_TEST_KEY_ENV"]);
     let mut app = create_test_app();
 
-    app.start_named_profile_login(crate::tui::app::auth::resolve_named_profile_selection("wafer", &[]).expect("profile"));
+    app.start_named_profile_login(crate::tui::app::auth::resolve_named_profile_selection("customlab", &[]).expect("profile"));
     assert!(
         app.pending_login.is_some(),
         "login must stage a pending key prompt"
@@ -142,16 +145,16 @@ fn named_profile_login_saves_key_and_logout_clears_it() {
 
     let env_path = crate::storage::app_config_dir()
         .expect("config dir")
-        .join("wafer.env");
-    let saved = std::fs::read_to_string(&env_path).expect("wafer.env written");
+        .join("customlab.env");
+    let saved = std::fs::read_to_string(&env_path).expect("customlab.env written");
     assert!(
-        saved.contains("WAFER_TEST_KEY_ENV=waf-test-key-1234567890"),
+        saved.contains("CUSTOMLAB_TEST_KEY_ENV=waf-test-key-1234567890"),
         "key must be persisted to the profile env file, got: {saved}"
     );
 
     // Logout clears the stored key.
     app.start_named_profile_logout(
-        crate::tui::app::auth::resolve_named_profile_selection("wafer", &[]).expect("profile"),
+        crate::tui::app::auth::resolve_named_profile_selection("customlab", &[]).expect("profile"),
     );
     let saved = std::fs::read_to_string(&env_path).unwrap_or_default();
     assert!(
@@ -162,7 +165,7 @@ fn named_profile_login_saves_key_and_logout_clears_it() {
 
 #[test]
 fn named_profile_without_api_key_env_is_skipped() {
-    let _guard = ProfileEnvGuard::new(&["WAFER_TEST_KEY_ENV"]);
+    let _guard = ProfileEnvGuard::new(&["CUSTOMLAB_TEST_KEY_ENV"]);
     // Overwrite config with a profile that has no api_key_env.
     let config_path = crate::config::Config::path().expect("config path");
     std::fs::write(
@@ -193,15 +196,15 @@ fn remote_account_command_still_handles_login_logout_shape() {
     // Remote mode funnels /login and /logout through the same shared
     // parse in handle_auth_command (dispatch_local_command table), so the
     // remote path must accept the same input shapes without error.
-    let _guard = ProfileEnvGuard::new(&["WAFER_TEST_KEY_ENV"]);
+    let _guard = ProfileEnvGuard::new(&["CUSTOMLAB_TEST_KEY_ENV"]);
     let mut app = create_test_app();
 
-    // The shared handler returns true (handled) for /login wafer; the actual
+    // The shared handler returns true (handled) for /login customlab; the actual
     // remote dispatch is exercised in key_handling via the same function.
-    assert!(crate::tui::app::auth::handle_auth_command(&mut app, "/login wafer"));
+    assert!(crate::tui::app::auth::handle_auth_command(&mut app, "/login customlab"));
     assert!(app.pending_login.is_some(), "profile login must stage");
     app.pending_login = None;
-    assert!(crate::tui::app::auth::handle_auth_command(&mut app, "/logout wafer"));
+    assert!(crate::tui::app::auth::handle_auth_command(&mut app, "/logout customlab"));
     assert!(crate::tui::app::auth::handle_auth_command(&mut app, "/login not-a-provider"));
     assert!(app.pending_login.is_none());
 }

@@ -1790,9 +1790,9 @@ impl Provider for MultiProvider {
     }
 
     fn name(&self) -> &str {
-        // An anthropic-compatible named profile (e.g. [providers.wafer]) binds
+        // An anthropic-compatible named profile (e.g. [providers.mylab]) binds
         // the Claude slot. Report the profile's own name so failure/fallback
-        // messages say "wafer" instead of the generic "Claude".
+        // messages say "mylab" instead of the generic "Claude".
         if matches!(self.active_provider(), ActiveProvider::Claude)
             && let Ok(profile_name) = std::env::var("JCODE_NAMED_PROVIDER_PROFILE")
             && crate::config::config()

@@ -605,6 +605,7 @@ fn provider_keys_for_env(env_key: &str) -> &'static [&'static str] {
         "GROQ_API_KEY" => &["groq"],
         "CEREBRAS_API_KEY" => &["cerebras"],
         "BELVEDIR_API_KEY" => &["belvedir"],
+        "WAFER_API_KEY" => &["wafer"],
         "XAI_API_KEY" => &["xai"],
         "OPENROUTER_API_KEY" => &["openrouter"],
         "CONIFER_API_KEY" => &["conifer"],
