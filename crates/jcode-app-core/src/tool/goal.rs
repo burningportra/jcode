@@ -44,6 +44,29 @@ fn maybe_publish_goals_overview_refresh(
     Ok(())
 }
 
+/// Resolve the goal id for actions that operate on an existing initiative.
+///
+/// Prefer the explicit `id` when provided; otherwise fall back to the goal
+/// attached to the current session. During a `/goals` run the model routinely
+/// omits `id` because the initiative is already attached, so this fallback keeps
+/// `update`/`checkpoint`/`review` from failing with "id is required".
+fn resolve_goal_id(
+    explicit_id: Option<&str>,
+    session_id: &str,
+    working_dir: Option<&std::path::Path>,
+    action: &str,
+) -> Result<String> {
+    if let Some(id) = explicit_id.map(str::trim).filter(|s| !s.is_empty()) {
+        return Ok(id.to_string());
+    }
+    if let Some(goal) = crate::goal::load_attached_goal(session_id, working_dir)? {
+        return Ok(goal.id);
+    }
+    anyhow::bail!(
+        "id is required for {action} (no initiative is attached to this session; pass `id` or run `resume`/`show` first)"
+    )
+}
+
 fn goal_page_is_open(session_id: &str, goal_id: &str) -> Result<bool> {
     let page_id = crate::goal::goal_page_id(goal_id);
     let snapshot = crate::side_panel::snapshot_for_session(session_id)?;
@@ -315,10 +338,13 @@ impl Tool for InitiativeTool {
                     .with_metadata(serde_json::to_value(&goal)?))
             }
             "update" | "checkpoint" => {
-                let id = params
-                    .id
-                    .as_deref()
-                    .ok_or_else(|| anyhow::anyhow!("id is required for update/checkpoint"))?;
+                let id = resolve_goal_id(
+                    params.id.as_deref(),
+                    &ctx.session_id,
+                    working_dir,
+                    &params.action,
+                )?;
+                let id = id.as_str();
                 let status = params
                     .status
                     .as_deref()
@@ -391,10 +417,13 @@ impl Tool for InitiativeTool {
                 )
             }
             "review" => {
-                let id = params
-                    .id
-                    .as_deref()
-                    .ok_or_else(|| anyhow::anyhow!("id is required for review"))?;
+                let id = resolve_goal_id(
+                    params.id.as_deref(),
+                    &ctx.session_id,
+                    working_dir,
+                    "review",
+                )?;
+                let id = id.as_str();
                 let lens = params
                     .lens
                     .as_deref()
