@@ -178,14 +178,16 @@ impl Provider for OpenRouterSpecCaptureProvider {
 pub(crate) fn create_test_app() -> App {
     ensure_test_jcode_home_if_unset();
     clear_persisted_test_ui_state();
-    // `clear_test_render_state_for_tests` wipes process-global render state
-    // (flicker history, layout snapshots, copy targets) and internally takes
-    // the shared render-state lock unless this thread already holds it. Do
-    // not take `render_state_test_lock()` explicitly here: the mutex is not
-    // reentrant, so tests that hold the lock and then build an app (e.g. the
-    // pinned-todo-band render test) would self-deadlock, which hung the CI
-    // TUI test step at its 35-minute job timeout.
-    crate::tui::ui::clear_test_render_state_for_tests();
+    // `clear_test_render_state_for_tests_unlocked` wipes this thread's
+    // render state (flicker history, layout snapshots, copy targets) without
+    // taking the render-state lock. App construction must not acquire the
+    // render lock while `with_temp_jcode_home` holds the env lock: rendering
+    // tests hold the render lock and some of them wait on the env lock, so
+    // acquiring render-while-holding-env deadlocked the parallel suite
+    // (cross-thread lock-order inversion; see
+    // docs/plans/PLAN_TUI_THREAD_LOCAL_FLICKER_STATE.md addendum). All the
+    // cleared state is thread-local in test builds, so no lock is needed.
+    crate::tui::ui::clear_test_render_state_for_tests_unlocked();
 
     let provider: Arc<dyn Provider> = Arc::new(MockProvider);
     let rt = tokio::runtime::Runtime::new().unwrap();
@@ -199,7 +201,7 @@ pub(crate) fn create_test_app() -> App {
 fn create_named_provider_test_app(name: &'static str, model: &'static str) -> App {
     ensure_test_jcode_home_if_unset();
     clear_persisted_test_ui_state();
-    crate::tui::ui::clear_test_render_state_for_tests();
+    crate::tui::ui::clear_test_render_state_for_tests_unlocked();
 
     let provider: Arc<dyn Provider> = Arc::new(NamedMockProvider { name, model });
     let rt = tokio::runtime::Runtime::new().unwrap();
@@ -225,7 +227,7 @@ fn wait_for_model_picker_load(app: &mut App) {
 fn create_refresh_summary_test_app(summary: crate::provider::ModelCatalogRefreshSummary) -> App {
     ensure_test_jcode_home_if_unset();
     clear_persisted_test_ui_state();
-    crate::tui::ui::clear_test_render_state_for_tests();
+    crate::tui::ui::clear_test_render_state_for_tests_unlocked();
 
     let provider: Arc<dyn Provider> = Arc::new(RefreshSummaryProvider { summary });
     let rt = tokio::runtime::Runtime::new().unwrap();
@@ -239,7 +241,7 @@ fn create_refresh_summary_test_app(summary: crate::provider::ModelCatalogRefresh
 fn create_openrouter_spec_capture_test_app() -> (App, StdArc<StdMutex<Vec<String>>>) {
     ensure_test_jcode_home_if_unset();
     clear_persisted_test_ui_state();
-    crate::tui::ui::clear_test_render_state_for_tests();
+    crate::tui::ui::clear_test_render_state_for_tests_unlocked();
 
     let set_model_calls = StdArc::new(StdMutex::new(Vec::new()));
     let provider: Arc<dyn Provider> = Arc::new(OpenRouterSpecCaptureProvider {

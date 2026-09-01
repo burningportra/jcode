@@ -1569,6 +1569,31 @@ pub(crate) fn clear_test_render_state_for_tests() {
     with_render_state_lock(clear_test_render_state_locked)
 }
 
+/// Clear render state WITHOUT taking the render-state lock.
+///
+/// For app-construction contexts (`create_test_app` and siblings). All state
+/// this clears is thread-local in test builds (the `TEST_*` storages here and
+/// the flicker history / perf stats in `ui_frame_metrics`), so clearing only
+/// the calling thread's copies requires no cross-thread coordination and
+/// therefore no lock.
+///
+/// Why this exists: `with_temp_jcode_home` holds the env lock while its body
+/// calls `create_test_app`, which used to acquire the render-state lock here.
+/// Meanwhile rendering tests hold the render lock and some of them wait on the
+/// env lock, producing a cross-thread lock-order inversion that deadlocked the
+/// whole parallel suite (forensics in
+/// docs/plans/PLAN_TUI_THREAD_LOCAL_FLICKER_STATE.md, addendum section).
+/// Taking the render lock out of the env-held region makes the inversion
+/// impossible.
+///
+/// A rendering test that currently holds the render lock and calls
+/// `create_test_app` still works: this clears that thread's own state, which
+/// is exactly what the old nested path (`with_render_state_lock` skip) did.
+#[cfg(test)]
+pub(crate) fn clear_test_render_state_for_tests_unlocked() {
+    clear_test_render_state_locked()
+}
+
 /// The actual reset, run with the render-state lock held.
 #[cfg(test)]
 fn clear_test_render_state_locked() {
