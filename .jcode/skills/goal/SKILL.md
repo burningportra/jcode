@@ -32,7 +32,13 @@ model's context window while the codebase never does. Global reasoning while
 global reasoning is still possible. If you are still redesigning the product,
 stay in plan space. If you are mainly packaging work for execution, move to bead
 space. Once you are in bead space you never look back at the plan, so the beads
-must carry all the details forward.
+must carry all the details forward. The exception: if implementation reveals a
+plan-level flaw, return to plan space, fix the plan, and re-translate the
+affected beads. This loop back is deliberate, not a failure.
+
+Every phase transition (plan -> bead, bead -> code) is a validation gate: do
+not advance while the previous artifact still has unresolved structural gaps.
+Drop back a phase instead of pushing forward optimistically.
 
 ## Start
 
@@ -47,6 +53,11 @@ runs:
 6. Bead space (convert + polish)
 7. Handoff
 8. Distill
+
+Scale the pipeline to the goal. Full ceremony is for new systems or major
+features; for bounded single-session work, compress to Elicit -> short plan ->
+todo list. Never skip Elicit, Converge, or Distill. See Notes for the exit
+ramp.
 
 ## Phase 1: Elicit
 
@@ -134,6 +145,11 @@ Reproduce the flywheel's competing-plans pattern:
    superior plan (note which idea came from which proposal in a comparison table).
 3. For small or low-risk goals a single draft is acceptable; do not over-invest.
    Scale the ceremony to the stakes.
+
+The markdown plan is the primary artifact only for goals touching code or
+product behavior in a repo. For non-code goals (a process, a campaign, an
+analysis), write the same exhaustive plan at `docs/plans/PLAN_<SLUG>.md` and
+adapt the artifact-specific checklist items to the domain.
 
 **What a strong plan contains** (structural checklist; use to judge
 completeness, not every plan needs all):
@@ -308,6 +324,11 @@ Then emit a short convergence report:
 - Any rubric items intentionally deferred, with justification.
 
 ## Phase 6: Bead space (convert + polish)
+
+Only run this phase when the work will outlive this session, involves multiple
+actors, or needs dependency-aware ordering. A small single-session goal with a
+converged plan and a rich todo list is already executable; forcing it through
+bead creation is ceremony without leverage.
 
 Treat plan-to-beads as a **translation problem, not task extraction**. Watch for
 the **plan-bead gap**: plans that got refined but never became beads. Always end
