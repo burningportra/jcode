@@ -10,6 +10,7 @@ pub const MAX_PLAN_ITEMS: usize = 1024;
 
 pub mod bridge;
 pub mod dag;
+pub mod graph_triage;
 pub mod mermaid;
 
 /// A swarm plan item.
@@ -1197,5 +1198,63 @@ mod tests {
             Some(1)
         );
         assert!(!reclaim_stranded_assignment(&mut plan, "missing"));
+    }
+
+    // ---- graph_triage ----
+
+    #[test]
+    fn triage_ranks_higher_unblock_first() {
+        // Two independent, runnable roots: `b`'s completion unblocks a long
+        // downstream chain (c, d), while `a` frees nothing. b must rank #1.
+        let items = vec![
+            item("a", "ready", &[]),
+            item("b", "ready", &[]),
+            item("c", "ready", &["b"]),
+            item("d", "ready", &["c"]),
+        ];
+        let summary = summarize_plan_graph(&items);
+        let ready = &summary.ready_ids;
+        assert_eq!(ready, &["a", "b"], "only the two roots are runnable");
+        let t = graph_triage::triage(&items, ready);
+        assert_eq!(t.open_count, 4);
+        assert_eq!(t.ready_count, 2);
+        assert_eq!(t.entries[0].id, "b", "higher unblock reach ranks first");
+        assert!(t.entries[0].unblock_reach > t.entries[1].unblock_reach);
+    }
+
+    #[test]
+    fn triage_excludes_blocked_and_completed_items() {
+        // a complete, b ready, c blocked on b -> only b is triaged.
+        let items = vec![
+            item("a", "completed", &[]),
+            item("b", "ready", &["a"]),
+            item("c", "ready", &["b"]),
+            item("d", "queued", &["c"]),
+        ];
+        let summary = summarize_plan_graph(&items);
+        let ready = &summary.ready_ids;
+        // a is completed -> not ready; b is the only thing runnable given a is done.
+        assert_eq!(ready, &["b"]);
+        let t = graph_triage::triage(&items, ready);
+        assert_eq!(t.entries.len(), 1);
+        assert_eq!(t.entries[0].id, "b");
+        assert_eq!(t.open_count, 3, "completed a is not open");
+    }
+
+    #[test]
+    fn unblock_reach_counts_transitive_dependents() {
+        let items = vec![
+            item("r", "ready", &[]),
+            item("x", "ready", &["r"]),
+            item("y", "ready", &["x"]),
+            item("z", "ready", &["y"]),
+        ];
+        let completed = completed_item_ids(&items);
+        let reach = graph_triage::unblock_reach(&items, &completed);
+        // Completing r unblocks x, y, z == 3.
+        assert_eq!(reach.get("r"), Some(&3));
+        assert_eq!(reach.get("x"), Some(&2));
+        assert_eq!(reach.get("y"), Some(&1));
+        assert_eq!(reach.get("z"), Some(&0));
     }
 }

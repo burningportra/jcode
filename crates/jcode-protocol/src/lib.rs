@@ -308,6 +308,21 @@ pub struct AgentStatusSnapshot {
     pub provider_model: Option<String>,
 }
 
+/// One graph-theory triage entry for a runnable plan item.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PlanTriageEntry {
+    pub id: String,
+    /// How many other open items transitively depend on this one.
+    pub unblock_reach: usize,
+    /// Longest downstream dependency chain rooted at this item.
+    pub critical_depth: usize,
+    /// PageRank scaled to thousandths (0..=1000). Keeps the type Eq-compatible
+    /// and deterministic without floating-point noise.
+    pub page_rank_x1000: u32,
+    /// Deterministic rank (1 = do first).
+    pub rank: usize,
+}
+
 /// Lightweight swarm plan graph summary for planner-friendly reads.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PlanGraphStatus {
@@ -342,6 +357,12 @@ pub struct PlanGraphStatus {
     pub unresolved_dependency_ids: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub next_ready_ids: Vec<String>,
+    /// bv-style graph-theory triage: runnable items ranked by how much
+    /// downstream work each completion unlocks (unblock reach), then critical
+    /// depth, then PageRank. Reflects `jcode_plan::graph_triage` so any spacer
+    /// asking "what's next" gets the same deterministic answer.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub triage_ranking: Vec<PlanTriageEntry>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub newly_ready_ids: Vec<String>,
     /// Completed (non-gate) items whose artifact self-reported LOW confidence.
@@ -386,6 +407,7 @@ impl PlanGraphStatus {
             unresolved_dependency_ids: Vec::new(),
             next_ready_ids: Vec::new(),
             newly_ready_ids: Vec::new(),
+            triage_ranking: Vec::new(),
             low_confidence_ids: Vec::new(),
             mode: default_plan_mode(),
             seeded_count: 0,
@@ -411,6 +433,18 @@ impl PlanGraphStatus {
                     .map(|reason| (id.clone(), reason))
             })
             .collect();
+        let triage = jcode_plan::graph_triage::triage(&plan.items, &graph.ready_ids);
+        let triage_ranking = triage
+            .entries
+            .into_iter()
+            .map(|e| PlanTriageEntry {
+                id: e.id,
+                unblock_reach: e.unblock_reach,
+                critical_depth: e.critical_depth,
+                page_rank_x1000: (e.page_rank.clamp(0.0, 1.0) * 1000.0).round() as u32,
+                rank: e.rank,
+            })
+            .collect();
         Self {
             swarm_id: Some(swarm_id.into()),
             version: plan.version,
@@ -425,6 +459,7 @@ impl PlanGraphStatus {
             unresolved_dependency_ids: graph.unresolved_dependency_ids,
             next_ready_ids: next_runnable_item_ids(&plan.items, next_ready_limit),
             newly_ready_ids,
+            triage_ranking,
             low_confidence_ids: jcode_plan::bridge::low_confidence_completed_ids(plan),
             mode: plan.mode.clone(),
             seeded_count: growth.seeded,

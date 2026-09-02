@@ -457,6 +457,18 @@ pub fn format_comm_plan_status(summary: &PlanGraphStatus) -> String {
             summary.next_ready_ids.join(", ")
         }
     ));
+    // bv-style graph-theory triage: runnable items ranked by how much downstream
+    // work completing them unlocks (unblock reach) then critical depth, then
+    // PageRank. Gives any agent the same deterministic "do this first" answer.
+    if !summary.triage_ranking.is_empty() {
+        output.push_str("  Triage (best-first, by unblock reach):\n");
+        for entry in &summary.triage_ranking {
+            output.push_str(&format!(
+                "    {}. {} (unblocks {}, depth {})\n",
+                entry.rank, entry.id, entry.unblock_reach, entry.critical_depth
+            ));
+        }
+    }
     if !summary.newly_ready_ids.is_empty() {
         output.push_str(&format!(
             "  Newly ready: {}\n",
