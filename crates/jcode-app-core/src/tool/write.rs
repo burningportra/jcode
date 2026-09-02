@@ -120,6 +120,12 @@ impl Tool for WriteTool {
             )
         };
 
+        if let Some(warning) = super::advisory_reservation_warning(&ctx, &path) {
+            body.push('\n');
+            body.push_str(&warning);
+            body.push('\n');
+        }
+
         // A write that lands on the active config.toml states exactly which
         // settings changed and whether they are live, so neither the agent nor
         // the user has to guess whether the edit took effect.

@@ -72,6 +72,7 @@ pub mod provider_catalog;
 pub mod quality;
 pub mod recent_session_index;
 pub mod registry;
+pub mod reservation;
 pub mod runtime_memory_log;
 pub mod safety;
 pub mod secret_input;

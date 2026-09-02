@@ -1929,6 +1929,21 @@ struct CommunicateInput {
     /// Required and nonblank for the explicit `spawn` action.
     #[serde(default)]
     label: Option<String>,
+    /// Project-relative paths / globs to reserve. Used by `reserve` and `release`.
+    #[serde(default)]
+    paths: Option<Vec<String>>,
+    /// Reservation id(s) to release. Used by `release`.
+    #[serde(default)]
+    reservation_ids: Option<Vec<String>>,
+    /// Reservation hold time in seconds. Used by `reserve` (default 3600).
+    #[serde(default)]
+    ttl_secs: Option<u64>,
+    /// Exclusive reservation (no other session may share the surface).
+    #[serde(default)]
+    exclusive: Option<bool>,
+    /// Plain label attached to a reservation for humans/agents to read.
+    #[serde(default)]
+    holder_label: Option<String>,
 }
 
 impl CommunicateInput {
@@ -1960,6 +1975,15 @@ impl CommunicateInput {
     }
 }
 
+/// Resolve the project root to hold file reservations against. Uses the active
+/// session working directory; falls back to the process cwd when not set.
+fn reservation_project_root(ctx: &super::ToolContext) -> anyhow::Result<std::path::PathBuf> {
+    if let Some(dir) = ctx.working_dir.as_deref() {
+        return Ok(dir.to_path_buf());
+    }
+    std::env::current_dir().map_err(|e| anyhow::anyhow!("cannot resolve project root: {e}"))
+}
+
 /// Map common action synonyms/typos to the canonical swarm action name. Models
 /// frequently invent near-miss verbs (e.g. `inbox` for reading messages, `send`
 /// for `message`), which previously produced an "Unknown action" error. Unknown
@@ -1975,6 +1999,9 @@ fn canonical_swarm_action(action: &str) -> &str {
         "plan" | "status_plan" => "plan_status",
         "assign" => "assign_task",
         "kill" | "terminate" => "stop",
+        "reserve" | "reserve_files" | "claim" => "reserve",
+        "release" | "release_files" | "unreserve" | "release_reservation" => "release",
+        "reservations" | "list_reservations" | "reservation_list" => "reservations",
         _ => action,
     }
 }
@@ -2002,7 +2029,8 @@ impl Tool for CommunicateTool {
                              "status", "report", "plan_status", "summary", "read_context", "resync_plan", "assign_task", "assign_next", "fill_slots", "run_plan", "cleanup",
                              "task_graph", "expand_node", "complete_node", "inject_gap",
                              "start", "start_task", "wake", "resume", "retry", "reassign", "replace", "salvage",
-                             "subscribe_channel", "unsubscribe_channel", "await_members", "list_models"],
+                             "subscribe_channel", "unsubscribe_channel", "await_members", "list_models",
+                             "reserve", "release", "reservations"],
                     "description": "Action. spawn requires label and should include prompt. list_models shows available models/routes."
                 },
                 "key": {
@@ -2042,6 +2070,28 @@ impl Tool for CommunicateTool {
                 },
                 "proposer_session": { "type": "string" },
                 "reason": { "type": "string" },
+                "paths": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "Project-relative paths or globs. Used by reserve (paths to claim) and release (paths to free)."
+                },
+                "reservation_ids": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "Reservation ids to release. Used by action=release."
+                },
+                "ttl_secs": {
+                    "type": "integer",
+                    "description": "Reservation hold time in seconds (default 3600). Used by action=reserve."
+                },
+                "exclusive": {
+                    "type": "boolean",
+                    "description": "Exclusive reservation: no other session may share the surface. Default true."
+                },
+                "holder_label": {
+                    "type": "string",
+                    "description": "Human/agent label attached to a reservation (e.g. 'auth' or 'BlueLake')."
+                },
                 "target_session": {
                     "type": "string",
                     "description": "Session ID or unique friendly name for management actions. Alias of to_session."
@@ -3372,10 +3422,129 @@ impl Tool for CommunicateTool {
                 }
             }
 
+            // ---- Advisory file reservations ----------------------------------
+            "reserve" => {
+                let paths = params
+                    .paths
+                    .clone()
+                    .ok_or_else(|| anyhow::anyhow!("'paths' is required for reserve action"))?;
+                if paths.is_empty() {
+                    return Err(anyhow::anyhow!("'paths' must not be empty for reserve action"));
+                }
+                let project = reservation_project_root(&ctx)?;
+                let exclusive = params.exclusive.unwrap_or(true);
+                let ttl = params.ttl_secs.unwrap_or(3600);
+                let now = crate::reservation::now_epoch_ms();
+
+                let reservation = crate::reservation::reserve_paths(
+                    &project,
+                    &ctx.session_id,
+                    params.holder_label.clone(),
+                    paths.clone(),
+                    exclusive,
+                    params.reason.clone(),
+                    ttl,
+                    now,
+                )?;
+
+                // Report any conflicts the new reservation holds against other sessions
+                // (advisory: we surface them, we do not refuse).
+                let store = crate::reservation::load_for_project(&project)?;
+                let mut conflicts = Vec::new();
+                for p in &reservation.paths {
+                    for (owner, _) in crate::reservation::conflicting_reservations(
+                        &store,
+                        p,
+                        &ctx.session_id,
+                        now,
+                    ) {
+                        conflicts.push(format!(
+                            "{} (holder={}) -> {p}",
+                            owner.owner_session_id,
+                            owner.holder_label.as_deref().unwrap_or("?"),
+                        ));
+                    }
+                }
+                conflicts.sort();
+                conflicts.dedup();
+
+                let mut body = format!(
+                    "Reserved {} paths for session {} ({}): {}",
+                    reservation.paths.len(),
+                    ctx.session_id,
+                    if exclusive { "exclusive" } else { "shared" },
+                    reservation.paths.join(", "),
+                );
+                body.push('\n');
+                body.push_str(&format!("Reservation id: {}\n", reservation.id));
+                body.push_str(&format!(
+                    "Expires: {}ms from epoch\n",
+                    reservation.expires_ms
+                ));
+                if !conflicts.is_empty() {
+                    body.push_str("\nAdvisory conflicts (held by other agents, overlap only):\n");
+                    for c in conflicts {
+                        body.push_str(&format!(" - {c}\n"));
+                    }
+                }
+                Ok(ToolOutput::new(body))
+            }
+
+            "release" => {
+                let project = reservation_project_root(&ctx)?;
+                let released = crate::reservation::release_paths(
+                    &project,
+                    &ctx.session_id,
+                    params.paths.clone().unwrap_or_default(),
+                    params.reservation_ids.clone().unwrap_or_default(),
+                    crate::reservation::now_epoch_ms(),
+                )?;
+                if released.is_empty() {
+                    Ok(ToolOutput::new(
+                        "No reservations released (you had none matching, or already expired).",
+                    ))
+                } else {
+                    Ok(ToolOutput::new(format!(
+                        "Released {} reservation(s): {}",
+                        released.len(),
+                        released.join(", ")
+                    )))
+                }
+            }
+
+            "reservations" => {
+                let project = reservation_project_root(&ctx)?;
+                let for_session = params.target_session.as_deref().or(params.to_session.as_deref());
+                let list = crate::reservation::list_reservations(
+                    &project,
+                    for_session,
+                    crate::reservation::now_epoch_ms(),
+                )?;
+                if list.is_empty() {
+                    return Ok(ToolOutput::new(
+                        "No active reservations for this project.",
+                    ));
+                }
+                let mut body = String::from("Active reservations:\n");
+                for r in &list {
+                    body.push_str(&format!(
+                        " - {} owner={} exclusive={} label={} paths={} expires={}\n",
+                        r.id,
+                        r.owner_session_id,
+                        r.exclusive,
+                        r.holder_label.as_deref().unwrap_or("-"),
+                        r.paths.join(","),
+                        r.expires_ms,
+                    ));
+                }
+                Ok(ToolOutput::new(body))
+            }
+
             _ => Err(anyhow::anyhow!(
                 "Unknown action '{}'. Valid actions: share, share_append, read, message, broadcast, dm, channel, list, list_channels, channel_members, \
                  propose_plan, approve_plan, reject_plan, spawn, stop, assign_role, status, report, plan_status, summary, read_context, \
-                 resync_plan, assign_task, assign_next, fill_slots, run_plan, cleanup, start, start_task, wake, resume, retry, reassign, replace, salvage, subscribe_channel, unsubscribe_channel, await_members. \
+                 resync_plan, assign_task, assign_next, fill_slots, run_plan, cleanup, start, start_task, wake, resume, retry, reassign, replace, salvage, subscribe_channel, unsubscribe_channel, await_members, \
+                 reserve, release, reservations. \
                  To read messages addressed to you, use action='read'.",
                 params.action
             )),

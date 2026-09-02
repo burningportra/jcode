@@ -58,6 +58,23 @@ pub(crate) fn tool_name_is_disabled(disabled: &HashSet<String>, name: &str) -> b
     disabled.contains(name) || (disabled.contains("mcp") && is_mcp_tool_name(name))
 }
 
+/// Build an advisory warning when another agent holds an exclusive reservation
+/// on the file being edited. Returns `None` when the working dir is unset (no
+/// project context), the file is outside it, or no conflict exists. Edit/write
+/// tools surface this without refusing the edit (reservations are advisory).
+pub(crate) fn advisory_reservation_warning(ctx: &ToolContext, path: &std::path::Path) -> Option<String> {
+    let project = ctx.working_dir.as_deref()?;
+    if !project.is_dir() {
+        return None;
+    }
+    crate::reservation::exclusive_warning(
+        project,
+        &ctx.session_id,
+        path,
+        crate::reservation::now_epoch_ms(),
+    )
+}
+
 fn is_fixed_mcp_tool(name: &str) -> bool {
     matches!(name, "mcp_search" | "mcp_call")
 }

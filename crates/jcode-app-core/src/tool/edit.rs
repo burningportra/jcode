@@ -144,6 +144,11 @@ impl Tool for EditTool {
             "Edited {}: replaced {} occurrence(s)\n{}\n\nContext after edit (lines {}-{}):\n{}",
             params.file_path, occurrences, diff, context.0, context.1, context.2
         );
+        if let Some(warning) = super::advisory_reservation_warning(&ctx, &path) {
+            body.push('\n');
+            body.push_str(&warning);
+            body.push('\n');
+        }
         super::config_edit_notice::append_config_edit_notice(
             &mut body,
             &path,
