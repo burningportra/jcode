@@ -385,8 +385,20 @@ wall clock, whichever first, on repos with huge history (jcode-scale fine;
 chromium-scale degrades gracefully).
 - **P4 (4 beads):** rename/move_symbol atomic + rollback, typecheck gate,
   structural compaction mode in CompactionManager, docs + TUI help text.
-- Total ~15 beads. Tree-sitter acceleration is a follow-up initiative, not a
-  bead here.
+- Total ~15 beads (9 created: jcode-rey..jcode-hlz; remaining ~6 are P1c/P2c
+  splits if beads grow — do not pre-split). Tree-sitter acceleration is a
+  follow-up initiative, not a bead here.
+
+**Refine fresh pass (roadmap lens, 86/100 — not applicable as revision):**
+read roadmap plus risks with fresh eyes. Roadmap bead counts (3/3/5/4) predate
+the 9-bead split and no longer match section 6's own bead IDs; adopted fix is
+documentation-only (this note), not a redesign — bead descriptions in `br`
+are normative for scope, section 6 for ordering. 5.3 still names
+rename/move as separate tools while the pass-9 note mandates a single
+symbol-relocate core; `jcode-rqk` bead already carries the merged scope, so
+5.3 body is updated at implementation time, not here (no-oversimplification
+guard: no behavior removed). No new structural gaps: counts, budgets, and R1–R7
+all still hold. Score reflects confirmation, not new changes.
 
 ## 7. Risks and mitigations
 
