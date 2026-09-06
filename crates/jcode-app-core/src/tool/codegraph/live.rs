@@ -70,11 +70,36 @@ pub struct LiveGraph {
     pub notes: Vec<String>,
 }
 
-/// Resolve the repo root for a working dir: walk up to `.git`; non-git repos
+/// Resolve the repo root for a working dir: walk up to `.git`, but stop at
+/// the first ancestor WITHOUT a `.git` marker chain break — i.e. only claim
+/// a parent as root if the walk from `working_dir` reaches it through
+/// directories that contain no other repo boundary. In practice: walk up
+/// while each level is not itself a repo root's child escape; non-git repos
 /// use the working dir itself (co-changes then degrade).
+///
+/// IMPORTANT: never claim a repo root ABOVE the canonicalized working dir's
+/// own subtree unless a `.git` is found — and cap the walk: if the working
+/// dir itself has no `.git` and its parent chain reaches `/` or `$HOME`
+/// without one, return the working dir (prevents scratch dirs under `$HOME`
+/// being swallowed by an unrelated ancestor repo).
 pub fn resolve_repo_root(working_dir: &Path) -> PathBuf {
-    let mut dir = Some(working_dir);
+    // Fast path: the dir itself is a root.
+    if working_dir.join(".git").exists() {
+        return working_dir.to_path_buf();
+    }
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    let mut dir = working_dir.parent();
     while let Some(d) = dir {
+        // Stop at filesystem root or $HOME: never claim those as repo roots
+        // for a working dir that has no .git chain leading there.
+        if d.parent().is_none() {
+            break;
+        }
+        if let Some(h) = home.as_deref() {
+            if d == h {
+                break;
+            }
+        }
         if d.join(".git").exists() {
             return d.to_path_buf();
         }
@@ -86,8 +111,10 @@ pub fn resolve_repo_root(working_dir: &Path) -> PathBuf {
 /// Canonicalize `rel` against `root`, rejecting escapes (plan security lens:
 /// symlinks resolved, prefix-checked, never string-compared).
 pub fn resolve_within_root(root: &Path, rel: &str) -> Result<PathBuf, String> {
-    let joined = root.join(rel);
+    // Canonicalize root FIRST (/tmp -> /private/tmp on macOS); otherwise the
+    // prefix check below rejects every file under a symlinked root.
     let canon_root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    let joined = canon_root.join(rel);
     match joined.canonicalize() {
         Ok(canon) => {
             if canon.starts_with(&canon_root) {

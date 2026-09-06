@@ -149,6 +149,13 @@ impl Tool for EditTool {
             body.push_str(&warning);
             body.push('\n');
         }
+        // Advisory blast radius (graph-ai jcode-nd5): display-only, never
+        // blocks or allows the edit (approval policy unchanged).
+        if let Some(line) = super::code_impact::advisory_blast_line(&ctx, &path) {
+            body.push('\n');
+            body.push_str(&line);
+            body.push('\n');
+        }
         super::config_edit_notice::append_config_edit_notice(
             &mut body,
             &path,

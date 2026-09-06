@@ -60,14 +60,18 @@ impl DepCache {
     }
 
     /// Cached dependents for `rel` under `root`; computes + stores on miss.
-    /// Returns `(files, from_cache)`.
+    /// Returns `(files, from_cache)`. Empty misses are NOT cached: an empty
+    /// result usually means the file did not exist yet (racy fixture, slow
+    /// write) and caching it poisons later calls for the full TTL.
     pub fn dependents(&self, root: &Path, rel: &str) -> (Vec<RelatedFile>, bool) {
         let key = Self::canonical_root(root);
         if let Some(hit) = self.get(&key, rel, |g| g.dependents.get(rel).cloned()) {
             return (hit, true);
         }
         let (files, _source, _partial) = dependents_live(root, rel);
-        self.put_dependents(&key, rel.to_string(), files.clone());
+        if !files.is_empty() {
+            self.put_dependents(&key, rel.to_string(), files.clone());
+        }
         (files, false)
     }
 
@@ -162,8 +166,8 @@ impl DepCache {
         self.inner.lock().map(|i| i.entries.len()).unwrap_or(0)
     }
 
-    /// Test hook: clear all entries.
-    #[cfg(test)]
+    /// Clear all entries. Test hook in spirit, but `code_impact`'s `refresh`
+    /// flag needs it in production builds too — hence unconditional.
     pub fn clear_for_test(&self) {
         if let Ok(mut inner) = self.inner.lock() {
             inner.entries.clear();

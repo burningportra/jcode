@@ -11,8 +11,9 @@ use std::path::PathBuf;
 
 fn fixture_root(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!(
-        "jcode-codegraph-test-{name}-{}",
-        std::process::id()
+        "jcode-codegraph-test-{name}-{}-{:?}",
+        std::process::id(),
+        std::thread::current().id()
     ));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
@@ -220,4 +221,19 @@ fn repo_root_walks_up_to_git() {
     fs::create_dir_all(&sub).unwrap();
     fs::create_dir_all(root.join(".git")).unwrap();
     assert_eq!(resolve_repo_root(&sub), root);
+}
+
+#[test]
+fn repo_root_stops_at_home_boundary() {
+    // Regression: scratch dirs under $HOME must never resolve to an ancestor
+    // repo (e.g. ~/.git). resolve_repo_root stops at $HOME.
+    let home = std::env::var_os("HOME").map(PathBuf::from).unwrap();
+    assert!(
+        home.join(".git").exists(),
+        "precondition: ~/.git exists here"
+    );
+    let scratch = home.join(".jcode").join("scratch");
+    if scratch.is_dir() {
+        assert_eq!(resolve_repo_root(&scratch), scratch);
+    }
 }
