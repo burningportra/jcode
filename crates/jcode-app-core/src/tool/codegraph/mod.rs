@@ -26,5 +26,5 @@ pub use indexed::{
 };
 pub use live::{
     GraphSource, LiveGraph, cochanges_live, dependencies_live, dependents_live,
-    exported_symbols_live, resolve_repo_root,
+    exported_symbols_live, rel_display, resolve_repo_root, resolve_within_root,
 };

@@ -37,6 +37,7 @@ mod session_search;
 pub(crate) mod session_search_index;
 mod side_panel;
 pub(crate) mod skill;
+mod symbol_relocate;
 mod todo;
 mod webfetch;
 mod websearch;
@@ -265,6 +266,12 @@ impl Registry {
                 &mut timings,
                 "code_query",
                 code_query::CodeQueryTool::new,
+            );
+            Self::insert_tool_timed(
+                &mut m,
+                &mut timings,
+                "symbol_relocate",
+                symbol_relocate::SymbolRelocateTool::new,
             );
             Self::insert_tool_timed(
                 &mut m,
