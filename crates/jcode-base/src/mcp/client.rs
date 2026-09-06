@@ -64,7 +64,8 @@ fn parse_mcp_body(text: &str, url: &str) -> Result<Value> {
     }
     // SSE envelope: overall text may contain event/data/blank lines; collect
     // the `data:` payloads and parse the last one (responses come once).
-    if trimmed.contains("\ndata:") || trimmed.starts_with("data:") || trimmed.starts_with("event:") {
+    if trimmed.contains("\ndata:") || trimmed.starts_with("data:") || trimmed.starts_with("event:")
+    {
         let mut last_data = None;
         for line in trimmed.lines() {
             if let Some(payload) = line.strip_prefix("data:") {
@@ -72,7 +73,10 @@ fn parse_mcp_body(text: &str, url: &str) -> Result<Value> {
             }
         }
         let payload = last_data.ok_or_else(|| {
-            anyhow::anyhow!("MCP HTTP server '{}' sent an SSE body with no data frame", url)
+            anyhow::anyhow!(
+                "MCP HTTP server '{}' sent an SSE body with no data frame",
+                url
+            )
         })?;
         if payload == "[DONE]" {
             anyhow::bail!("MCP HTTP server '{}' sent [DONE] without a response", url);
@@ -111,7 +115,10 @@ impl McpHandle {
             let body = serde_json::to_string(&request)?;
             let value = http.post(&body).await?;
             let response: JsonRpcResponse = serde_json::from_value(value).with_context(|| {
-                format!("MCP HTTP response from '{}' was not a JSON-RPC response", self.name)
+                format!(
+                    "MCP HTTP response from '{}' was not a JSON-RPC response",
+                    self.name
+                )
             })?;
             if let Some(err) = &response.error {
                 anyhow::bail!("MCP error {}: {}", err.code, err.message);
@@ -278,11 +285,14 @@ impl McpClient {
             .context("HTTP MCP server config missing a URL")?
             .trim()
             .to_string();
-        crate::logging::info(&format!("MCP: Connecting to HTTP server '{}' at {}", name, url));
+        crate::logging::info(&format!(
+            "MCP: Connecting to HTTP server '{}' at {}",
+            name, url
+        ));
 
-        let client = reqwest::Client::builder().build().with_context(|| {
-            format!("Failed to build HTTP client for MCP server '{}'", name)
-        })?;
+        let client = reqwest::Client::builder()
+            .build()
+            .with_context(|| format!("Failed to build HTTP client for MCP server '{}'", name))?;
         let http = Arc::new(HttpTransport {
             client,
             url,
@@ -533,10 +543,7 @@ impl McpClient {
     /// Shutdown the server. For stdio this sends `shutdown` then kills the
     /// child; for HTTP there is nothing to terminate (the endpoint is remote).
     pub async fn shutdown(&mut self) {
-        let _ = self
-            .handle
-            .send_notification("shutdown", None)
-            .await;
+        let _ = self.handle.send_notification("shutdown", None).await;
 
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
@@ -614,7 +621,8 @@ mod tests {
     fn parse_mcp_body_handles_plain_json_and_sse() {
         let url = "http://mcp.test/mcp";
         // Plain JSON-RPC response body.
-        let plain = parse_mcp_body(r#"{"jsonrpc":"2.0","id":1,"result":{"ok":true}}"#, url).unwrap();
+        let plain =
+            parse_mcp_body(r#"{"jsonrpc":"2.0","id":1,"result":{"ok":true}}"#, url).unwrap();
         assert_eq!(plain["result"]["ok"], serde_json::json!(true));
 
         // Single-line SSE data frame.

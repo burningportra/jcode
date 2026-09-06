@@ -322,7 +322,8 @@ async fn post_compact_recall_is_dropped_when_no_agents_md_exists() {
     agent.agents_md_snapshot = (None, crate::prompt::ContextInfo::default());
     agent.pending_post_compact_anchor = true;
 
-    let out = agent.consume_turn_reminder_with_compact_recall(Some("existing reminder".to_string()));
+    let out =
+        agent.consume_turn_reminder_with_compact_recall(Some("existing reminder".to_string()));
     assert_eq!(out.as_deref(), Some("existing reminder"));
     assert!(!agent.pending_post_compact_anchor);
 }

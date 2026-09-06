@@ -91,8 +91,7 @@ pub fn glob_match(pattern: &str, path: &str) -> bool {
             None => segs.is_empty(),
             Some(&"**") => {
                 // `**` matches zero segments, or one+ segments.
-                rec(&pat[1..], segs)
-                    || (!segs.is_empty() && rec(pat, &segs[1..]))
+                rec(&pat[1..], segs) || (!segs.is_empty() && rec(pat, &segs[1..]))
             }
             Some(&p) => {
                 if let Some((first, rest)) = segs.split_first() {
@@ -213,7 +212,10 @@ pub fn reserve_paths(
         id,
         owner_session_id: owner_session_id.to_string(),
         holder_label,
-        paths: paths.into_iter().map(|p| normalize_project_path(&p)).collect(),
+        paths: paths
+            .into_iter()
+            .map(|p| normalize_project_path(&p))
+            .collect(),
         exclusive,
         reason,
         created_ms: now_ms,
@@ -239,7 +241,10 @@ pub fn release_paths(
     let mut store = load_for_project(project_root)?;
     store.prune_expired(now_ms);
     let released_all = paths.is_empty() && ids.is_empty();
-    let path_set: Vec<String> = paths.into_iter().map(|p| normalize_project_path(&p)).collect();
+    let path_set: Vec<String> = paths
+        .into_iter()
+        .map(|p| normalize_project_path(&p))
+        .collect();
 
     let mut released = Vec::new();
     store.reservations.retain(|r| {
@@ -254,8 +259,7 @@ pub fn release_paths(
             released.push(r.id.clone());
             return false;
         }
-        if r
-            .paths
+        if r.paths
             .iter()
             .any(|p| path_set.iter().any(|q| q == &normalize_project_path(p)))
         {
@@ -293,10 +297,12 @@ pub fn find_exclusive_reservation(
     now_ms: u64,
 ) -> Result<Option<Reservation>> {
     let store = load_for_project(project_root)?;
-    Ok(conflicting_reservations(&store, path, owner_session_id, now_ms)
-        .into_iter()
-        .find(|(r, _)| r.exclusive)
-        .map(|(r, _)| r.clone()))
+    Ok(
+        conflicting_reservations(&store, path, owner_session_id, now_ms)
+            .into_iter()
+            .find(|(r, _)| r.exclusive)
+            .map(|(r, _)| r.clone()),
+    )
 }
 
 pub fn now_epoch_ms() -> u64 {
@@ -317,12 +323,17 @@ pub fn exclusive_warning(
     now_ms: u64,
 ) -> Option<String> {
     let rel = path.strip_prefix(project_root).ok()?;
-    let rel_str = rel.to_string_lossy().replace(std::path::MAIN_SEPARATOR, "/");
-    let blocking = find_exclusive_reservation(project_root, owner_session_id, &rel_str, now_ms)
-        .ok()??;
+    let rel_str = rel
+        .to_string_lossy()
+        .replace(std::path::MAIN_SEPARATOR, "/");
+    let blocking =
+        find_exclusive_reservation(project_root, owner_session_id, &rel_str, now_ms).ok()??;
     Some(format!(
         "⚠ another agent ({}) has an exclusive reservation on '{}' (reservation {}, reason {})",
-        blocking.holder_label.as_deref().unwrap_or(&blocking.owner_session_id),
+        blocking
+            .holder_label
+            .as_deref()
+            .unwrap_or(&blocking.owner_session_id),
         rel_str,
         blocking.id,
         blocking.reason.as_deref().unwrap_or("unspecified"),
@@ -352,8 +363,14 @@ mod tests {
     #[test]
     fn glob_matches_within_segments_only() {
         assert!(glob_match("src/*.rs", "src/main.rs"));
-        assert!(!glob_match("src/*.rs", "src/sub/mod.rs"), "must not cross slash");
-        assert!(glob_match("**/*.rs", "a/b/c.rs"), "double-star matches across");
+        assert!(
+            !glob_match("src/*.rs", "src/sub/mod.rs"),
+            "must not cross slash"
+        );
+        assert!(
+            glob_match("**/*.rs", "a/b/c.rs"),
+            "double-star matches across"
+        );
         assert!(glob_match("src/*", "src/lib.rs"));
         assert!(!glob_match("src/*", "src/deep/mod.rs"));
     }
@@ -365,7 +382,17 @@ mod tests {
         let root = project.path();
 
         let now0 = now();
-        let r = reserve_paths(root, "sess-a", Some("A".into()), vec!["src/*.rs".into()], true, Some("work".into()), 300, now0).unwrap();
+        let r = reserve_paths(
+            root,
+            "sess-a",
+            Some("A".into()),
+            vec!["src/*.rs".into()],
+            true,
+            Some("work".into()),
+            300,
+            now0,
+        )
+        .unwrap();
         assert_eq!(r.paths, vec!["src/*.rs"]);
 
         let listed = list_reservations(root, None, now0).unwrap();
@@ -374,12 +401,19 @@ mod tests {
 
         // Another session sees the exclusive conflict.
         let conflict = find_exclusive_reservation(root, "sess-b", "src/main.rs", now0).unwrap();
-        assert!(conflict.is_some(), "exclusive conflict should be visible to B");
+        assert!(
+            conflict.is_some(),
+            "exclusive conflict should be visible to B"
+        );
 
         // Release by empty selectors releases everything for the owner.
         let released = release_paths(root, "sess-a", vec![], vec![], now() + 10).unwrap();
         assert_eq!(released.len(), 1);
-        assert!(list_reservations(root, None, now() + 10).unwrap().is_empty());
+        assert!(
+            list_reservations(root, None, now() + 10)
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]
@@ -391,7 +425,17 @@ mod tests {
 
         // Insert a short-lived reservation in the distant past via list prune:
         // create with ttl 1s then advance time well past expiry.
-        let _r = reserve_paths(root, "owner", None, vec!["x.md".into()], true, None, 1, now0).unwrap();
+        let _r = reserve_paths(
+            root,
+            "owner",
+            None,
+            vec!["x.md".into()],
+            true,
+            None,
+            1,
+            now0,
+        )
+        .unwrap();
         let far_future = now0 + Duration::from_secs(3600).as_millis() as u64;
 
         let listed = list_reservations(root, None, far_future).unwrap();
@@ -412,7 +456,17 @@ mod tests {
         let project = tempfile::tempdir().unwrap();
         let root = project.path();
         let now0 = now();
-        reserve_paths(root, "other-session", Some("Other".into()), vec!["src/x.rs".into()], true, Some("refactor".into()), 3600, now0).unwrap();
+        reserve_paths(
+            root,
+            "other-session",
+            Some("Other".into()),
+            vec!["src/x.rs".into()],
+            true,
+            Some("refactor".into()),
+            3600,
+            now0,
+        )
+        .unwrap();
 
         // The owner sees no warning (reservation is theirs).
         let owner_file = root.join("src/x.rs");

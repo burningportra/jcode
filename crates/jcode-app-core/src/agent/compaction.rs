@@ -204,8 +204,7 @@ impl Agent {
             )
             .with_session_id(self.session.id.clone())
             .with_detail(format!(
-                "dropped_messages={dropped},usage_pct={usage_pct:.1},learned_budget={:?}"
-                ,
+                "dropped_messages={dropped},usage_pct={usage_pct:.1},learned_budget={:?}",
                 learned_budget
             ))
             .force_attribution(),

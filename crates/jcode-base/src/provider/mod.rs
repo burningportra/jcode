@@ -1275,9 +1275,7 @@ impl MultiProvider {
             }
             ActiveProvider::InferenceNet => {
                 let Some(inference) = self.inference_provider() else {
-                    anyhow::bail!(
-                        "Inference.net credentials not available. Run  to log in."
-                    );
+                    anyhow::bail!("Inference.net credentials not available. Run  to log in.");
                 };
                 inference.set_model(model)?;
                 self.set_active_provider(ActiveProvider::InferenceNet);
@@ -1542,8 +1540,9 @@ impl MultiProvider {
         if crate::auth::xai::has_cached_auth()
             && registry.compatible_profile(XAI_OAUTH_PROFILE_ID).is_none()
         {
-            match external::instantiate_openrouter_runtime(external::OpenRouterRuntimeSpec::XaiOauth)
-            {
+            match external::instantiate_openrouter_runtime(
+                external::OpenRouterRuntimeSpec::XaiOauth,
+            ) {
                 Ok(xai) => {
                     crate::logging::info("Hot-initialized xAI Grok OAuth provider after login");
                     registry.install_compatible_profile(XAI_OAUTH_PROFILE_ID, xai);
@@ -1811,7 +1810,9 @@ impl Provider for MultiProvider {
                 std::sync::Mutex<std::collections::HashMap<String, &'static str>>,
             > = std::sync::OnceLock::new();
             let cache = INTERNED.get_or_init(Default::default);
-            let mut cache = cache.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            let mut cache = cache
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             let key = profile_name.trim().to_string();
             return *cache
                 .entry(key)

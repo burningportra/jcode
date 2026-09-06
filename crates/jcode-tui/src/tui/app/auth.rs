@@ -4,13 +4,13 @@ mod auth_account_commands;
 mod auth_account_picker;
 #[path = "auth_types.rs"]
 mod auth_types;
+#[cfg(test)]
+pub(crate) use self::auth_account_commands::resolve_named_profile_selection;
 pub(crate) use self::auth_account_commands::{
     account_command_from_picker, execute_account_command_local, execute_account_command_remote,
     handle_account_command_remote, handle_auth_command, resolve_account_provider_descriptor,
     save_openai_fast_setting_local,
 };
-#[cfg(test)]
-pub(crate) use self::auth_account_commands::resolve_named_profile_selection;
 pub(super) use self::auth_types::{AccountCommand, PendingAccountInput, PendingLogin};
 
 use super::*;

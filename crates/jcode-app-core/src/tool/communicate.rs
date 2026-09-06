@@ -3429,7 +3429,9 @@ impl Tool for CommunicateTool {
                     .clone()
                     .ok_or_else(|| anyhow::anyhow!("'paths' is required for reserve action"))?;
                 if paths.is_empty() {
-                    return Err(anyhow::anyhow!("'paths' must not be empty for reserve action"));
+                    return Err(anyhow::anyhow!(
+                        "'paths' must not be empty for reserve action"
+                    ));
                 }
                 let project = reservation_project_root(&ctx)?;
                 let exclusive = params.exclusive.unwrap_or(true);
@@ -3514,16 +3516,17 @@ impl Tool for CommunicateTool {
 
             "reservations" => {
                 let project = reservation_project_root(&ctx)?;
-                let for_session = params.target_session.as_deref().or(params.to_session.as_deref());
+                let for_session = params
+                    .target_session
+                    .as_deref()
+                    .or(params.to_session.as_deref());
                 let list = crate::reservation::list_reservations(
                     &project,
                     for_session,
                     crate::reservation::now_epoch_ms(),
                 )?;
                 if list.is_empty() {
-                    return Ok(ToolOutput::new(
-                        "No active reservations for this project.",
-                    ));
+                    return Ok(ToolOutput::new("No active reservations for this project."));
                 }
                 let mut body = String::from("Active reservations:\n");
                 for r in &list {

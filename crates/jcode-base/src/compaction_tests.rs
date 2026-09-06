@@ -938,12 +938,7 @@ fn test_persisted_state_round_trip_preserves_compacted_view() {
 fn test_persisted_state_round_trip_preserves_learned_context_limit() {
     let mut manager = CompactionManager::new().with_budget(500);
     let messages: Vec<Message> = (0..20)
-        .map(|i| {
-            make_text_message(
-                Role::User,
-                &format!("turn {} {}", i, "x".repeat(40)),
-            )
-        })
+        .map(|i| make_text_message(Role::User, &format!("turn {} {}", i, "x".repeat(40))))
         .collect();
     for _ in 0..20 {
         manager.notify_message_added();

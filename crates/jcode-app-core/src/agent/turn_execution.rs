@@ -87,7 +87,8 @@ impl Agent {
             );
         }
 
-        self.current_turn_system_reminder = self.consume_turn_reminder_with_compact_recall(system_reminder);
+        self.current_turn_system_reminder =
+            self.consume_turn_reminder_with_compact_recall(system_reminder);
 
         self.append_user_context_message_with_display_role(user_message, images, display_role)?;
         crate::telemetry::record_turn();
