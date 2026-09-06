@@ -138,6 +138,17 @@ backend that accelerates them later. Every graph tool returns identical shapes
 indexed or not, with a `source: "index" | "live" | "degraded"` field. This is
 Empryo's own `soul_impact` fallback contract, made explicit.
 
+**Refine re-pass (architecture lens, 82/100):** the ASCII diagram still names a
+`CodeGraph trait (sync read API)` plus a `GraphHandle`, but 3.1 correctly
+specifies plain blocking functions as the Phase 1–2 interface. The trait +
+handle appear only in the Phase 3 crate bullet. Adopted fix: the trait is a
+Phase 3 introduction, not a Phase 1 contract — 3.1's function signatures are
+normative until P3a lands. Also: the live box says `in-memory per-session dep
+cache (mttl 60s)` — typo for TTL, and cache is process-wide OnceLock, not
+per-session (base tools are shared). Corrected in 3.1; diagram label kept short
+deliberately. No cross-model reviewer used (no swarm_model pin; workers would
+inherit coordinator model) — recorded as residual risk R7.
+
 ## 3. Architecture
 
 ```
@@ -151,7 +162,7 @@ Empryo's own `soul_impact` fallback contract, made explicit.
 ┌─ Live backend (Phase 1) ──┐  ┌─ Indexed backend (Phase 3) ──┐
 │ rg + git + import regex   │  │ jcode-codegraph crate        │
 │ in-memory per-session     │  │ per-repo SQLite, FTS5,       │
-│ dep cache (mttl 60s)      │  │ PageRank + co-change tables  │
+│ dep cache (TTL 60s)       │  │ PageRank + co-change tables  │
 └───────────────────────────┘  └──────────────────────────────┘
 ```
 
