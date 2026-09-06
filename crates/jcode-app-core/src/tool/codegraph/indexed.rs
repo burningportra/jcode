@@ -32,6 +32,51 @@ pub fn db_path_for(root: &Path) -> PathBuf {
 struct IndexState {
     last_ok: Option<Instant>,
     unwritable: bool,
+    /// Consecutive build failures. After 3, the root is treated Corrupt→Absent:
+    /// DB file deleted once, then retried fresh (prevents poison loops).
+    failures: u32,
+}
+
+/// Explicit lifecycle states (plan 3.1/euh): Absent → Building → Ready ⇄
+/// Stale → Rebuilding, plus Disabled (JCODE_CODEGRAPH=0) and Corrupt → Absent
+/// (auto-delete + rebuild). `status()` exposes the current state for tests.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IndexStatus {
+    Absent,
+    Building,
+    Ready,
+    Stale,
+    Disabled,
+}
+
+pub fn index_status(root: &Path) -> IndexStatus {
+    if codegraph_disabled() {
+        return IndexStatus::Disabled;
+    }
+    let canon = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    if let Ok(guard) = IndexRegistry::shared().build_guard.lock() {
+        if guard.contains(&canon) {
+            return IndexStatus::Building;
+        }
+    }
+    if let Ok(states) = IndexRegistry::shared().states.lock() {
+        if let Some(st) = states.get(&canon) {
+            if st.unwritable {
+                return IndexStatus::Absent;
+            }
+            if let Some(t) = st.last_ok {
+                if t.elapsed() < INDEX_STALE_AFTER {
+                    return IndexStatus::Ready;
+                }
+                return IndexStatus::Stale;
+            }
+        }
+    }
+    // No record: Absent, unless a DB file already exists (then Stale → will rebuild).
+    if db_path_for(&canon).exists() {
+        return IndexStatus::Stale;
+    }
+    IndexStatus::Absent
 }
 
 struct IndexRegistry {
@@ -92,16 +137,32 @@ impl IndexRegistry {
             guard.remove(&canon);
         }
         if let Ok(mut states) = Self::shared().states.lock() {
-            let st = states.entry(canon).or_insert(IndexState {
+            let st = states.entry(canon.clone()).or_insert(IndexState {
                 last_ok: None,
                 unwritable: false,
+                failures: 0,
             });
             if ok {
                 st.last_ok = Some(Instant::now());
+                st.failures = 0;
             } else {
-                // Build failed (read-only? corrupt?): cache unwritable verdict
-                // only when the .jcode dir cannot be created.
-                st.unwritable = st.unwritable || !ok;
+                st.failures += 1;
+                if st.failures >= 3 {
+                    // Corrupt → Absent: delete once, reset counter, retry fresh
+                    // next call (prevents poison loops on a bad DB).
+                    let _ = std::fs::remove_file(db_path_for(&canon));
+                    st.failures = 0;
+                    st.last_ok = None;
+                }
+                // Read-only roots: .jcode dir cannot be created → permanent
+                // Absent verdict for this process (no retry every call).
+                if db_path_for(&canon)
+                    .parent()
+                    .map(|p| !p.exists())
+                    .unwrap_or(false)
+                {
+                    st.unwritable = true;
+                }
             }
         }
         ok
@@ -340,6 +401,44 @@ mod tests {
         assert!(
             elapsed < Duration::from_millis(2000),
             "indexed too slow: {elapsed:?}"
+        );
+    }
+
+    #[test]
+    fn lifecycle_absent_ready_disabled() {
+        let _guard = env_serial();
+        unsafe { std::env::remove_var("JCODE_CODEGRAPH") };
+        let dir = fixture("lifecycle");
+        std::fs::write(dir.join("a.ts"), "export const a = 1;\n").unwrap();
+        let root = resolve_repo_root(&dir);
+        assert_eq!(index_status(&root), IndexStatus::Absent);
+        let _ = indexed_or_live(&root, "a.ts", true);
+        assert_eq!(index_status(&root), IndexStatus::Ready);
+        unsafe { std::env::set_var("JCODE_CODEGRAPH", "0") };
+        assert_eq!(index_status(&root), IndexStatus::Disabled);
+        unsafe { std::env::remove_var("JCODE_CODEGRAPH") };
+    }
+
+    #[test]
+    fn kill_switch_opens_zero_sqlite() {
+        let _guard = env_serial();
+        unsafe { std::env::set_var("JCODE_CODEGRAPH", "0") };
+        let dir = fixture("killswitch");
+        std::fs::write(dir.join("core.ts"), "export function core() {}\n").unwrap();
+        std::fs::write(
+            dir.join("user.ts"),
+            "import { core } from './core';\ncore();\n",
+        )
+        .unwrap();
+        let root = resolve_repo_root(&dir);
+        let (g, used_index) = indexed_or_live(&root, "core.ts", true);
+        unsafe { std::env::remove_var("JCODE_CODEGRAPH") };
+        assert!(!used_index);
+        assert_ne!(g.source, GraphSource::Index);
+        // Zero sqlite opens: no .jcode dir created under the fixture root.
+        assert!(
+            !db_path_for(&root.canonicalize().unwrap_or(root.clone())).exists(),
+            "kill switch must not create DB files"
         );
     }
 }
