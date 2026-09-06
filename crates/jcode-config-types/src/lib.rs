@@ -64,6 +64,10 @@ pub enum CompactionMode {
     Proactive,
     /// Compact based on semantic topic shifts and relevance scoring
     Semantic,
+    /// Structural (graph-ai `jcode-hlz`): no-LLM compaction — file-content
+    /// tool results replaced by symbol-outline stubs from the code graph,
+    /// transcript otherwise untouched. Cheapest mode; precision lowest.
+    Structural,
 }
 
 impl CompactionMode {
@@ -72,6 +76,7 @@ impl CompactionMode {
             Self::Reactive => "reactive",
             Self::Proactive => "proactive",
             Self::Semantic => "semantic",
+            Self::Structural => "structural",
         }
     }
 
@@ -80,6 +85,7 @@ impl CompactionMode {
             "reactive" => Some(Self::Reactive),
             "proactive" => Some(Self::Proactive),
             "semantic" => Some(Self::Semantic),
+            "structural" => Some(Self::Structural),
             _ => None,
         }
     }

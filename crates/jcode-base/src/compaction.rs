@@ -27,16 +27,16 @@ use std::time::Instant;
 use tokio::task::JoinHandle;
 
 pub use jcode_compaction_core::{
-    CHARS_PER_TOKEN, COMPACTION_THRESHOLD, CRITICAL_THRESHOLD, CompactionAction, CompactionEvent,
-    CompactionStats, CONTEXT_LIMIT_PARSE_FLOOR, DEFAULT_TOKEN_BUDGET, EMBED_MAX_CHARS_PER_MSG,
-    EMBEDDING_HISTORY_WINDOW, EMERGENCY_IMAGE_MAX_CHARS, EMERGENCY_TOOL_RESULT_MAX_CHARS,
-    MANUAL_COMPACT_MIN_THRESHOLD, MIN_TURNS_TO_KEEP, PAYLOAD_IMAGE_CHAR_BUDGET,
-    RECENT_TURNS_TO_KEEP, SEMANTIC_EMBED_CACHE_CAPACITY, SUMMARY_PROMPT, SYSTEM_OVERHEAD_TOKENS,
-    TOKEN_HISTORY_WINDOW, Summary, ContextLimitViolation, build_compaction_prompt,
-    build_emergency_summary_text, compacted_summary_text_block, content_char_count,
-    effective_context_tokens_from_usage, emergency_strip_large_images,
-    emergency_truncate_large_payloads, estimate_compaction_tokens, is_context_limit_error,
-    is_request_payload_too_large_error, mean_embedding, message_char_count,
+    CHARS_PER_TOKEN, COMPACTION_THRESHOLD, CONTEXT_LIMIT_PARSE_FLOOR, CRITICAL_THRESHOLD,
+    CompactionAction, CompactionEvent, CompactionStats, ContextLimitViolation,
+    DEFAULT_TOKEN_BUDGET, EMBED_MAX_CHARS_PER_MSG, EMBEDDING_HISTORY_WINDOW,
+    EMERGENCY_IMAGE_MAX_CHARS, EMERGENCY_TOOL_RESULT_MAX_CHARS, MANUAL_COMPACT_MIN_THRESHOLD,
+    MIN_TURNS_TO_KEEP, PAYLOAD_IMAGE_CHAR_BUDGET, RECENT_TURNS_TO_KEEP,
+    SEMANTIC_EMBED_CACHE_CAPACITY, SUMMARY_PROMPT, SYSTEM_OVERHEAD_TOKENS, Summary,
+    TOKEN_HISTORY_WINDOW, build_compaction_prompt, build_emergency_summary_text,
+    compacted_summary_text_block, content_char_count, effective_context_tokens_from_usage,
+    emergency_strip_large_images, emergency_truncate_large_payloads, estimate_compaction_tokens,
+    is_context_limit_error, is_request_payload_too_large_error, mean_embedding, message_char_count,
     parse_context_limit_violation, safe_compaction_cutoff, semantic_cache_key, semantic_goal_text,
     semantic_message_text, strip_large_images_in_contents, summary_payload_char_count,
 };
@@ -880,6 +880,11 @@ impl CompactionManager {
             CompactionMode::Semantic => {
                 active.len() > RECENT_TURNS_TO_KEEP && self.should_compact_semantic(all_messages)
             }
+            CompactionMode::Structural => {
+                // Structural mode compacts eagerly (no-LLM stubs are cheap):
+                // same recency gate as reactive, no token-threshold wait.
+                self.pending_task.is_none() && active.len() > RECENT_TURNS_TO_KEEP
+            }
         }
     }
 
@@ -928,6 +933,36 @@ impl CompactionManager {
 
         self.pending_cutoff = cutoff;
         self.pending_trigger = Some(mode_label.clone());
+
+        // Structural mode (graph-ai jcode-hlz): no-LLM shortcut — build the
+        // outline stub synchronously instead of spawning an LLM summarization.
+        // Working dir is unavailable here (manager owns no session state), so
+        // resolve against the process CWD; callers with a session dir should
+        // prefer the app-core helper. Falls back to normal path when no files
+        // resolve.
+        if self.mode == crate::config::CompactionMode::Structural {
+            let text: String = messages_to_summarize
+                .iter()
+                .map(|m| format!("{m:?}"))
+                .collect::<Vec<_>>()
+                .join("\n");
+            let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+            // NOTE: app-core owns the real builder (agentgrep dep lives there);
+            // jcode-base cannot depend on app-core. Inline a minimal outline
+            // stub here: file mentions + line counts, no symbol detail. The
+            // full symbol version runs in app-core's structural_summary.
+            let summary_text = structural_stub_summary(&text, &cwd);
+            self.pending_task = Some(tokio::spawn(async move {
+                Ok(CompactionResult {
+                    summary_text,
+                    openai_encrypted_content: None,
+                    covers_up_to_turn: 0,
+                    duration_ms: 0,
+                    summarized_messages: msg_count,
+                })
+            }));
+            return;
+        }
 
         // Spawn background task that notifies via Bus when done
         self.pending_task = Some(tokio::spawn(async move {
@@ -1696,6 +1731,44 @@ impl Default for CompactionManager {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Minimal structural stub (graph-ai `jcode-hlz`, no-LLM): file mentions in
+/// the compacted text with line counts. Symbol-level outlines live in
+/// app-core's `codegraph::structural::structural_summary` (agentgrep dep).
+fn structural_stub_summary(text: &str, working_dir: &std::path::Path) -> String {
+    use std::collections::HashSet;
+    let mut seen = HashSet::new();
+    let mut lines =
+        vec!["Structural context summary (no-LLM; file stubs, not contents):".to_string()];
+    for token in text.split(|c: char| c.is_whitespace() || c == '"' || c == '\'') {
+        let t = token.trim_matches(|c| c == '(' || c == ')' || c == ',' || c == ':');
+        if t.len() < 4 || t.len() > 200 || seen.contains(t) {
+            continue;
+        }
+        if ![".rs", ".ts", ".tsx", ".js", ".jsx", ".py", ".go"]
+            .iter()
+            .any(|e| t.ends_with(e))
+        {
+            continue;
+        }
+        let abs = working_dir.join(t.trim_start_matches("./").trim_start_matches('/'));
+        if let Ok(content) = std::fs::read_to_string(&abs) {
+            seen.insert(t.to_string());
+            let rel = abs
+                .strip_prefix(working_dir)
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_else(|_| t.to_string());
+            lines.push(format!("  {rel} ({} lines)", content.lines().count()));
+        }
+        if lines.len() > 21 {
+            break;
+        }
+    }
+    if lines.len() < 2 {
+        lines.push("  (no repo files mentioned)".to_string());
+    }
+    lines.join("\n")
 }
 
 /// Generate summary using the provider
