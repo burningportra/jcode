@@ -396,6 +396,11 @@ impl Config {
                 self.agents.swarm_max_concurrent_agents = parsed;
             }
         }
+        if let Ok(v) = std::env::var("JCODE_CODEGRAPH_MAP") {
+            if let Some(parsed) = parse_env_bool(&v) {
+                self.agents.codegraph_map = parsed;
+            }
+        }
         if let Ok(v) = std::env::var("JCODE_MEMORY_MODEL") {
             let trimmed = v.trim();
             self.agents.memory_model = if trimmed.is_empty() {

@@ -14,6 +14,7 @@
 
 pub mod cache;
 pub mod live;
+pub mod map;
 
 #[cfg(test)]
 mod tests;

@@ -121,6 +121,19 @@ impl Agent {
             &mut split,
             self.provider.reasoning_effort().as_deref(),
         );
+        // Code-graph map block (graph-ai jcode-hkd): static, rank-ordered,
+        // cache-stable. Off by default (agents.codegraph_map). Blocking but
+        // bounded (5s); only computed when enabled.
+        if crate::config::config().agents.codegraph_map {
+            if let Some(dir) = working_dir.as_deref() {
+                if let Some(block) = crate::tool::codegraph::map::build_map_block(dir, true) {
+                    if !split.static_part.is_empty() {
+                        split.static_part.push_str("\n\n");
+                    }
+                    split.static_part.push_str(&block);
+                }
+            }
+        }
 
         split
     }

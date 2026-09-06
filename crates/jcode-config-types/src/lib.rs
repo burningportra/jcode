@@ -662,6 +662,12 @@ pub struct AgentsConfig {
     /// Env override: `JCODE_SWARM_MAX_CONCURRENT_AGENTS`.
     #[serde(default = "default_swarm_max_concurrent_agents")]
     pub swarm_max_concurrent_agents: usize,
+    /// Code-graph map block in the system prompt (graph-ai `jcode-hkd`):
+    /// top-30 files by dependent count as `path (→N dependents)`, rank-ordered
+    /// for prompt-cache stability, ≤2k tokens. Off by default until the
+    /// benchmark bead proves a token win. Env: `JCODE_CODEGRAPH_MAP`.
+    #[serde(default)]
+    pub codegraph_map: bool,
 }
 
 fn default_swarm_max_concurrent_agents() -> usize {
@@ -705,6 +711,7 @@ impl Default for AgentsConfig {
             memory_embedding_base_url: None,
             memory_embedding_dim: None,
             swarm_max_concurrent_agents: default_swarm_max_concurrent_agents(),
+            codegraph_map: false,
         }
     }
 }
