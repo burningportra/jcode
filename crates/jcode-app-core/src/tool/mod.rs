@@ -6,6 +6,7 @@ mod batch;
 mod bg;
 mod browser;
 pub(crate) mod code_impact;
+mod code_query;
 pub mod codegraph;
 mod communicate;
 #[cfg(target_os = "macos")]
@@ -258,6 +259,12 @@ impl Registry {
                 &mut timings,
                 "code_impact",
                 code_impact::CodeImpactTool::new,
+            );
+            Self::insert_tool_timed(
+                &mut m,
+                &mut timings,
+                "code_query",
+                code_query::CodeQueryTool::new,
             );
             Self::insert_tool_timed(
                 &mut m,
