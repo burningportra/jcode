@@ -247,6 +247,19 @@ fixture in the Phase 3 bead.
   reindex (no migrations in v1). Corrupt DB → delete + rebuild, tools report
   `source: live` meanwhile (never error).
 
+**Refine re-pass (data-model lens, 84/100):** two gaps closed. (1) `deps.weight`
+semantics were unspecified — defined now: weight = number of distinct import
+statements from src to dst (re-imports across one file count once per
+specifier line), normalized per-source at PageRank build (out-weight sums to
+1; zero-out-degree nodes distribute uniformly). Without this, PageRank over
+raw counts is dominated by files with repeated imports of one module.
+(2) `symbols_fts` has a `path` column but no sync contract — added: FTS rows
+written in the same transaction as `symbols` inserts (delete + reinsert per
+file on rescan); FTS is never read for ranking, only `find` matching, so
+staleness window equals the file-row transaction. (3) `mtime INTEGER` is
+seconds since epoch (not ms — git and stat disagree otherwise); bead must
+assert the unit. No cross-model reviewer; residual risk R7 stands.
+
 - Import→file resolution: relative-path resolution for `./`/`../` plus
   basename fallback; unresolved imports are dropped (not stored). Rust `mod`/`use`,
   TS/JS import/from/require, Python import/from, Go import — Phase 3 bead specs
