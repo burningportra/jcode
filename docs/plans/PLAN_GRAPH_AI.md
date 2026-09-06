@@ -406,6 +406,20 @@ chromium-scale degrades gracefully).
 - R7 No cross-model review yet → convergence report must flag single-model
   authorship; schedule one `claude-fable-5` review pass before bead conversion.
 
+**Refine re-pass (simplicity lens, 85/100 — converged):** checked the plan
+against oversimplification (no features lost — all 4 phases, both tools, all 5
+open questions intact) and remaining fat. One cut adopted: `move_symbol`'s
+import-line insertion duplicated `rename_symbol`'s batch machinery — merged into
+a single `symbol-relocate` core with a `dst` option (`dst: none` = rename),
+saving one tool surface while keeping both behaviors; P4a bead text updated at
+implementation time. Deferred, not cut: trigram index (Empryo has it; FTS5
+prefix matching covers v1 — add only if `find` precision bead fails), call-site
+edges (dependents at file granularity suffice for blast radius; symbol-level
+call graph is the tree-sitter follow-up's problem). No expansion detected
+(450 → ~490 lines, all rubric-driven). Fresh pass surfaced no new structural
+gaps — only known nits (R7 cross-model absence, unanswered elicitation).
+Rubric: all 11 boxes satisfied or justifiably deferred.
+
 **Security lens additions (pass 5):** graph tools are read-only but their
 INPUTS are attack surface. `file`/`pattern`/`query` args: path traversal
 rejected (canonicalize + prefix-check against root — symlinks resolved, not
