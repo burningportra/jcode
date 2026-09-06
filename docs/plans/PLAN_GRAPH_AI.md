@@ -362,14 +362,14 @@ benchmark bead proves token win; flag `agents.codegraph_map`.
 
 ## 6. Roadmap (dependency-ordered, ROI first)
 
-- **P1 (3 beads):** `code_impact` live backend + tests; edit advisory line;
-  co-change via git log. No new deps. Shippable alone.
-- **P2 (3 beads):** `code_query` pipeline + shared graph core refactor;
-  prompt map block (flagged); benchmark harness (token/step comparison on 5
-  fixed tasks, before/after).
-- **P3 (5 beads):** `jcode-codegraph` crate (schema/scan/rank/query/symbols),
-  mtime reindex, indexed backend for both tools, PageRank, FTS5, perf budget
-  tests, `JCODE_CODEGRAPH=0` kill switch.
+- **P1 (jcode-rey, jcode-nd5):** `code_impact` live backend + tests; edit
+  advisory line; co-change via git log. No new deps. Shippable alone.
+- **P2 (jcode-hg3, jcode-hkd):** `code_query` pipeline + shared graph core
+  refactor; prompt map block (flagged); benchmark harness (token/step comparison
+  on 5 fixed tasks, before/after).
+- **P3 (jcode-dj6, jcode-ggw, jcode-euh):** `jcode-codegraph` crate
+  (schema/scan/rank/query/symbols), mtime reindex, indexed backend for both
+  tools, PageRank, FTS5, perf budget tests, `JCODE_CODEGRAPH=0` kill switch.
 
 **Performance budgets (pass 4, enforced by tests):** live `code_impact` p50
 < 2s on jcode repo (warm rg cache), hard timeout 10s per sub-call with
@@ -383,8 +383,9 @@ block ≤ 2k tokens hard cap (truncate by rank, never by recency — stable orde
 preserves prompt cache). Co-change mining capped at 500 newest commits AND 30s
 wall clock, whichever first, on repos with huge history (jcode-scale fine;
 chromium-scale degrades gracefully).
-- **P4 (4 beads):** rename/move_symbol atomic + rollback, typecheck gate,
-  structural compaction mode in CompactionManager, docs + TUI help text.
+- **P4 (jcode-rqk, jcode-hlz):** symbol-relocate core (rename + move, single
+  tool surface per pass-9 note) atomic + rollback, typecheck gate, structural
+  compaction mode in CompactionManager, docs + TUI help text.
 - Total ~15 beads (9 created: jcode-rey..jcode-hlz; remaining ~6 are P1c/P2c
   splits if beads grow — do not pre-split). Tree-sitter acceleration is a
   follow-up initiative, not a bead here.
