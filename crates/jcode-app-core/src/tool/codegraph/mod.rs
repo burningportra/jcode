@@ -13,6 +13,7 @@
 //! hard errors (except path traversal, which is rejected).
 
 pub mod cache;
+pub mod indexed;
 pub mod live;
 pub mod map;
 
@@ -20,6 +21,7 @@ pub mod map;
 mod tests;
 
 pub use cache::DepCache;
+pub use indexed::{codegraph_disabled, db_path_for, indexed_or_live, rel_for};
 pub use live::{
     GraphSource, LiveGraph, cochanges_live, dependencies_live, dependents_live,
     exported_symbols_live, resolve_repo_root,

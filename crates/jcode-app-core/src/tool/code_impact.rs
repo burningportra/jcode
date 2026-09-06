@@ -73,34 +73,13 @@ pub fn advisory_blast_line(ctx: &ToolContext, abs_path: &Path) -> Option<String>
 async fn compute_report(root: std::path::PathBuf, rel: String) -> ImpactReport {
     let rel_fallback = rel.clone();
     tokio::task::spawn_blocking(move || {
-        // Direct live calls (not DepCache): the tool must report source/partial
-        // honestly per query; the cache swallows provenance. Cache serves the
-        // advisory line path (code_impact::advisory path uses live fns too).
+        // Indexed-or-live (jcode-ggw): same shapes, plus source: index.
         let root = resolve_repo_root(&root);
-        let (dents, s1, p1) = dependents_live(&root, &rel);
-        let (deps, s2, p2) = dependencies_live(&root, &rel);
-        let (co, s3, p3) = cochanges_live(&root, &rel);
-        let syms = exported_symbols_live(&root, &rel);
-        let source = [s1, s2, s3]
-            .into_iter()
-            .min_by_key(|s| match s {
-                GraphSource::Degraded => 0,
-                GraphSource::Live => 1,
-                GraphSource::Index => 2,
-            })
-            .unwrap_or(GraphSource::Live);
+        let (graph, _used_index) = super::codegraph::indexed_or_live(&root, &rel, false);
         ImpactReport {
-            source,
-            partial: p1 || p2 || p3,
-            graph: LiveGraph {
-                source,
-                partial: p1 || p2 || p3,
-                dependents: dents,
-                dependencies: deps,
-                cochanges: co,
-                symbols: syms,
-                notes: vec![],
-            },
+            source: graph.source,
+            partial: graph.partial,
+            graph,
             rel,
         }
     })
