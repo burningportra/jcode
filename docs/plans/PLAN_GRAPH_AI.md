@@ -305,8 +305,10 @@ output: { success, output: "<human text, Empryo soul_impact shape>",
 - `dependencies` (live): read file, apply language import regexes, resolve
   relative targets that exist on disk. Unresolvable bare imports listed as
   external, not dropped silently.
-- `cochanges` (live): `git log --name-only --pretty=format: -- <file>`,
-  count partner files, top 20. Non-git repos → `degraded` with message.
+- `cochanges` (live): full `git log --name-only` parsed per-commit-block for
+  partners of the file (a `-- <path>` filter narrows `--name-only` output to
+  the matching path and hides partners — implementation lesson 2026-09-06),
+  top 20. Non-git repos → `degraded` with message.
 - `blast_radius` (live): union of dependents + cochanges + exported symbols
   (regex-extracted). Same text shape as indexed path.
 - Security: respect existing `isForbidden`-equivalent path gates (jcode: check
