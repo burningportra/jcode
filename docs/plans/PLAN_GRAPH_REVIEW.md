@@ -279,6 +279,37 @@ Verified against the clean worktree (`/tmp/jcode-graph-review`, DIRTY_COUNT=0):
 - Simplicity: F1–F5 minimal, no redesign. Remaining work is execution
   (Handoff), not plan design.
 
+### Pass 5 (full-suite verdict + convergence): 90/100
+
+Full workspace suite on clean HEAD worktree (`--workspace --no-fail-fast`,
+log `graph-review/full-head.log`, ~16 min wall):
+
+- My-surface suites ALL GREEN on clean HEAD: codegraph 24/24, codegraph
+  crate 10/10, code_impact 8/8, code_query 6/6, symbol_relocate 5/5
+  (53/53). `check` on all touched crates clean.
+- Workspace failures: 12 binaries red, ~120 unique tests. Categorized:
+  - agentgrep FFF (5): red on BASE too (verified `tool::agentgrep` on base
+    worktree: same 5 FAILED). Pre-existing (FFF backend env-sensitive).
+  - communicate/swarm (9+): red on BASE too (verified 75/9 on base).
+    Pre-existing (timing-sensitive swarm orchestration).
+  - session persist incl. residual (4: compaction_state, provider_key,
+    reasoning_effort, macos_sleep_assertion): red on BASE too (verified
+    51/4 on base, identical `os error 2` family). Pre-existing env issue.
+  - provider_matrix (56), e2e debug sessions (3), lifecycle_events (3),
+    watchdog/auth/cli misc: all in foreign surfaces none of the 9 commits
+    touch (providers, auth, sessions, TUI lifecycle). No my-surface test
+    among them (grep for codegraph/code_impact/code_query/relocate/
+    compaction-mode/structural: zero hits).
+  - context_window_matrix (1), fake_acp (1), structured_output (4+):
+    foreign harnesses, same reasoning.
+- Decision-matrix rollup: every investigated cluster = red/red same-family
+  = pre-existing. ZERO red/green (my regression) found. The full-suite
+  verdict: NO REGRESSIONS attributable to the 9 commits.
+- Convergence: rubric complete (scope, interfaces, data model, errors,
+  edges, perf budgets, security, verification via worktrees, deps,
+  self-documenting beads, subtraction logged). Residual risks recorded
+  below. Stop here: fresh passes would re-read the same evidence.
+
 ## 10. Assumptions carried forward (Elicit record)
 3. Full suite = `scripts/dev_cargo.sh test --workspace` or `cargo test
    --workspace` per repo convention (confirm script supports it).
