@@ -2079,7 +2079,7 @@ async fn handle_remote_key_internal(
                         .clone()
                         .unwrap_or(crate::config::CompactionMode::Reactive);
                     app.push_display_message(DisplayMessage::system(format!(
-                        "Compaction mode: {}\nAvailable: reactive, proactive, semantic\nUse /compact mode <mode> to change it for this session.",
+                        "Compaction mode: {}\nAvailable: reactive, proactive, semantic, structural\nUse /compact mode <mode> to change it for this session.",
                         mode.as_str()
                     )));
                     return Ok(());
@@ -2089,7 +2089,8 @@ async fn handle_remote_key_internal(
                     let mode_str = mode_str.trim();
                     let Some(mode) = crate::config::CompactionMode::parse(mode_str) else {
                         app.push_display_message(DisplayMessage::error(
-                            "Usage: /compact mode <reactive|proactive|semantic>".to_string(),
+                            "Usage: /compact mode <reactive|proactive|semantic|structural>"
+                                .to_string(),
                         ));
                         return Ok(());
                     };

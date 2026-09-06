@@ -164,8 +164,9 @@ impl Tool for MultiEditTool {
             &content,
         );
 
-        // Advisory blast radius (graph-ai jcode-nd5): display-only.
-        if let Some(line) = super::code_impact::advisory_blast_line(&ctx, &path) {
+        // Advisory blast radius (graph-ai jcode-nd5): display-only, async
+        // via spawn_blocking (F3).
+        if let Some(line) = super::code_impact::advisory_blast_line_async(&ctx, &path).await {
             output.push('\n');
             output.push_str(&line);
             output.push('\n');

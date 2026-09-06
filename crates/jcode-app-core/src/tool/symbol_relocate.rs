@@ -92,15 +92,17 @@ fn replace_symbol_text(content: &str, symbol: &str, new_name: &str) -> (String, 
     let mut out = String::with_capacity(content.len());
     let mut count = 0;
     let mut rest = content;
+    // Identifier chars include `$` (JS `$foo` must not match `foo`; F5).
+    let is_ident = |c: char| c.is_alphanumeric() || c == '_' || c == '$';
     while let Some(pos) = rest.find(symbol) {
         let before_ok = pos == 0 || {
             let c = rest[..pos].chars().last().unwrap();
-            !(c.is_alphanumeric() || c == '_')
+            !is_ident(c)
         };
         let after = &rest[pos + symbol.len()..];
         let after_ok = after.is_empty() || {
             let c = after.chars().next().unwrap();
-            !(c.is_alphanumeric() || c == '_')
+            !is_ident(c)
         };
         if before_ok && after_ok {
             out.push_str(&rest[..pos]);

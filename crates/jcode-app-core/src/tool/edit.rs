@@ -150,8 +150,9 @@ impl Tool for EditTool {
             body.push('\n');
         }
         // Advisory blast radius (graph-ai jcode-nd5): display-only, never
-        // blocks or allows the edit (approval policy unchanged).
-        if let Some(line) = super::code_impact::advisory_blast_line(&ctx, &path) {
+        // blocks or allows the edit (approval policy unchanged). Async via
+        // spawn_blocking (F3: blocking rg+git must not stall tokio worker).
+        if let Some(line) = super::code_impact::advisory_blast_line_async(&ctx, &path).await {
             body.push('\n');
             body.push_str(&line);
             body.push('\n');

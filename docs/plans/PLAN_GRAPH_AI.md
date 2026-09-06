@@ -248,9 +248,12 @@ fixture in the Phase 3 bead.
   `source: live` meanwhile (never error).
 
 **Refine re-pass (data-model lens, 84/100):** two gaps closed. (1) `deps.weight`
-semantics were unspecified — defined now: weight = number of distinct import
-statements from src to dst (re-imports across one file count once per
-specifier line), normalized per-source at PageRank build (out-weight sums to
+semantics were unspecified — defined now: weight = 1 per (src, dst) file pair
+(F4 correction 2026-09-06: implementation dedups by dst file via `seen` +
+`INSERT OR IGNORE`, so multi-specifier imports count once; the earlier
+"per-specifier" wording was aspirational. PageRank normalization is unaffected
+since uniform weights normalize identically), normalized per-source at PageRank
+build (out-weight sums to
 1; zero-out-degree nodes distribute uniformly). Without this, PageRank over
 raw counts is dominated by files with repeated imports of one module.
 (2) `symbols_fts` has a `path` column but no sync contract — added: FTS rows

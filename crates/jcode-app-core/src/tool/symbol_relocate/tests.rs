@@ -109,4 +109,8 @@ fn word_boundary_replacement_is_conservative() {
     let (out, n) = super::replace_symbol_text("foo foobar foo_bar foo", "foo", "baz");
     assert_eq!(n, 2, "out={out}");
     assert!(out.contains("foobar") && out.contains("foo_bar"));
+    // F5: `$` is an identifier char (JS `$foo` must not match `foo`).
+    let (out2, n2) = super::replace_symbol_text("$foo foo foo$bar", "foo", "baz");
+    assert_eq!(n2, 1, "out2={out2}");
+    assert!(out2.contains("$foo") && out2.contains("foo$bar"));
 }

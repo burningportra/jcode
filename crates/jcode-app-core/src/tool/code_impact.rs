@@ -45,10 +45,30 @@ pub struct ImpactReport {
 }
 
 pub fn advisory_blast_line(ctx: &ToolContext, abs_path: &Path) -> Option<String> {
-    let root = ctx.working_dir.as_deref()?;
+    // Sync wrapper for tests and non-async callers. Async edit paths should
+    // prefer `advisory_blast_line_async` (F3: two 10s-bounded blocking calls
+    // must not run on a tokio worker).
+    let root = ctx.working_dir.as_deref()?.to_path_buf();
     if !root.is_dir() {
         return None;
     }
+    advisory_blast_line_for(&root, abs_path)
+}
+
+/// Async advisory: blocking graph calls inside `spawn_blocking`.
+pub async fn advisory_blast_line_async(ctx: &ToolContext, abs_path: &Path) -> Option<String> {
+    let root = ctx.working_dir.as_deref()?.to_path_buf();
+    if !root.is_dir() {
+        return None;
+    }
+    let abs = abs_path.to_path_buf();
+    tokio::task::spawn_blocking(move || advisory_blast_line_for(&root, &abs))
+        .await
+        .ok()
+        .flatten()
+}
+
+fn advisory_blast_line_for(root: &std::path::PathBuf, abs_path: &Path) -> Option<String> {
     let root = resolve_repo_root(root);
     let rel = rel_display(&root, abs_path);
     // Best-effort, bounded: dependents only, no git. Never fail the edit.
@@ -70,12 +90,13 @@ pub fn advisory_blast_line(ctx: &ToolContext, abs_path: &Path) -> Option<String>
     ))
 }
 
-async fn compute_report(root: std::path::PathBuf, rel: String) -> ImpactReport {
+async fn compute_report(root: std::path::PathBuf, rel: String, refresh: bool) -> ImpactReport {
     let rel_fallback = rel.clone();
     tokio::task::spawn_blocking(move || {
         // Indexed-or-live (jcode-ggw): same shapes, plus source: index.
+        // refresh=true forces reindex (F2: flag was dead before threading).
         let root = resolve_repo_root(&root);
-        let (graph, _used_index) = super::codegraph::indexed_or_live(&root, &rel, false);
+        let (graph, _used_index) = super::codegraph::indexed_or_live(&root, &rel, refresh);
         ImpactReport {
             source: graph.source,
             partial: graph.partial,
@@ -308,7 +329,7 @@ impl Tool for CodeImpactTool {
         if params.refresh {
             super::codegraph::DepCache::shared().clear_for_test();
         }
-        let report = compute_report(root, rel).await;
+        let report = compute_report(root, rel, params.refresh).await;
         Ok(ToolOutput::new(render(&report, action)))
     }
 }
