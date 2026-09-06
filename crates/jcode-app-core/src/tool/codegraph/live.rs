@@ -491,7 +491,7 @@ pub fn cochanges_live(root: &Path, rel: &str) -> (Vec<RelatedFile>, GraphSource,
     };
     let mut counts: HashMap<String, usize> = HashMap::new();
     let mut block: Vec<String> = vec![];
-    let mut flush = |block: &mut Vec<String>, counts: &mut HashMap<String, usize>| {
+    let flush = |block: &mut Vec<String>, counts: &mut HashMap<String, usize>| {
         if block.iter().any(|f| f == rel) {
             for f in block.iter() {
                 if f != rel && !f.is_empty() {

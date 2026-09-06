@@ -8,8 +8,8 @@
 //! blocks or allows edits (approval policy unchanged).
 
 use super::codegraph::live::{
-    GraphSource, LiveGraph, cochanges_live, dependencies_live, dependents_live,
-    exported_symbols_live, rel_display, resolve_repo_root, resolve_within_root,
+    GraphSource, LiveGraph, cochanges_live, dependents_live, rel_display, resolve_repo_root,
+    resolve_within_root,
 };
 use super::{Tool, ToolContext, ToolOutput};
 use anyhow::Result;
@@ -27,6 +27,7 @@ impl CodeImpactTool {
 }
 
 #[derive(Deserialize)]
+#[allow(dead_code)] // `intent` is schema-required but consumed by the harness, not the tool
 struct CodeImpactInput {
     #[serde(default)]
     intent: Option<String>,
@@ -44,6 +45,7 @@ pub struct ImpactReport {
     pub rel: String,
 }
 
+#[allow(dead_code)] // production callers use the async variant; tests use this
 pub fn advisory_blast_line(ctx: &ToolContext, abs_path: &Path) -> Option<String> {
     // Sync wrapper for tests and non-async callers. Async edit paths should
     // prefer `advisory_blast_line_async` (F3: two 10s-bounded blocking calls

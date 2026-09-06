@@ -13,7 +13,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use super::live::{
     GraphSource, LiveGraph, RelatedFile, cochanges_live, dependencies_live, dependents_live,
-    exported_symbols_live, rel_display, resolve_repo_root, resolve_within_root,
+    exported_symbols_live, rel_display, resolve_within_root,
 };
 
 pub const INDEX_STALE_AFTER: Duration = Duration::from_secs(60);
@@ -336,6 +336,7 @@ pub fn mtime_secs(p: &Path) -> i64 {
 
 #[cfg(test)]
 mod tests {
+    use super::super::live::resolve_repo_root;
     use super::*;
 
     fn fixture(name: &str) -> PathBuf {

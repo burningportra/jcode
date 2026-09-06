@@ -26,6 +26,7 @@ impl SymbolRelocateTool {
 }
 
 #[derive(Deserialize)]
+#[allow(dead_code)] // `intent` is schema-required but consumed by the harness, not the tool
 struct RelocateInput {
     #[serde(default)]
     intent: Option<String>,

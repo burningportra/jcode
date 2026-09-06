@@ -57,6 +57,7 @@ struct ReadRanges {
 }
 
 #[derive(Deserialize)]
+#[allow(dead_code)] // `intent` is schema-required but consumed by the harness, not the tool
 struct CodeQueryInput {
     #[serde(default)]
     intent: Option<String>,
