@@ -343,9 +343,11 @@ Emits a per-stage trace (`1. search "x" → 14 files`) like Empryo's.
 
 ### 5.3 Symbol edit tools (Phase 4)
 
-`rename_symbol {file, symbol, new_name}` — phase A: text refs via agentgrep +
-`edit` batches; gated by `code_impact blast_radius` preview shown first.
-`move_symbol {src, dst, symbol}` — same, plus import-line insertion.
+Single `symbol-relocate {file, symbol, new_name, dst?}` core (pass-9 merge;
+`dst: none` = rename, `dst` set = move, one tool surface — `jcode-rqk` bead
+is normative): text refs via agentgrep + `edit` batches; gated by
+`code_impact blast_radius` preview shown first; move adds import-line
+insertion.
 Atomicity: all-or-nothing — apply to temp copies, verify, then swap; on any
 failure restore originals and report per-file status. Typecheck gate: run the
 repo's check (`cargo check` / `tsc --noEmit` detection via existing project
