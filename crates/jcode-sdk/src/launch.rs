@@ -80,8 +80,9 @@ pub struct LaunchOptions {
     pub binary: Option<PathBuf>,
     /// Extra environment variables for the private instance.
     pub env: HashMap<OsString, OsString>,
-    /// Model used by every spawned swarm worker. `inherit` keeps workers on the
-    /// coordinator's model and auth route. This is applied as the operator-level
+    /// Default model for spawned swarm workers, unless overridden per spawn.
+    /// `inherit` defaults to the coordinator's model and auth route.
+    /// This is applied as the operator-level
     /// `JCODE_SWARM_MODEL` override and takes precedence over `env`.
     pub swarm_model: Option<String>,
     /// Who executes autonomous wake requests. Applied as the operator-level
@@ -745,7 +746,7 @@ fn launch_io(error: std::io::Error) -> Error {
     Error::new(ErrorKind::LaunchFailed, error.to_string())
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 

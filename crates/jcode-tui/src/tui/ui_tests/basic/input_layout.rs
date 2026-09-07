@@ -1,4 +1,139 @@
 #[test]
+fn first_prompt_preserves_welcome_header_spacing() {
+    let _lock = viewport_snapshot_test_lock();
+    for (width, height) in [(80, 40), (100, 60), (60, 80)] {
+        for centered in [false, true] {
+            crate::tui::ui::clear_test_render_state_for_tests();
+            let mut state = TestState {
+                input: "FIRST PROMPT".into(),
+                centered_mode: centered,
+                suppress_info_widgets: true,
+                ..Default::default()
+            };
+            let welcome = buffer_to_text(&render_full(&state, width, height));
+            // Unseen release notes may fill all the space above the header.
+            // Track a persistent header row, not the first nonblank screen row.
+            let header_y = welcome
+                .lines()
+                .position(|line| line.contains("/model to switch"))
+                .unwrap();
+            assert!(header_y > 0, "header is below the top: {welcome}");
+
+            state.input.clear();
+            state
+                .display_messages
+                .push(DisplayMessage::user("FIRST PROMPT"));
+            state.messages_version += 1;
+            let submitted = buffer_to_text(&render_full(&state, width, height));
+            assert_eq!(
+                submitted
+                    .lines()
+                    .position(|line| line.contains("/model to switch")),
+                Some(header_y),
+                "submitting must not jump the transcript to the top: {submitted}"
+            );
+            let prompt_y = submitted
+                .lines()
+                .position(|line| line.contains("FIRST PROMPT"))
+                .unwrap();
+            assert!(prompt_y > header_y, "prompt should remain below the header");
+            assert_eq!(crate::tui::ui::last_resolved_chat_scroll(), 0);
+        }
+    }
+}
+
+#[test]
+fn first_prompt_stays_visible_with_widgets_during_processing_at_47x51() {
+    let _lock = viewport_snapshot_test_lock();
+    pin_full_tier();
+    const PROMPT: &str = "PROMPT_SENTINEL";
+    const WIDGET: &str = "WIDGET_SENTINEL";
+
+    // Keep one terminal through every transition, exercising buffer diffing as
+    // well as layout. Unit preparation still bypasses production caches.
+    for centered in [false, true] {
+        for scrollbar in [false, true] {
+            crate::tui::ui::clear_test_render_state_for_tests();
+            info_widget::clear_widget_placements_for_tests();
+            assert!(info_widget::is_enabled());
+            let mut state = TestState {
+                input: PROMPT.into(),
+                centered_mode: centered,
+                chat_native_scrollbar: scrollbar,
+                info_widget_data: info_widget::InfoWidgetData {
+                    model: Some(WIDGET.into()),
+                    reasoning_effort: Some("high".into()),
+                    context_limit: Some(256_000),
+                    observed_context_tokens: Some(1_000),
+                    provider_name: Some("openai".into()),
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+            let mut terminal = Terminal::new(TestBackend::new(47, 51)).unwrap();
+            for _ in 0..5 {
+                terminal.draw(|frame| draw(frame, &state)).unwrap();
+            }
+            state.input.clear();
+            state.display_messages.push(DisplayMessage::user(PROMPT));
+            state.messages_version += 1;
+            request_tail_follow_snap();
+            let mut saw_widget = false;
+
+            for (phase, status, stream) in [
+                ("sending", ProcessingStatus::Sending, ""),
+                ("thinking", ProcessingStatus::Thinking(Instant::now()), ""),
+                ("first token", ProcessingStatus::Streaming, "I"),
+                (
+                    "streaming",
+                    ProcessingStatus::Streaming,
+                    "I will investigate.\n\nFirst I will inspect the rendering paths.",
+                ),
+            ] {
+                state.status = status;
+                state.streaming_text = stream.into();
+                let phase_start_ms = state.now_ms;
+                for elapsed_ms in [0, 16, 100, 225, 450, 500] {
+                    state.now_ms = phase_start_ms + elapsed_ms;
+                    state.anim_elapsed = state.now_ms as f32 / 1000.0;
+                    terminal.draw(|frame| draw(frame, &state)).unwrap();
+                    let text = buffer_to_text(&terminal);
+                    let area = last_layout_snapshot().unwrap().messages_area;
+                    let chat = text
+                        .lines()
+                        .skip(area.y as usize)
+                        .take(area.height as usize)
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    saw_widget |= chat.contains(WIDGET);
+                    assert!(
+                        chat.contains(PROMPT),
+                        "prompt disappeared: phase={phase}, centered={centered}, scrollbar={scrollbar}, now={}, area={area:?}, scroll={}, total={}\n{text}",
+                        state.now_ms,
+                        last_resolved_chat_scroll(),
+                        last_total_wrapped_lines()
+                    );
+                }
+            }
+            state
+                .display_messages
+                .push(DisplayMessage::assistant(std::mem::take(
+                    &mut state.streaming_text,
+                )));
+            state.messages_version += 1;
+            state.status = ProcessingStatus::Idle;
+            terminal.draw(|frame| draw(frame, &state)).unwrap();
+            assert!(buffer_to_text(&terminal).contains(PROMPT));
+            assert!(
+                saw_widget,
+                "fixture must actually paint a widget: centered={centered}, scrollbar={scrollbar}"
+            );
+        }
+    }
+    info_widget::clear_widget_placements_for_tests();
+}
+
+#[test]
 fn test_file_diff_cache_reuses_entry_when_signature_matches() {
     let temp = tempfile::NamedTempFile::new().expect("temp file");
     std::fs::write(temp.path(), "fn main() {}\n").expect("write file");

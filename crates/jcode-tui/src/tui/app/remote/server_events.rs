@@ -1558,10 +1558,12 @@ pub(in crate::tui::app) fn handle_server_event(
             let history_mcp_count = mcp_servers.len();
             let history_model = provider_model.clone();
 
-            if should_defer_history_for_runtime_identity(
-                server_has_update,
-                server_version.as_deref(),
-            ) {
+            if !crate::tui::is_ssh_remote()
+                && should_defer_history_for_runtime_identity(
+                    server_has_update,
+                    server_version.as_deref(),
+                )
+            {
                 let client_detected_stale = server_release_is_older_than_client(
                     server_version.as_deref(),
                     &client_release_version(),
@@ -1792,7 +1794,10 @@ pub(in crate::tui::app) fn handle_server_event(
             app.workspace_client
                 .sync_after_history(&session_id, &app.remote_sessions);
 
-            if server_has_update == Some(true) && !app.pending_server_reload {
+            if !crate::tui::is_ssh_remote()
+                && server_has_update == Some(true)
+                && !app.pending_server_reload
+            {
                 app.pending_server_reload = true;
                 app.set_status_notice("Server update available");
             }
@@ -1852,7 +1857,11 @@ pub(in crate::tui::app) fn handle_server_event(
                 // History arrived: cancel the "stuck on loading session…"
                 // recovery watchdog so it doesn't re-request on a later tick.
                 app.clear_remote_history_wait();
-                if messages.is_empty() && !session_changed && !app.display_messages().is_empty() {
+                if !crate::tui::is_ssh_remote()
+                    && messages.is_empty()
+                    && !session_changed
+                    && !app.display_messages().is_empty()
+                {
                     crate::logging::info(
                         "Preserving locally restored display history for metadata-only History bootstrap",
                     );
@@ -1860,13 +1869,15 @@ pub(in crate::tui::app) fn handle_server_event(
                     let fingerprint = history_payload_fingerprint(&messages);
                     let last_applied =
                         last_applied_history_fingerprint(&app.remote_client_instance_id);
-                    if should_skip_identical_history_payload(
-                        session_changed,
-                        app.display_messages().is_empty(),
-                        last_applied.as_ref(),
-                        &session_id,
-                        fingerprint,
-                    ) {
+                    if !crate::tui::is_ssh_remote()
+                        && should_skip_identical_history_payload(
+                            session_changed,
+                            app.display_messages().is_empty(),
+                            last_applied.as_ref(),
+                            &session_id,
+                            fingerprint,
+                        )
+                    {
                         // Watchdog re-requests and reconnect re-bootstraps can
                         // redeliver a byte-identical full payload seconds apart.
                         // Rebuilding the transcript would stack multi-megabyte
@@ -1922,7 +1933,9 @@ pub(in crate::tui::app) fn handle_server_event(
                             // chunks. The server rejects rewinds while a turn
                             // is processing, so streaming state present at this
                             // point is stale by construction.
-                            if app.pending_remote_rewind_notice.is_some() {
+                            if app.pending_remote_rewind_notice.is_some()
+                                || crate::tui::is_ssh_remote()
+                            {
                                 app.stream_buffer.clear();
                                 app.clear_streaming_render_state();
                                 app.streaming_tool_calls.clear();
@@ -2759,6 +2772,13 @@ pub(in crate::tui::app) fn handle_server_event(
                     new_session_name,
                 )));
                 app.set_status_notice(format!("Workspace + {}", new_session_name));
+                return false;
+            }
+            if crate::tui::is_ssh_remote() {
+                app.pending_split_request = false;
+                app.set_status_notice(format!(
+                    "Remote session created: {new_session_id}. Resume using --ssh and --resume."
+                ));
                 return false;
             }
             finish_remote_split_launch(app);

@@ -142,10 +142,17 @@ pub enum Request {
         client_has_local_history: bool,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         allow_session_takeover: bool,
-        /// Mark the attached session crashed if this connection disappears
-        /// without first sending `prepare_disconnect`.
+        /// Legacy ownership hint, retained for wire compatibility. Disconnects
+        /// only mark a session crashed when they interrupt unfinished processing,
+        /// regardless of this flag. Idle/completed sessions close normally.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         crash_on_disconnect: bool,
+        /// Keep an already-running turn alive when this transport disconnects.
+        /// Opt-in for remote clients only. Idle sessions still close normally,
+        /// and reattachment uses persisted history plus future live events, not
+        /// replay of missed deltas. This does not survive daemon termination.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        continue_on_disconnect: bool,
         /// Terminal-identifying env vars (tmux/zellij/kitty/DISPLAY/...) captured
         /// from the connecting client so the server can route spawn/focus hooks
         /// to the client's terminal instead of its own stale startup env (#405).
@@ -172,7 +179,8 @@ pub enum Request {
     },
 
     /// Declare that this client is intentionally detaching before its transport
-    /// closes. This disarms `crash_on_disconnect` for graceful UI teardown.
+    /// closes. Retained for compatibility with older servers that use
+    /// `crash_on_disconnect` for idle sessions too.
     #[serde(rename = "prepare_disconnect")]
     PrepareDisconnect { id: u64 },
 
@@ -568,6 +576,12 @@ pub enum Request {
         request_nonce: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         spawn_mode: Option<String>,
+        /// Optional per-spawn model override. Takes precedence over
+        /// `agents.swarm_model` config. Supports explicit auth-route prefixes
+        /// (e.g. `openai-api:gpt-5.5`) and the `inherit`/`coordinator`
+        /// sentinels to force coordinator inheritance past a config pin.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        model: Option<String>,
         /// Optional reasoning effort for the spawned agent (e.g. `none`,
         /// `low`, `medium`, `high`, `xhigh`, `max`). Unset = provider default.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -686,6 +700,10 @@ pub enum Request {
         spawn_if_needed: Option<bool>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         message: Option<String>,
+        /// Optional model override for workers spawned by this assignment
+        /// (same semantics as CommSpawn::model).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        model: Option<String>,
         /// Optional reasoning effort for workers spawned by this assignment
         /// (same semantics as CommSpawn::effort).
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1078,7 +1096,13 @@ pub enum ServerEvent {
 
     /// Pong response
     #[serde(rename = "pong")]
-    Pong { id: u64 },
+    Pong {
+        id: u64,
+        /// Native SSH protocol v1 supports opt-in disconnected turn continuation.
+        /// Omitted by older daemons, which a new SSH bridge must reject.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        native_ssh_protocol: Option<u32>,
+    },
 
     /// Current state (debug)
     #[serde(rename = "state")]

@@ -15,6 +15,14 @@ use std::sync::{
 };
 use std::time::{SystemTime, UNIX_EPOCH};
 
+#[cfg(test)]
+pub(crate) fn jcode_home_test_lock() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+    LOCK.get_or_init(|| std::sync::Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 /// Default number of messages a `peek_session` returns. A preview is a glance,
 /// so this is a tail rather than a transcript: enough to recognise which
 /// conversation it is, few enough that peeking a dozen sessions stays cheap.
@@ -102,11 +110,25 @@ pub struct BridgeState {
     /// Legacy id of the in-flight `message` request, so `done` maps to
     /// `turn_done`.
     pending_message_id: Option<u64>,
+    /// A turn can belong to another attachment or a server-initiated wake.
+    observed_turn_active: bool,
+    activity_version: u64,
+    pending_activity_snapshots: std::collections::HashMap<u64, u64>,
+    /// Control requests also emit done, sometimes after their richer reply.
+    /// Retain those ids until done so they never terminate an observed turn.
+    pending_control_done_ids: std::collections::HashSet<u64>,
+    /// Soft interrupts normally join an active turn, but the daemon promotes
+    /// one received while idle into a new turn. Retain their ids so a matching
+    /// `done` can become `turn_done` without confusing queued interrupts with
+    /// the active ordinary message.
+    pending_soft_interrupt_ids: Vec<u64>,
     /// Legacy and API ids for a context-only message. Its daemon completion
     /// event is a request reply, not a model turn boundary.
     pending_no_reply_message_id: Option<(u64, u64)>,
     /// Legacy id of an in-flight `create/attach` subscribe.
     pending_attach_id: Option<(u64, u64, Option<String>)>,
+    /// Subscribe errors can arrive before the correlated state response.
+    pending_attach_subscribe_id: Option<u64>,
     /// Legacy and API ids for an in-flight session fork.
     pending_fork_id: Option<(u64, u64)>,
     /// Legacy id of the unsolicited model-catalog probe sent after attach. Its
@@ -131,6 +153,8 @@ pub struct BridgeState {
     /// again: a picker that opens instantly is the difference between a usable
     /// model switcher and a spinner.
     available_models: Vec<String>,
+    /// An empty catalog is a valid snapshot, not an uninitialized cache.
+    model_catalog_loaded: bool,
     /// Model currently serving the session, tracked alongside the catalog so
     /// a picker can mark the active entry.
     current_model: Option<String>,
@@ -233,6 +257,7 @@ enum SimpleKind {
     Compact,
     /// Awaiting the catalog reply that answers `list_models`.
     Models,
+    RuntimeInfo,
     Credential {
         provider: String,
         configured: bool,
@@ -246,6 +271,29 @@ impl BridgeState {
 
     /// Translate one API request (raw JSON) into outbound actions.
     pub fn api_request_to_legacy(&mut self, request: &Value) -> Vec<Outbound> {
+        let outbound = self.translate_request(request);
+        for action in &outbound {
+            if let Outbound::Legacy(value) = action
+                && matches!(value["type"].as_str(), Some("state" | "get_history"))
+                && let Some(id) = value["id"].as_u64()
+            {
+                self.pending_activity_snapshots
+                    .insert(id, self.activity_version);
+            }
+            if let Outbound::Legacy(value) = action
+                && matches!(
+                    value["type"].as_str(),
+                    Some("subscribe" | "clear" | "prepare_disconnect" | "notify_auth_changed")
+                )
+                && let Some(id) = value["id"].as_u64()
+            {
+                self.pending_control_done_ids.insert(id);
+            }
+        }
+        outbound
+    }
+
+    fn translate_request(&mut self, request: &Value) -> Vec<Outbound> {
         let api_id = request["id"].as_u64().unwrap_or(0);
         let req = request["req"].as_str().unwrap_or("");
 
@@ -370,20 +418,11 @@ impl BridgeState {
                     .then(|| request["session_id"].as_str().map(str::to_string))
                     .flatten();
                 self.pending_attach_id = Some((state_id, api_id, requested_session));
+                self.pending_attach_subscribe_id = Some(id);
                 self.pending_model_probe = Some(catalog_id);
-                let working_dir =
-                    request["working_dir"]
-                        .as_str()
-                        .map(str::to_string)
-                        .or_else(|| {
-                            std::env::current_dir()
-                                .ok()
-                                .map(|d| d.display().to_string())
-                        });
                 let mut subscribe = json!({
                     "type": "subscribe",
                     "id": id,
-                    "working_dir": working_dir,
                 });
                 if self.crash_on_disconnect {
                     subscribe["crash_on_disconnect"] = json!(true);
@@ -393,15 +432,28 @@ impl BridgeState {
                 // prompt when the subscribe says so, and a client that opens
                 // the repo without saying so gets an agent that cannot build
                 // the very app it is running in.
-                if working_dir
-                    .as_deref()
-                    .is_some_and(Self::path_is_inside_jcode_repo)
-                {
-                    subscribe["selfdev"] = json!(true);
-                }
-                if req == "attach_session"
-                    && let Some(target) = request["session_id"].as_str()
-                {
+                if req == "create_session" {
+                    let working_dir =
+                        request["working_dir"]
+                            .as_str()
+                            .map(str::to_string)
+                            .or_else(|| {
+                                std::env::current_dir()
+                                    .ok()
+                                    .map(|d| d.display().to_string())
+                            });
+                    subscribe["working_dir"] = json!(working_dir);
+                    if working_dir
+                        .as_deref()
+                        .is_some_and(Self::path_is_inside_jcode_repo)
+                    {
+                        subscribe["selfdev"] = json!(true);
+                    }
+                } else if let Some(target) = request["session_id"].as_str() {
+                    // The daemon owns both live and persisted session roots.
+                    // Empty panels have no file yet, and a cached disk cwd may
+                    // be older than the live Agent. Never override either with
+                    // the bridge's process cwd just to bootstrap attachment.
                     subscribe["target_session_id"] = json!(target);
                 }
                 // The daemon assigns the session during subscribe but reports
@@ -450,12 +502,19 @@ impl BridgeState {
             "soft_interrupt" => {
                 let id = self.legacy_id();
                 self.pending_simple.push((id, api_id, SimpleKind::Ok));
-                vec![Outbound::Legacy(json!({
+                self.pending_soft_interrupt_ids.push(id);
+                let mut interrupt = json!({
                     "type": "soft_interrupt",
                     "id": id,
                     "content": request["content"].as_str().unwrap_or(""),
                     "urgent": request["urgent"].as_bool().unwrap_or(false),
-                }))]
+                });
+                if let Some(images) = request["images"].as_array()
+                    && !images.is_empty()
+                {
+                    interrupt["images"] = json!(images);
+                }
+                vec![Outbound::Legacy(interrupt)]
             }
             "clear" => {
                 let id = self.legacy_id();
@@ -628,7 +687,7 @@ impl BridgeState {
                 // same breath as attaching can beat it. Returning an empty
                 // list would look like "no models exist", so ask the daemon
                 // and answer when the catalog lands.
-                if self.available_models.is_empty() {
+                if !self.model_catalog_loaded {
                     let id = self.legacy_id();
                     self.pending_simple.push((id, api_id, SimpleKind::Models));
                     return vec![Outbound::Legacy(
@@ -644,16 +703,20 @@ impl BridgeState {
                     },
                 ))]
             }
-            "get_runtime_info" => vec![Outbound::Reply(ServerFrame::reply(
-                api_id,
-                ApiEvent::RuntimeInfo {
-                    session_id: self.session_id.clone().unwrap_or_default(),
-                    provider: self.current_provider.clone(),
-                    model: self.current_model.clone(),
-                    reasoning_effort: self.current_effort.clone(),
-                    routes: self.available_routes.clone(),
-                },
-            ))],
+            "get_runtime_info" => {
+                if !self.model_catalog_loaded {
+                    let id = self.legacy_id();
+                    self.pending_simple
+                        .push((id, api_id, SimpleKind::RuntimeInfo));
+                    return vec![Outbound::Legacy(
+                        json!({"type": "get_model_catalog", "id": id}),
+                    )];
+                }
+                vec![Outbound::Reply(ServerFrame::reply(
+                    api_id,
+                    self.runtime_info(),
+                ))]
+            }
             "set_api_key" | "clear_api_key" => {
                 let provider = request["provider"].as_str().unwrap_or_default();
                 let Some((provider, env_keys, file_name)) = Self::credential_binding(provider)
@@ -885,6 +948,14 @@ impl BridgeState {
     pub fn legacy_event_to_api(&mut self, event: &Value) -> Vec<ServerFrame> {
         let kind = event["type"].as_str().unwrap_or("");
         let session = |state: &Self| state.session_id.clone().unwrap_or_default();
+        if matches!(
+            kind,
+            "text_delta" | "reasoning_delta" | "tool_start" | "tool_exec"
+        ) || (kind == "connection_phase" && event["phase"] == "streaming")
+        {
+            self.observed_turn_active = true;
+            self.activity_version += 1;
+        }
         match kind {
             "session" => {
                 let session_id = event["session_id"].as_str().unwrap_or("").to_string();
@@ -911,16 +982,35 @@ impl BridgeState {
                 {
                     let api_id = *api_id;
                     self.pending_attach_id = None;
+                    self.pending_attach_subscribe_id = None;
                     // `state` snapshots can also be broadcast for other live
                     // sessions. Only the reply correlated with this connection's
                     // attach request establishes its identity. Otherwise opening
                     // a second panel can retarget the first panel's bridge and
                     // make its next command fail with a wrong-session error.
                     if !session_id.is_empty() {
+                        if self
+                            .session_id
+                            .as_ref()
+                            .is_some_and(|old| old != &session_id)
+                        {
+                            self.available_models.clear();
+                            self.available_routes.clear();
+                            self.current_model = None;
+                            self.current_provider = None;
+                            self.current_effort = None;
+                            self.model_catalog_loaded = false;
+                        }
                         self.session_id = Some(session_id.clone());
                     }
+                    let fresh_activity =
+                        self.pending_activity_snapshots.remove(&id) == Some(self.activity_version);
+                    if fresh_activity {
+                        self.observed_turn_active =
+                            event["is_processing"].as_bool().unwrap_or(false);
+                    }
                     let metadata = Self::resolve_session_metadata(&session_id);
-                    return vec![ServerFrame::reply(
+                    let mut frames = vec![ServerFrame::reply(
                         api_id,
                         ApiEvent::Attached {
                             session: SessionInfo {
@@ -936,7 +1026,7 @@ impl BridgeState {
                                 last_active_at_ms: metadata
                                     .as_ref()
                                     .and_then(|value| value.last_active_at_ms),
-                                session_id,
+                                session_id: session_id.clone(),
                                 working_dir: metadata
                                     .as_ref()
                                     .and_then(|metadata| metadata.working_dir.clone()),
@@ -953,6 +1043,18 @@ impl BridgeState {
                             },
                         },
                     )];
+                    if fresh_activity {
+                        frames.push(ServerFrame::event(ApiEvent::SessionStatus {
+                            session_id,
+                            status: if self.observed_turn_active {
+                                "running"
+                            } else {
+                                "idle"
+                            }
+                            .into(),
+                        }));
+                    }
+                    return frames;
                 }
                 vec![]
             }
@@ -1009,16 +1111,35 @@ impl BridgeState {
             })],
             "done" => {
                 let id = event["id"].as_u64().unwrap_or(0);
-                // Subscribe and other requests also emit `done`; only a
-                // completed `message` is a turn boundary.
-                if self.pending_message_id == Some(id) {
+                // Subscribe and controls also emit `done`. Exclude their ids,
+                // but retain session-scoped completions fanned out by another
+                // attachment or a server-initiated turn (whose id is zero).
+                let completed_message = self.pending_message_id == Some(id);
+                let completed_idle_interrupt = self.pending_soft_interrupt_ids.contains(&id);
+                let control_done = self.pending_control_done_ids.remove(&id);
+                let observed_done =
+                    self.observed_turn_active && !control_done && self.session_id.is_some();
+                if completed_message || completed_idle_interrupt || observed_done {
+                    self.observed_turn_active = false;
+                    self.activity_version += 1;
                     self.pending_message_id = None;
+                    // Any other retained soft interrupts were queued into the
+                    // turn which just ended. Their ids will not emit `done`.
+                    self.pending_soft_interrupt_ids.clear();
                     vec![ServerFrame::event(ApiEvent::TurnDone {
                         session_id: session(self),
                     })]
                 } else {
                     vec![]
                 }
+            }
+            "interrupted" => {
+                self.activity_version += 1;
+                self.observed_turn_active = false;
+                vec![ServerFrame::event(ApiEvent::SessionStatus {
+                    session_id: session(self),
+                    status: "cancelled".into(),
+                })]
             }
             "wake_requested" => vec![ServerFrame::event(ApiEvent::WakeRequested {
                 session_id: event["session_id"]
@@ -1099,7 +1220,10 @@ impl BridgeState {
                 if self.pending_model_probe == Some(id) {
                     self.pending_model_probe = None;
                     self.note_models(event);
-                    return vec![ServerFrame::event(self.model_info(session(self), event))];
+                    return vec![
+                        ServerFrame::event(self.model_info(session(self), event)),
+                        ServerFrame::event(self.runtime_info()),
+                    ];
                 }
                 // A `list_models` that arrived before the catalog did: the
                 // client asked too early, so answer it now that it is here.
@@ -1113,6 +1237,10 @@ impl BridgeState {
                             current: self.current_model.clone(),
                         },
                     )];
+                }
+                if let Some(api_id) = self.take_simple(id, SimpleKind::RuntimeInfo) {
+                    self.note_models(event);
+                    return vec![ServerFrame::reply(api_id, self.runtime_info())];
                 }
                 let Some(api_id) = self.take_simple(id, SimpleKind::History) else {
                     return vec![];
@@ -1130,14 +1258,27 @@ impl BridgeState {
                     })
                     .unwrap_or_default();
                 let images = serde_json::from_value(event["images"].clone()).unwrap_or_default();
-                vec![ServerFrame::reply(
+                let mut frames = vec![ServerFrame::reply(
                     api_id,
                     ApiEvent::History {
                         session_id: session(self),
                         messages,
                         images,
                     },
-                )]
+                )];
+                // A snapshot requested before newer stream/terminal events must
+                // not resurrect a completed turn or stop a newly started one.
+                let fresh_activity =
+                    self.pending_activity_snapshots.remove(&id) == Some(self.activity_version);
+                if fresh_activity && let Some(active) = event["activity"]["is_processing"].as_bool()
+                {
+                    self.observed_turn_active = active;
+                    frames.push(ServerFrame::event(ApiEvent::SessionStatus {
+                        session_id: session(self),
+                        status: if active { "running" } else { "idle" }.into(),
+                    }));
+                }
+                frames
             }
             // The model can change mid-session (`/model`, a cycle, or an auth
             // change re-resolving the route), so both pushes are forwarded.
@@ -1162,12 +1303,12 @@ impl BridgeState {
                     self.current_model = Some(model.to_string());
                 }
                 if let Some(provider) = event["provider_name"].as_str() {
-                    self.current_provider = Some(provider.to_string());
+                    self.note_provider(provider);
                 }
                 let info = ApiEvent::ModelInfo {
                     session_id: session(self),
-                    provider: event["provider_name"].as_str().map(str::to_string),
-                    model: event["model"].as_str().map(str::to_string),
+                    provider: self.current_provider.clone(),
+                    model: self.current_model.clone(),
                     reasoning_effort: self.current_effort.clone(),
                 };
                 // Both a reply and a broadcast: the caller needs its request
@@ -1259,7 +1400,10 @@ impl BridgeState {
             }
             "available_models_updated" => {
                 self.note_models(event);
-                vec![ServerFrame::event(self.model_info(session(self), event))]
+                vec![
+                    ServerFrame::event(self.model_info(session(self), event)),
+                    ServerFrame::event(self.runtime_info()),
+                ]
             }
             // Background-task traffic reaches clients as a notification whose
             // body is the markdown the TUI renders. The API refuses to make
@@ -1315,7 +1459,33 @@ impl BridgeState {
                 }
             }
             "error" => {
+                self.activity_version += 1;
+                self.observed_turn_active = false;
                 let id = event["id"].as_u64().unwrap_or(0);
+                self.pending_control_done_ids.remove(&id);
+                self.pending_activity_snapshots.remove(&id);
+                if let Some((state_id, api_id, target)) = self.pending_attach_id.as_ref()
+                    && (self.pending_attach_subscribe_id == Some(id) || *state_id == id)
+                {
+                    let api_id = *api_id;
+                    let code = if target.is_some() {
+                        ErrorCode::UnknownSession
+                    } else {
+                        ErrorCode::Internal
+                    };
+                    self.pending_attach_id = None;
+                    self.pending_attach_subscribe_id = None;
+                    self.pending_model_probe = None;
+                    return vec![ServerFrame::reply(
+                        api_id,
+                        ApiEvent::Error {
+                            code,
+                            message: event["message"].as_str().unwrap_or_default().to_string(),
+                        },
+                    )];
+                }
+                self.pending_soft_interrupt_ids
+                    .retain(|pending_id| *pending_id != id);
                 let message = event["message"].as_str().unwrap_or("").to_string();
                 // A turn that fails ends with `error` *instead of* `done`, so
                 // the turn is over: forget the pending message, or a later
@@ -1368,23 +1538,22 @@ impl BridgeState {
     /// The daemon reports models on attach and on every change; caching here
     /// is what lets `list_models` answer without a round trip.
     fn note_models(&mut self, event: &Value) {
+        self.model_catalog_loaded = true;
         if let Some(models) = event["available_models"].as_array() {
             let names: Vec<String> = models
                 .iter()
                 .filter_map(|value| value.as_str().map(str::to_string))
                 .collect();
-            if !names.is_empty() {
-                self.available_models = names;
-            }
+            self.available_models = names;
         }
         if let Some(model) = event["provider_model"].as_str() {
             self.current_model = Some(model.to_string());
         }
         if let Some(provider) = event["provider_name"].as_str() {
-            self.current_provider = Some(provider.to_string());
+            self.note_provider(provider);
         }
-        if let Some(effort) = event["reasoning_effort"].as_str() {
-            self.current_effort = Some(effort.to_string());
+        if event.get("reasoning_effort").is_some() {
+            self.current_effort = event["reasoning_effort"].as_str().map(str::to_string);
         }
         if let Some(routes) = event["available_model_routes"].as_array() {
             self.available_routes = routes
@@ -1399,6 +1568,25 @@ impl BridgeState {
                     })
                 })
                 .collect();
+        }
+    }
+
+    fn note_provider(&mut self, provider: &str) {
+        if self.current_provider.as_deref() != Some(provider) {
+            // Effort is provider-specific. ModelChanged and auth pushes can
+            // omit it, so never carry the previous provider's setting across.
+            self.current_effort = None;
+        }
+        self.current_provider = Some(provider.to_string());
+    }
+
+    fn runtime_info(&self) -> ApiEvent {
+        ApiEvent::RuntimeInfo {
+            session_id: self.session_id.clone().unwrap_or_default(),
+            provider: self.current_provider.clone(),
+            model: self.current_model.clone(),
+            reasoning_effort: self.current_effort.clone(),
+            routes: self.available_routes.clone(),
         }
     }
 

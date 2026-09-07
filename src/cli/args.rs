@@ -43,6 +43,18 @@ pub(crate) struct Args {
     #[arg(long, global = true)]
     pub(crate) remote_working_dir: Option<String>,
 
+    /// Run the UI locally and attach to the persistent Jcode server on this SSH host
+    #[arg(long, global = true, conflicts_with = "socket", value_name = "HOST")]
+    pub(crate) ssh: Option<String>,
+
+    /// Remote Jcode executable name or literal path (requires --ssh)
+    #[arg(long, global = true, requires = "ssh", value_name = "PATH")]
+    pub(crate) ssh_binary: Option<String>,
+
+    /// Remote daemon socket override, for isolated servers (requires --ssh)
+    #[arg(long, global = true, requires = "ssh", value_name = "PATH")]
+    pub(crate) ssh_server_socket: Option<String>,
+
     /// Skip the automatic update check
     #[arg(long, global = true)]
     pub(crate) no_update: bool,
@@ -195,7 +207,7 @@ pub(crate) enum Command {
         #[arg(long, short = 'a')]
         account: Option<String>,
 
-        /// Do not try to open a browser locally. Useful over SSH or on headless machines.
+        /// Do not open a local browser. Show a login QR for another device (useful over SSH).
         #[arg(long, alias = "headless")]
         no_browser: bool,
 
@@ -218,6 +230,14 @@ pub(crate) enum Command {
         /// Resume a pending scriptable login flow that does not require callback/code input.
         #[arg(long, conflicts_with_all = ["print_auth_url", "callback_url", "auth_code"])]
         complete: bool,
+
+        /// Isolate temporary login state using 1-64 ASCII letters, digits, underscores or hyphens.
+        #[arg(long, value_parser = super::login::parse_login_flow_id)]
+        flow_id: Option<String>,
+
+        /// Cancel only this provider's pending flow. Does not remove saved credentials.
+        #[arg(long, requires = "flow_id", conflicts_with_all = ["print_auth_url", "callback_url", "auth_code", "complete", "account", "api_base", "api_key", "api_key_env"])]
+        cancel: bool,
 
         /// Save credentials without running the post-login live provider validation.
         /// Useful for offline setup, CI, or when entering credentials before network access is available.
@@ -564,6 +584,11 @@ pub(crate) enum Command {
         /// both ends of the bridge at the same path.
         #[arg(long = "api-socket")]
         api_socket: Option<String>,
+
+        /// Serve one API connection on stdin/stdout (for SSH SDK clients).
+        /// Starts the shared daemon if needed; does not create an API socket.
+        #[arg(long, conflicts_with = "api_socket")]
+        stdio: bool,
     },
 }
 
@@ -603,6 +628,11 @@ pub(crate) enum AccountCommand {
 
 #[derive(Subcommand, Debug)]
 pub(crate) enum ServerCommand {
+    /// Internal native client protocol bridge over stdin/stdout (for SSH attach)
+    #[cfg(unix)]
+    #[command(hide = true)]
+    Stdio,
+
     /// Start the background server if it is not already running.
     Start {
         /// Emit JSON instead of human-readable text
@@ -1018,6 +1048,16 @@ pub(crate) enum ProviderCommand {
 
 #[derive(Subcommand, Debug)]
 pub(crate) enum AuthCommand {
+    /// Import one selected OAuth login from a trusted client (never overwrites a store)
+    Import {
+        /// Read the private credential envelope from stdin, never from command arguments
+        #[arg(long, required = true)]
+        stdin: bool,
+
+        /// Emit a secret-free JSON acknowledgement
+        #[arg(long)]
+        json: bool,
+    },
     /// Show configured authentication status for model/tool providers
     Status {
         /// Emit JSON instead of plain text

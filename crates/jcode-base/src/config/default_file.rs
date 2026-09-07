@@ -429,9 +429,16 @@ wake_mode = "internal"
 #
 # Default model for spawned swarm/subagent sessions.
 # Leave unset (or "inherit"/"coordinator") so workers inherit the model of the
-# session that spawned them. Set a concrete model only to pin every worker to it.
+# session that spawned them. Set a concrete model to change the worker default.
+# An explicit `model` in the swarm tool overrides this default for new workers.
 # Env override: JCODE_SWARM_MODEL
 # swarm_model = "inherit"
+#
+# Default reasoning effort for spawned swarm workers when the spawn call does
+# not pass an explicit `effort` ("low", "medium", "high", ...). Leave unset so
+# workers inherit the provider-wide reasoning effort.
+# Env override: JCODE_SWARM_EFFORT
+# swarm_effort = "medium"
 #
 # How swarm-created agents are spawned:
 #   "inline"   - in-process (no window), shown as a live gallery viewport in the coordinator (default)

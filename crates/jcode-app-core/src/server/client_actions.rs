@@ -655,8 +655,23 @@ pub(super) async fn handle_trigger_memory_extraction(
     let _ = client_event_tx.send(ServerEvent::Done { id });
 }
 
-fn clone_split_session(parent_session_id: &str) -> anyhow::Result<(String, String)> {
-    let parent = Session::load(parent_session_id)?;
+fn clone_split_session(
+    parent_session_id: &str,
+    live_parent: Option<&Session>,
+) -> anyhow::Result<(String, String)> {
+    // Keep the persisted snapshot authoritative, including while the parent is
+    // busy. A brand-new Agent may not have saved anything yet, however. Only a
+    // missing snapshot permits an in-memory fallback, never corrupt/unreadable
+    // history or a session belonging to a different client.
+    let parent = Session::load(parent_session_id).or_else(|error| {
+        let missing = error
+            .downcast_ref::<std::io::Error>()
+            .is_some_and(|error| error.kind() == std::io::ErrorKind::NotFound);
+        match live_parent.filter(|parent| missing && parent.id == parent_session_id) {
+            Some(parent) => Ok(parent.clone()),
+            None => Err(error),
+        }
+    })?;
 
     let mut child = Session::create(Some(parent_session_id.to_string()), None);
     child.replace_messages(parent.messages.clone());
@@ -715,6 +730,7 @@ fn create_transfer_child_session(
 pub(super) async fn handle_split(
     id: u64,
     client_session_id: &str,
+    agent: &Arc<Mutex<Agent>>,
     client_event_tx: &mpsc::UnboundedSender<ServerEvent>,
 ) {
     let started = Instant::now();
@@ -726,7 +742,16 @@ pub(super) async fn handle_split(
             ("session_id", client_session_id.to_string()),
         ],
     );
-    let (new_session_id, new_session_name) = match clone_split_session(client_session_id) {
+    // Splitting must remain available during a streaming turn. Never await the
+    // Agent lock: busy sessions can still fork their last persisted snapshot.
+    let result = {
+        let idle_agent = agent.try_lock().ok();
+        clone_split_session(
+            client_session_id,
+            idle_agent.as_ref().map(|agent| agent.session_for_split()),
+        )
+    };
+    let (new_session_id, new_session_name) = match result {
         Ok(result) => result,
         Err(e) => {
             crate::logging::event_warn(
@@ -954,7 +979,8 @@ pub(super) async fn handle_resume_all_sessions(
         };
 
         // Only act on idle sessions; a busy session is already making progress.
-        let Ok(agent_guard) = agent.try_lock() else {
+        // The owned guard doubles as the turn reservation (#1152).
+        let Ok(agent_guard) = Arc::clone(&agent).try_lock_owned() else {
             skipped += 1;
             continue;
         };
@@ -973,7 +999,6 @@ pub(super) async fn handle_resume_all_sessions(
             .session_short_name()
             .map(str::to_string)
             .unwrap_or_else(|| session_id[..8.min(session_id.len())].to_string());
-        drop(agent_guard);
 
         // Best-effort: record that the durable recovery intent was delivered.
         if let Err(error) = super::reload_recovery::mark_delivered_if_matching_continuation(
@@ -989,7 +1014,7 @@ pub(super) async fn handle_resume_all_sessions(
 
         super::live_turn::spawn_tracked_live_turn(
             &session_id,
-            Arc::clone(&agent),
+            agent_guard,
             String::new(),
             Some(reminder),
             None,

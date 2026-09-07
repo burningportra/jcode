@@ -113,6 +113,7 @@ pub(super) fn disable_auto_poke(app: &mut App) -> usize {
     app.todo_confidence_spike_challenged = false;
     app.todo_completion_gate_attempts = 0;
     app.last_auto_poke_fingerprint = None;
+    app.last_todo_ownership_fingerprint = None;
     app.todo_gate_digest_delivered = false;
     cleared
 }
@@ -245,6 +246,7 @@ pub(super) fn activate_auto_poke(app: &mut App) -> PokeActivation {
     app.todo_confidence_spike_challenged = false;
     app.todo_completion_gate_attempts = 0;
     app.last_auto_poke_fingerprint = None;
+    app.last_todo_ownership_fingerprint = None;
     // Re-arming starts a fresh review cycle, so the deferred quality digest is
     // eligible to be delivered again for the upcoming work.
     app.todo_gate_digest_delivered = false;
@@ -1353,8 +1355,18 @@ fn handle_fork_command(app: &mut App, trimmed: &str) -> bool {
 /// as the first message of the forked session. Shared by `/btw <question>`,
 /// `/fork [prompt]`, and `/split`.
 pub(super) fn fork_session_with_prompt_local(app: &mut App, prompt: Option<&str>) {
-    let staged = prompt.map(|prompt| (prompt.to_string(), Vec::new()));
+    // Images attached to the input belong to the prompt being forked off, so
+    // they travel with it instead of lingering on the parent's next message.
+    let images = if prompt.is_some() {
+        std::mem::take(&mut app.pending_images)
+    } else {
+        Vec::new()
+    };
+    let staged = prompt.map(|prompt| (prompt.to_string(), images.clone()));
     if let Err(error) = launch_forked_session_local(app, staged) {
+        if !images.is_empty() {
+            app.pending_images = images;
+        }
         app.push_display_message(DisplayMessage::error(format!(
             "Failed to fork session: {}",
             error

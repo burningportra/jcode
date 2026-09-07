@@ -430,6 +430,37 @@ fn apply_kimi_coding_agent_headers(
     }
 }
 
+/// Hosts that require the `x-opencode-session` header (issue #1167).
+fn is_opencode_api_base(api_base: &str) -> bool {
+    let Ok(url) = reqwest::Url::parse(api_base) else {
+        return false;
+    };
+    matches!(
+        url.host_str(),
+        Some(host) if host == "opencode.ai" || host.ends_with(".opencode.ai")
+    )
+}
+
+pub(crate) fn new_conversation_id() -> String {
+    uuid::Uuid::new_v4().to_string()
+}
+
+/// OpenCode Go/Zen require a stable per-conversation `x-opencode-session`
+/// header on inference requests (rejected from 2026-09-05 without it).
+fn apply_opencode_session_header(
+    req: reqwest::RequestBuilder,
+    api_base: &str,
+    conversation_id: &str,
+) -> reqwest::RequestBuilder {
+    if is_opencode_api_base(api_base) {
+        req.header(OPENCODE_SESSION_HEADER, conversation_id)
+    } else {
+        req
+    }
+}
+
+pub(crate) const OPENCODE_SESSION_HEADER: &str = "x-opencode-session";
+
 #[derive(Debug, Clone)]
 enum ProviderAuth {
     AuthorizationBearer {
@@ -905,6 +936,10 @@ pub struct OpenRouterProvider {
     /// Missing entries mean unspecified and preserve the provider-level fallback.
     static_image_input_support: HashMap<String, bool>,
     send_openrouter_headers: bool,
+    /// Stable per-conversation identifier sent as `x-opencode-session` to
+    /// OpenCode (Zen / Go) endpoints, which require it for routing (issue #1167).
+    /// Each provider instance (and each `fork()`) gets a fresh UUID.
+    conversation_id: String,
     models_cache: Arc<RwLock<ModelsCache>>,
     model_catalog_refresh: Arc<Mutex<ModelCatalogRefreshState>>,
     /// Provider routing preferences
@@ -1451,6 +1486,7 @@ impl OpenRouterProvider {
             static_context_limits,
             static_image_input_support,
             send_openrouter_headers: false,
+            conversation_id: new_conversation_id(),
             models_cache: Arc::new(RwLock::new(ModelsCache::default())),
             model_catalog_refresh: Arc::new(Mutex::new(ModelCatalogRefreshState::default())),
             provider_routing: Arc::new(RwLock::new(ProviderRouting::default())),
@@ -1656,6 +1692,7 @@ impl OpenRouterProvider {
             static_context_limits,
             static_image_input_support: HashMap::new(),
             send_openrouter_headers,
+            conversation_id: new_conversation_id(),
             models_cache: Arc::new(RwLock::new(ModelsCache::default())),
             model_catalog_refresh: Arc::new(Mutex::new(ModelCatalogRefreshState::default())),
             provider_routing: Arc::new(RwLock::new(provider_routing)),
@@ -1699,6 +1736,7 @@ impl OpenRouterProvider {
             static_context_limits: HashMap::new(),
             static_image_input_support: HashMap::new(),
             send_openrouter_headers: true,
+            conversation_id: new_conversation_id(),
             models_cache: Arc::new(RwLock::new(ModelsCache::default())),
             model_catalog_refresh: Arc::new(Mutex::new(ModelCatalogRefreshState::default())),
             provider_routing: Arc::new(RwLock::new(Self::parse_provider_routing())),
@@ -1770,6 +1808,7 @@ impl OpenRouterProvider {
             static_context_limits,
             static_image_input_support: HashMap::new(),
             send_openrouter_headers: false,
+            conversation_id: new_conversation_id(),
             models_cache: Arc::new(RwLock::new(ModelsCache::default())),
             model_catalog_refresh: Arc::new(Mutex::new(ModelCatalogRefreshState::default())),
             provider_routing: Arc::new(RwLock::new(ProviderRouting::default())),
@@ -2026,6 +2065,7 @@ impl OpenRouterProvider {
                 static_context_limits: HashMap::new(),
                 static_image_input_support: HashMap::new(),
                 send_openrouter_headers: true,
+                conversation_id: new_conversation_id(),
                 models_cache: Arc::new(RwLock::new(ModelsCache::default())),
                 model_catalog_refresh: Arc::new(Mutex::new(ModelCatalogRefreshState::default())),
                 provider_routing: Arc::new(RwLock::new(ProviderRouting::default())),

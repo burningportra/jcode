@@ -89,6 +89,7 @@ impl Client {
             client_has_local_history,
             allow_session_takeover,
             crash_on_disconnect: false,
+            continue_on_disconnect: false,
             terminal_env: crate::terminal_launch::snapshot_client_terminal_env(),
             prompt_suggestions: false,
             prompt_suggestion_generation: None,
@@ -126,7 +127,7 @@ impl Client {
             let event: ServerEvent = serde_json::from_str(&line)?;
 
             match event {
-                ServerEvent::Pong { id: pong_id } => return Ok(pong_id == id),
+                ServerEvent::Pong { id: pong_id, .. } => return Ok(pong_id == id),
                 ServerEvent::Ack { id: ack_id } if ack_id == id => continue,
                 ServerEvent::Error { id: error_id, .. } if error_id == id => return Ok(false),
                 _ => return Ok(false),

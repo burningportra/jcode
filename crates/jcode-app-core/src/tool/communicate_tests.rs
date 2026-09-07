@@ -981,13 +981,20 @@ fn schema_still_requires_action() {
 }
 
 #[test]
-fn schema_omits_model_override_and_advertises_effort() {
+fn schema_advertises_model_and_effort_spawn_overrides() {
     let schema = CommunicateTool::new().parameters_schema();
     let props = schema["properties"]
         .as_object()
         .expect("swarm schema should have properties");
 
-    assert!(!props.contains_key("model"));
+    assert_eq!(props["model"]["type"], json!("string"));
+    assert!(
+        props["model"]["description"]
+            .as_str()
+            .expect("model description")
+            .contains("list_models"),
+        "model param should point at the list_models action"
+    );
     assert!(props.contains_key("effort"));
     assert_eq!(
         props["effort"]["enum"],
@@ -1150,7 +1157,56 @@ fn existing_tool_keeps_prompt_while_new_tool_loads_edit() {
 }
 
 #[test]
-fn format_swarm_model_list_renders_routes_and_pin() {
+fn spawning_action_inputs_preserve_requested_model() {
+    for action in [
+        "spawn",
+        "assign_task",
+        "assign_next",
+        "fill_slots",
+        "run_plan",
+    ] {
+        for model in [
+            "z-ai/glm-5.2:free",
+            "openai-api:gpt-5.5",
+            "inherit",
+            "coordinator",
+            "  ",
+        ] {
+            let input: CommunicateInput = serde_json::from_value(json!({
+                "action": action,
+                "label": "reviewer",
+                "model": model
+            }))
+            .unwrap();
+            assert_eq!(input.model.as_deref(), Some(model));
+        }
+    }
+}
+
+#[test]
+fn spawning_action_inputs_allow_omitted_or_null_model() {
+    for action in [
+        "spawn",
+        "assign_task",
+        "assign_next",
+        "fill_slots",
+        "run_plan",
+    ] {
+        let without_model: CommunicateInput =
+            serde_json::from_value(json!({"action": action, "label": "reviewer"})).unwrap();
+        assert!(without_model.model.is_none());
+        let null_model: CommunicateInput = serde_json::from_value(json!({
+            "action": action,
+            "label": "reviewer",
+            "model": null
+        }))
+        .unwrap();
+        assert!(null_model.model.is_none());
+    }
+}
+
+#[test]
+fn format_swarm_model_list_renders_routes_and_default() {
     let routes = vec![
         jcode_provider_core::ModelRoute {
             model: "gpt-5.5".to_string(),
@@ -1172,7 +1228,7 @@ fn format_swarm_model_list_renders_routes_and_pin() {
     let output =
         format_swarm_model_list(Some("claude-fable-5"), Some("openai-api:gpt-5.5"), &routes);
     assert!(output.contains("Current coordinator model: claude-fable-5"));
-    assert!(output.contains("Configured agents.swarm_model pin: openai-api:gpt-5.5"));
+    assert!(output.contains("Configured agents.swarm_model default: openai-api:gpt-5.5"));
     assert!(output.contains("gpt-5.5 via OpenAI [openai-api-key] (API key)"));
     assert!(output.contains("claude-fable-5 via Anthropic [anthropic-api-key] [unavailable]"));
     assert!(output.contains("effort"));
@@ -1208,7 +1264,8 @@ fn format_swarm_model_list_dedupes_models_across_providers() {
 fn format_swarm_model_list_handles_empty_catalog() {
     let output = format_swarm_model_list(None, None, &[]);
     assert!(output.contains("Current coordinator model: unknown"));
-    assert!(output.contains("No agents.swarm_model pin configured"));
+    assert!(output.contains("No agents.swarm_model default configured"));
+    assert!(output.contains("unless model is passed"));
     assert!(output.contains("No model routes reported"));
 }
 
@@ -1456,6 +1513,7 @@ impl RawClient {
             client_has_local_history: false,
             allow_session_takeover: false,
             crash_on_disconnect: false,
+            continue_on_disconnect: false,
             terminal_env: Vec::new(),
             prompt_suggestions: false,
             prompt_suggestion_generation: None,

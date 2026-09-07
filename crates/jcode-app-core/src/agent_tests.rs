@@ -8,6 +8,12 @@ use async_trait::async_trait;
 use tokio::sync::mpsc as tokio_mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
+#[path = "agent_tests/concurrency.rs"]
+mod concurrency;
+
+#[path = "agent_tests/concurrency_construction.rs"]
+mod concurrency_construction;
+
 struct DelayedProvider {
     open_delay: Duration,
     first_event_delay: Duration,
@@ -87,6 +93,102 @@ fn content_text(content: &[ContentBlock]) -> &str {
 
 fn message_text(message: &Message) -> &str {
     content_text(&message.content)
+}
+
+#[test]
+fn agent_drop_removes_its_configured_session_tool_policy() {
+    let provider: Arc<dyn Provider> = Arc::new(NativeAutoCompactionProvider);
+    let session = Session::create(None, None);
+    let session_id = session.id.clone();
+    let agent = Agent::new_with_session(
+        provider,
+        Registry::empty(),
+        session,
+        Some(HashSet::from(["bash".to_string()])),
+    );
+
+    assert_eq!(
+        crate::tool::session_tool_policy_allows_tool_for_test(&session_id, "bash"),
+        Some(true)
+    );
+    drop(agent);
+    assert_eq!(
+        crate::tool::session_tool_policy_allows_tool_for_test(&session_id, "bash"),
+        None,
+        "dropping the Agent must remove its global policy entry"
+    );
+}
+
+#[test]
+fn stale_agent_drop_preserves_successor_session_tool_policy() {
+    let provider: Arc<dyn Provider> = Arc::new(NativeAutoCompactionProvider);
+    let first_session = Session::create(None, None);
+    let session_id = first_session.id.clone();
+    let first = Agent::new_with_session(
+        provider.clone(),
+        Registry::empty(),
+        first_session,
+        Some(HashSet::from(["bash".to_string()])),
+    );
+    let mut successor_session = Session::create(None, None);
+    successor_session.id.clone_from(&session_id);
+    let successor = Agent::new_with_session(
+        provider,
+        Registry::empty(),
+        successor_session,
+        Some(HashSet::from(["read".to_string()])),
+    );
+
+    drop(first);
+
+    assert_eq!(
+        crate::tool::session_tool_policy_allows_tool_for_test(&session_id, "read"),
+        Some(true),
+        "a stale Agent must not remove its active successor's policy"
+    );
+    assert_eq!(
+        crate::tool::session_tool_policy_allows_tool_for_test(&session_id, "bash"),
+        Some(false),
+        "the surviving entry must be the successor's configured policy"
+    );
+    drop(successor);
+    assert_eq!(
+        crate::tool::session_tool_policy_allows_tool_for_test(&session_id, "read"),
+        None
+    );
+}
+
+#[test]
+fn agent_clear_moves_tool_policy_registration_to_new_session() {
+    let provider: Arc<dyn Provider> = Arc::new(NativeAutoCompactionProvider);
+    let session = Session::create(None, None);
+    let previous_session_id = session.id.clone();
+    let mut agent = Agent::new_with_session(
+        provider,
+        Registry::empty(),
+        session,
+        Some(HashSet::from(["bash".to_string()])),
+    );
+
+    agent.clear();
+    let new_session_id = agent.session.id.clone();
+
+    assert_ne!(previous_session_id, new_session_id);
+    assert_eq!(
+        crate::tool::session_tool_policy_allows_tool_for_test(&previous_session_id, "bash"),
+        None,
+        "changing sessions must remove the former ID's policy"
+    );
+    assert_eq!(
+        crate::tool::session_tool_policy_allows_tool_for_test(&new_session_id, "bash"),
+        Some(true),
+        "the new session must retain the Agent's configured policy"
+    );
+    drop(agent);
+    assert_eq!(
+        crate::tool::session_tool_policy_allows_tool_for_test(&new_session_id, "bash"),
+        None
+    );
 }
 
 #[async_trait]
@@ -178,6 +280,17 @@ impl Provider for NativeCompactionStreamProvider {
     ) -> Result<EventStream> {
         let (tx, rx) = tokio_mpsc::channel::<Result<StreamEvent>>(4);
         tokio::spawn(async move {
+            // Response usage is deliberately far below the provider-reported
+            // pre-compaction size so a regression that relabels usage as
+            // `pre_tokens` is caught (#1178).
+            let _ = tx
+                .send(Ok(StreamEvent::TokenUsage {
+                    input_tokens: Some(24_000),
+                    output_tokens: Some(10),
+                    cache_read_input_tokens: None,
+                    cache_creation_input_tokens: None,
+                }))
+                .await;
             let _ = tx
                 .send(Ok(StreamEvent::Compaction {
                     trigger: "openai_native".to_string(),
@@ -370,7 +483,7 @@ async fn run_turn_streaming_mpsc_emits_keepalive_while_provider_is_quiet() {
     let keepalive_deadline = Instant::now() + Duration::from_secs(20);
     while Instant::now() < keepalive_deadline {
         match tokio::time::timeout(Duration::from_secs(1), rx.recv()).await {
-            Ok(Some(ServerEvent::Pong { id })) => {
+            Ok(Some(ServerEvent::Pong { id, .. })) => {
                 assert_eq!(id, STREAM_KEEPALIVE_PONG_ID);
                 saw_keepalive = true;
                 break;
@@ -399,7 +512,7 @@ async fn run_turn_streaming_mpsc_emits_keepalive_while_provider_is_quiet() {
                 saw_text = true;
                 break;
             }
-            Ok(Some(ServerEvent::Pong { id })) => {
+            Ok(Some(ServerEvent::Pong { id, .. })) => {
                 assert_eq!(id, STREAM_KEEPALIVE_PONG_ID);
             }
             Ok(Some(_)) => {}
@@ -438,11 +551,17 @@ async fn run_turn_streaming_mpsc_emits_native_compaction_for_client_cache_reset(
     while let Ok(event) = rx.try_recv() {
         if let ServerEvent::Compaction {
             trigger,
+            pre_tokens,
             messages_compacted,
             ..
         } = event
         {
             assert_eq!(trigger, "openai_native");
+            assert_eq!(
+                pre_tokens,
+                Some(80_000),
+                "remote compaction must forward the provider's pre-compaction count"
+            );
             assert!(
                 messages_compacted.is_some_and(|count| count > 0),
                 "native compaction should report a non-empty compacted prefix"

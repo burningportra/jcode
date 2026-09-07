@@ -100,9 +100,23 @@ pub struct McpHandle {
     server_info: Arc<std::sync::RwLock<Option<ServerInfo>>>,
     capabilities: Arc<std::sync::RwLock<ServerCapabilities>>,
     tools: Arc<std::sync::RwLock<Vec<McpToolDef>>>,
+    /// Reply timeout applied to every request on this server.
+    request_timeout: std::time::Duration,
     /// Optional HTTP/streamable-http transport. When present, `request` and
     /// `post_notification` use it instead of the stdio writer/reader tasks.
     http: Option<Arc<HttpTransport>>,
+}
+
+/// Default reply timeout when a server config does not set `timeout_secs`.
+pub const DEFAULT_MCP_REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Resolve the per-request reply timeout for a server config.
+pub fn request_timeout_for(config: &McpServerConfig) -> std::time::Duration {
+    config
+        .timeout_secs
+        .filter(|secs| *secs > 0)
+        .map(std::time::Duration::from_secs)
+        .unwrap_or(DEFAULT_MCP_REQUEST_TIMEOUT)
 }
 
 impl McpHandle {
@@ -138,9 +152,15 @@ impl McpHandle {
             .await
             .context("Failed to send request")?;
 
-        let response = tokio::time::timeout(std::time::Duration::from_secs(30), rx)
+        let response = tokio::time::timeout(self.request_timeout, rx)
             .await
-            .context("Request timeout")?
+            .with_context(|| {
+                format!(
+                    "Request timeout after {}s (raise `timeout_secs` for MCP server '{}' if its tools legitimately run longer)",
+                    self.request_timeout.as_secs(),
+                    self.name
+                )
+            })?
             .context("Channel closed")?;
 
         if let Some(err) = &response.error {
@@ -307,6 +327,7 @@ impl McpClient {
             server_info: Arc::new(std::sync::RwLock::new(None)),
             capabilities: Arc::new(std::sync::RwLock::new(ServerCapabilities::default())),
             tools: Arc::new(std::sync::RwLock::new(Vec::new())),
+            request_timeout: request_timeout_for(config),
             http: Some(http),
         };
 
@@ -456,6 +477,7 @@ impl McpClient {
             server_info: Arc::new(std::sync::RwLock::new(None)),
             capabilities: Arc::new(std::sync::RwLock::new(ServerCapabilities::default())),
             tools: Arc::new(std::sync::RwLock::new(Vec::new())),
+            request_timeout: request_timeout_for(config),
             http: None,
         };
 
@@ -712,6 +734,7 @@ done
             headers: std::collections::HashMap::new(),
             enabled: None,
             disabled: None,
+            timeout_secs: None,
         }
     }
 

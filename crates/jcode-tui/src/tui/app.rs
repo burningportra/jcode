@@ -51,6 +51,7 @@ pub enum AppRuntimeMode {
 
 mod auth;
 mod auth_account_picker_saved_accounts;
+mod auth_remote;
 mod catchup;
 mod commands;
 mod commands_colors;
@@ -954,6 +955,9 @@ pub struct App {
     /// has sent. Without a budget, a model that stops updating its todos gets
     /// nudged on every turn forever, silently burning an API call per tick.
     todo_completion_gate_attempts: u8,
+    /// Last session/todo/goal state challenged by the ownership gate. Repeating
+    /// the same check cannot resolve an external blocker or stale assessment.
+    last_todo_ownership_fingerprint: Option<String>,
     /// Whether the clean completion handoff has already requested a user-facing
     /// final response for the current todo cycle.
     todo_final_response_requested: bool,
@@ -1324,6 +1328,8 @@ pub struct App {
     diff_pane_scroll: usize,
     diff_pane_scroll_x: i32,
     side_panel_image_zoom_percent: u8,
+    // Full-screen preview of a clicked panel image. Panel scroll/focus stay intact.
+    panel_image_preview: Option<u64>,
     diff_pane_focus: bool,
     diff_pane_auto_scroll: bool,
     side_panel: crate::side_panel::SidePanelSnapshot,
@@ -1589,6 +1595,8 @@ pub struct App {
     ambient_system_prompt: Option<String>,
     /// Pending login flow: if set, next input is intercepted as OAuth code or API key
     pending_login: Option<PendingLogin>,
+    remote_login: Option<auth_remote::RemoteLogin>,
+    remote_login_onboarding: auth_remote::Onboarding,
     /// Pending account picker follow-up input (new label or setting value)
     pending_account_input: Option<auth::PendingAccountInput>,
     /// Pending SSH remote target prompt. Stores the friendly remote name.

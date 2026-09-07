@@ -103,7 +103,14 @@ pub(super) async fn handle_lightweight_control_request(
         swarm_mutation_runtime,
     } = context;
     if let Request::Ping { id } = request {
-        write_direct_event(&writer, &ServerEvent::Pong { id }).await?;
+        write_direct_event(
+            &writer,
+            &ServerEvent::Pong {
+                id,
+                native_ssh_protocol: Some(1),
+            },
+        )
+        .await?;
         return Ok(());
     }
 
@@ -408,6 +415,7 @@ pub(super) async fn handle_lightweight_control_request(
             initial_message,
             request_nonce,
             spawn_mode,
+            model,
             effort,
             label,
         } => {
@@ -422,6 +430,7 @@ pub(super) async fn handle_lightweight_control_request(
                 initial_message,
                 request_nonce,
                 spawn_mode,
+                model,
                 effort,
                 label,
                 &client_event_tx,
@@ -658,6 +667,7 @@ pub(super) async fn handle_lightweight_control_request(
             prefer_spawn,
             spawn_if_needed,
             message,
+            model,
             effort,
         } => {
             handle_comm_assign_next(
@@ -668,6 +678,7 @@ pub(super) async fn handle_lightweight_control_request(
                 prefer_spawn,
                 spawn_if_needed,
                 message,
+                model,
                 effort,
                 &client_event_tx,
                 sessions,

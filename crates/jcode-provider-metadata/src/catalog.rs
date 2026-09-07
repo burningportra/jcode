@@ -341,6 +341,17 @@ pub const FIREWORKS_PROFILE: OpenAiCompatibleProfile = OpenAiCompatibleProfile {
     requires_api_key: true,
 };
 
+pub const NOVITA_PROFILE: OpenAiCompatibleProfile = OpenAiCompatibleProfile {
+    id: "novita",
+    display_name: "Novita AI",
+    api_base: "https://api.novita.ai/openai",
+    api_key_env: "NOVITA_API_KEY",
+    env_file: "novita.env",
+    setup_url: "https://novita.ai/settings/key-management",
+    default_model: Some("zai-org/glm-5.3"),
+    requires_api_key: true,
+};
+
 pub const MINIMAX_PROFILE: OpenAiCompatibleProfile = OpenAiCompatibleProfile {
     id: "minimax",
     display_name: "MiniMax",
@@ -541,6 +552,7 @@ pub(crate) const OPENAI_COMPAT_PROFILES: &[OpenAiCompatibleProfile] = &[
     TOGETHER_AI_PROFILE,
     DEEPINFRA_PROFILE,
     FIREWORKS_PROFILE,
+    NOVITA_PROFILE,
     MINIMAX_PROFILE,
     XAI_PROFILE,
     NVIDIA_NIM_PROFILE,
@@ -1058,6 +1070,19 @@ pub const FIREWORKS_LOGIN_PROVIDER: LoginProviderDescriptor = LoginProviderDescr
     order: LoginProviderSurfaceOrder::new(Some(37), Some(37), Some(37), Some(37), Some(37)),
 };
 
+pub const NOVITA_LOGIN_PROVIDER: LoginProviderDescriptor = LoginProviderDescriptor {
+    id: "novita",
+    display_name: "Novita AI",
+    auth_kind: LoginProviderAuthKind::ApiKey,
+    auth_state_key: LoginProviderAuthStateKey::OpenRouterLike,
+    auth_status_method: "API key",
+    aliases: &["novita-ai", "novita.ai"],
+    menu_detail: "Pay-as-you-go API key",
+    recommended: false,
+    target: LoginProviderTarget::OpenAiCompatible(NOVITA_PROFILE),
+    order: LoginProviderSurfaceOrder::new(Some(39), Some(39), Some(39), Some(39), Some(39)),
+};
+
 pub const MINIMAX_LOGIN_PROVIDER: LoginProviderDescriptor = LoginProviderDescriptor {
     id: "minimax",
     display_name: "MiniMax",
@@ -1342,6 +1367,7 @@ pub(crate) const LOGIN_PROVIDERS: &[LoginProviderDescriptor] = &[
     TOGETHER_AI_LOGIN_PROVIDER,
     DEEPINFRA_LOGIN_PROVIDER,
     FIREWORKS_LOGIN_PROVIDER,
+    NOVITA_LOGIN_PROVIDER,
     MINIMAX_LOGIN_PROVIDER,
     XAI_LOGIN_PROVIDER,
     GROK_BUILD_LOGIN_PROVIDER,

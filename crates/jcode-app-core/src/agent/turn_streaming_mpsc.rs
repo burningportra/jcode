@@ -120,6 +120,14 @@ impl Agent {
                     repaired
                 ));
             }
+            // Start provider transport setup before deriving and potentially
+            // compacting the request history. This is the first point where the
+            // stable request settings are available.
+            let mut tools = self.tool_definitions().await;
+            let mut split_prompt = self.build_system_prompt_split(None);
+            self.provider
+                .prewarm(&tools, &split_prompt.static_part)
+                .await;
             let (messages, compaction_event) = self.messages_for_provider();
             if let Some(event) = compaction_event {
                 // Reset cache tracker and tool lock on compaction since the message history changes
@@ -139,14 +147,17 @@ impl Agent {
                     post_tokens: event.post_tokens,
                     tokens_saved: event.tokens_saved,
                     duration_ms: event.duration_ms,
-                    messages_dropped: None,
+                    messages_dropped: event.messages_dropped,
                     messages_compacted: event.messages_compacted,
                     summary_chars: event.summary_chars,
                     active_messages: event.active_messages,
                 });
+                // Compaction clears the tool lock, so rebuild the foreground
+                // request metadata rather than relying on the pre-compaction snapshot.
+                tools = self.tool_definitions().await;
+                split_prompt = self.build_system_prompt_split(None);
             }
 
-            let tools = self.tool_definitions().await;
             let messages: std::sync::Arc<[Message]> = messages.into();
             // Non-blocking memory: uses pending result from last turn, spawns check for next turn
             let memory_pending = self.build_memory_prompt_nonblocking_shared(
@@ -159,7 +170,6 @@ impl Agent {
                 })),
             );
             // Use split prompt for better caching - static content cached, dynamic not
-            let split_prompt = self.build_system_prompt_split(None);
             self.log_prompt_prefix_accounting(&split_prompt, &tools);
 
             // Check for client-side cache violations before memory injection.
@@ -363,7 +373,7 @@ impl Agent {
             // to clients as a keepalive; throttles issue #451 keepalives.
             let mut hidden_activity_last = Instant::now();
             let mut openai_reasoning_items: Vec<ContentBlock> = Vec::new();
-            let mut openai_native_compaction: Option<(String, usize)> = None;
+            let mut openai_native_compaction: Option<(String, usize, Option<u64>)> = None;
             let mut tool_id_to_name: std::collections::HashMap<String, String> =
                 std::collections::HashMap::new();
 
@@ -817,12 +827,16 @@ impl Agent {
                         }
                     }
                     StreamEvent::Compaction {
+                        pre_tokens,
                         openai_encrypted_content,
                         ..
                     } => {
                         if let Some(encrypted_content) = openai_encrypted_content {
-                            openai_native_compaction
-                                .get_or_insert((encrypted_content, self.session.messages.len()));
+                            openai_native_compaction.get_or_insert((
+                                encrypted_content,
+                                self.session.messages.len(),
+                                pre_tokens,
+                            ));
                         }
                     }
                     StreamEvent::NativeToolCall {
@@ -1103,7 +1117,9 @@ impl Agent {
                 None
             };
 
-            if let Some((encrypted_content, compacted_count)) = openai_native_compaction.take() {
+            if let Some((encrypted_content, compacted_count, native_pre_tokens)) =
+                openai_native_compaction.take()
+            {
                 self.apply_openai_native_compaction(encrypted_content, compacted_count)?;
                 // Native OpenAI compaction is applied after the provider stream,
                 // so `messages_for_provider()` did not have an event to emit at
@@ -1111,9 +1127,13 @@ impl Agent {
                 // tool-driven continuation can enqueue its next KvCacheRequest.
                 // The FIFO event ordering lets the TUI invalidate its old
                 // append-only baseline before seeing the compacted signature.
+                //
+                // Only a provider-supplied pre-compaction count is trustworthy
+                // here. The response's own input usage is not the pre-compaction
+                // context size, so omit the value rather than mislabel it (#1178).
                 let _ = event_tx.send(ServerEvent::Compaction {
                     trigger: "openai_native".to_string(),
-                    pre_tokens: usage_input,
+                    pre_tokens: native_pre_tokens,
                     post_tokens: None,
                     tokens_saved: None,
                     duration_ms: None,

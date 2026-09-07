@@ -16,6 +16,22 @@ fn sync_output_style_from_config() {
 }
 
 pub async fn run() -> Result<()> {
+    // Parse once, before startup side effects. Invalid arguments and --help
+    // must not harden credential files or create configuration/telemetry state.
+    let args = Args::parse();
+    // Credential import must refuse existing stores without normal startup
+    // hardening, migrations, telemetry, or provider discovery touching them.
+    if args.ssh.is_none()
+        && matches!(
+            args.command,
+            Some(Command::Auth(super::args::AuthCommand::Import { .. }))
+        )
+    {
+        if let Some(cwd) = &args.cwd {
+            std::env::set_current_dir(cwd)?;
+        }
+        return dispatch::run_main(args).await;
+    }
     startup_profile::init();
 
     terminal::install_panic_hook();
@@ -123,7 +139,7 @@ pub async fn run() -> Result<()> {
     }
     startup_profile::mark("telemetry_check");
 
-    let args = parse_and_prepare_args()?;
+    let args = parse_and_prepare_args(args)?;
     spawn_background_update_check(&args);
 
     if let Err(e) = dispatch::run_main(args).await {
@@ -160,6 +176,9 @@ fn is_telemetry_subcommand_invocation(
                     | "-C"
                     | "--cwd"
                     | "--remote-working-dir"
+                    | "--ssh"
+                    | "--ssh-binary"
+                    | "--ssh-server-socket"
                     | "--spawn-hotkey"
                     | "--socket"
                     | "-m"
@@ -279,8 +298,7 @@ pub fn register_external_provider_runtimes() {
     );
 }
 
-fn parse_and_prepare_args() -> Result<Args> {
-    let args = Args::parse();
+fn parse_and_prepare_args(args: Args) -> Result<Args> {
     startup_profile::mark("args_parse");
 
     if let Some(chord) = args.spawn_hotkey.as_deref() {
@@ -451,11 +469,15 @@ fn should_spawn_background_update_check(args: &Args) -> bool {
 
 fn should_spawn_background_update_check_with_config(args: &Args, check_updates: bool) -> bool {
     check_updates
+        && args.ssh.is_none()
         && !args.quiet
         && !args.no_update
         && !matches!(
             args.command,
-            Some(Command::Update) | Some(Command::Serve { .. }) | Some(Command::Acp)
+            Some(Command::Update)
+                | Some(Command::Serve { .. })
+                | Some(Command::Server { .. })
+                | Some(Command::Acp)
         )
         && args.resume.is_none()
 }

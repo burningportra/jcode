@@ -629,6 +629,10 @@ pub trait TuiState {
     fn diff_pane_scroll_x(&self) -> i32;
     /// Zoom percentage for image widgets rendered inside the side panel.
     fn side_panel_image_zoom_percent(&self) -> u8;
+    /// Image shown in the dismissible full-screen panel preview.
+    fn panel_image_preview(&self) -> Option<u64> {
+        None
+    }
     /// Whether the pinned diff pane is focused
     fn diff_pane_focus(&self) -> bool;
     /// Session-scoped side panel state managed by the side_panel tool
@@ -1339,6 +1343,15 @@ pub enum PickerAction {
     Model,
     Account(AccountPickerAction),
     Login(crate::provider_catalog::LoginProviderDescriptor),
+    /// Native SSH actions never dispatch through laptop-local authentication.
+    RemoteLogin {
+        provider: &'static str,
+        import: bool,
+    },
+    /// Explicit remote import offer/consent, never a local authentication action.
+    RemoteImportDecision {
+        accept: bool,
+    },
     Logout(crate::provider_catalog::LoginProviderDescriptor),
     /// Login entry for a user-defined `[providers.<name>]` config profile.
     /// Owned (unlike `Login`) because the static descriptor catalog cannot
@@ -1402,6 +1415,8 @@ impl InlineInteractiveState {
 fn estimate_picker_action_bytes(action: &PickerAction) -> usize {
     match action {
         PickerAction::Model
+        | PickerAction::RemoteLogin { .. }
+        | PickerAction::RemoteImportDecision { .. }
         | PickerAction::AgentTarget(_)
         | PickerAction::AgentModelChoice { .. }
         | PickerAction::SubagentModelChoice { .. }
@@ -1663,9 +1678,28 @@ pub struct PickerOption {
     pub estimated_reference_cost_micros: Option<u64>,
 }
 
+/// An SSH-backed socket is not a shared-filesystem local daemon. Keep this
+/// distinct from `App::is_remote`, which also describes ordinary local clients.
+pub(crate) fn ssh_remote_host() -> Option<String> {
+    std::env::var("JCODE_SSH_REMOTE")
+        .ok()
+        .filter(|host| !host.trim().is_empty())
+}
+
+pub(crate) fn is_ssh_remote() -> bool {
+    ssh_remote_host().is_some()
+}
+
 pub(crate) fn subscribe_metadata(
     remote_working_dir: Option<&str>,
 ) -> (Option<String>, Option<bool>) {
+    if is_ssh_remote() {
+        // Never infer a remote project (or self-dev mode) from the laptop cwd.
+        return (
+            remote_working_dir.map(str::to_string),
+            jcode_selfdev_types::client_selfdev_requested().then_some(true),
+        );
+    }
     let working_dir = std::env::current_dir().ok();
     resolve_subscribe_metadata(
         working_dir.as_deref(),

@@ -380,6 +380,13 @@ impl Session {
         // Do not turn that implementation detail into a transcript on disk. Once
         // the user (or a programmatic caller) adds a real conversation message,
         // the normal first snapshot includes all of the accumulated context.
+        //
+        // A caller-chosen `title` (review/judge sessions, menubar sessions) is
+        // explicit state just like `custom_title`, so it must persist even
+        // before the first visible message (#1144). Otherwise later lookups by
+        // id find no file and silently treat the session as missing.
+        // Parent linkage is also explicit state: an empty fork carries only a
+        // hidden fork notice but must be loadable when its new client attaches.
         if !self.persist_state.snapshot_exists
             && !self
                 .messages
@@ -387,6 +394,8 @@ impl Session {
                 .any(super::is_visible_conversation_message)
             && !self.saved
             && self.custom_title.is_none()
+            && self.title.is_none()
+            && self.parent_id.is_none()
         {
             return Ok(());
         }

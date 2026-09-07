@@ -1,6 +1,11 @@
 use super::*;
 
 impl Agent {
+    /// Read-only source for splitting a new session before its first persistence.
+    pub(crate) fn session_for_split(&self) -> &Session {
+        &self.session
+    }
+
     pub fn session_memory_profile_snapshot(
         &mut self,
     ) -> crate::session::SessionMemoryProfileSnapshot {
@@ -155,6 +160,11 @@ impl Agent {
         // `display_name()` resolves the active runtime profile (e.g. NVIDIA NIM)
         // for the OpenRouter slot; for all other providers it equals `name()`.
         self.provider.display_name()
+    }
+
+    /// Reasoning effort the active provider is running with, if any.
+    pub fn provider_reasoning_effort(&self) -> Option<String> {
+        self.provider.reasoning_effort()
     }
 
     pub fn provider_model(&self) -> String {

@@ -96,6 +96,8 @@ pub(super) async fn handle_tick(app: &mut App, remote: &mut RemoteConnection) ->
             .is_some_and(|state| state.kind == crate::tui::PickerKind::Model),
     });
     let mut needs_redraw = crate::tui::periodic_redraw_required(app);
+    needs_redraw |= app.poll_ssh_login(remote).await;
+    needs_redraw |= app.poll_ssh_login_onboarding();
     needs_redraw |= app.flush_pending_resize_redraw();
     app.maybe_capture_runtime_memory_heartbeat();
     app.maybe_release_idle_heap();
@@ -405,7 +407,11 @@ async fn apply_terminal_event(
             // Start the key-to-paint clock at the moment the key is read, which is
             // the only point that corresponds to the user's press.
             crate::tui::ui::note_key_event_read();
-            input_attribution.event = Some(format!("key:{:?}:{:?}", key.code, key.kind));
+            input_attribution.event = Some(if app.remote_login.is_some() {
+                "ssh_login_key".to_string()
+            } else {
+                format!("key:{:?}:{:?}", key.code, key.kind)
+            });
             input_attribution.scroll_delta = key_scroll_delta(&key);
             app.note_client_interaction();
             app.update_copy_badge_key_event(key);
@@ -609,6 +615,10 @@ pub(super) async fn handle_bus_event(
             true
         }
         Ok(BusEvent::LoginCompleted(login)) => {
+            if crate::tui::is_ssh_remote() {
+                app.set_status_notice("Local login does not change SSH server credentials");
+                return true;
+            }
             let success = login.success && login.provider != "copilot_code";
             let provider_hint = auth_provider_hint_for_login_provider(&login.provider);
             let auth = auth_changed_event_for_login_provider(&login.provider);
@@ -1897,6 +1907,10 @@ fn handle_disconnected_key_internal(
     let mut code = code;
     let mut modifiers = modifiers;
     ctrl_bracket_fallback_to_esc(&mut code, &mut modifiers);
+
+    if app.handle_ssh_login_key(code, modifiers, text_input.as_deref()) {
+        return Ok(());
+    }
 
     if input::handle_scroll_overlay_key(app, code)? {
         return Ok(());

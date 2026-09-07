@@ -483,6 +483,7 @@ fn coordinator_identity(
 #[test]
 fn resolve_swarm_spawn_model_prefers_configured_model_over_coordinator_model() {
     let selection = resolve_swarm_spawn_selection(
+        None,
         Some("openai/gpt-5.4@OpenAI".to_string()),
         &coordinator_identity(
             Some("nvidia/llama-3.3-nemotron-super-49b-v1"),
@@ -500,6 +501,7 @@ fn resolve_swarm_spawn_model_prefers_configured_model_over_coordinator_model() {
 #[test]
 fn resolve_swarm_spawn_model_inherits_coordinator_when_unconfigured() {
     let selection = resolve_swarm_spawn_selection(
+        None,
         None,
         &coordinator_identity(
             Some("nvidia/llama-3.3-nemotron-super-49b-v1"),
@@ -525,6 +527,7 @@ fn resolve_swarm_spawn_model_inherits_coordinator_auth_route_for_oauth_vs_api() 
     // the same API route, not Claude OAuth (the config default).
     let selection = resolve_swarm_spawn_selection(
         None,
+        None,
         &coordinator_identity(
             Some("claude-opus-4-6"),
             Some("claude-api"),
@@ -540,6 +543,7 @@ fn resolve_swarm_spawn_model_inherits_coordinator_auth_route_for_oauth_vs_api() 
 #[test]
 fn resolve_swarm_spawn_model_keeps_provider_key_when_config_matches_coordinator() {
     let selection = resolve_swarm_spawn_selection(
+        None,
         Some("custom-model".to_string()),
         &coordinator_identity(
             Some("custom-model"),
@@ -558,6 +562,7 @@ fn resolve_swarm_spawn_model_openai_api_prefix_pins_api_route_over_coordinator()
     // `agents.swarm_model = "openai-api:gpt-5.5"` must spawn agents on GPT-5.5
     // via the OpenAI API key route, regardless of the coordinator's model/auth.
     let selection = resolve_swarm_spawn_selection(
+        None,
         Some("openai-api:gpt-5.5".to_string()),
         &coordinator_identity(
             Some("claude-opus-4-8"),
@@ -591,6 +596,7 @@ fn resolve_swarm_spawn_model_auth_route_prefixes_pin_expected_routes() {
         ),
     ] {
         let selection = resolve_swarm_spawn_selection(
+            None,
             Some(configured.to_string()),
             &coordinator_identity(
                 Some("some-other-model"),
@@ -620,6 +626,7 @@ fn resolve_swarm_spawn_model_auth_route_prefixes_pin_expected_routes() {
 fn resolve_swarm_spawn_model_inherit_sentinel_uses_coordinator_model() {
     for sentinel in ["inherit", "INHERIT", "coordinator", " inherit ", ""] {
         let selection = resolve_swarm_spawn_selection(
+            None,
             Some(sentinel.to_string()),
             &coordinator_identity(
                 Some("nvidia/llama-3.3-nemotron-super-49b-v1"),
@@ -644,6 +651,129 @@ fn resolve_swarm_spawn_model_inherit_sentinel_uses_coordinator_model() {
             "sentinel {sentinel:?} should inherit coordinator auth route",
         );
     }
+}
+
+#[test]
+fn resolve_swarm_spawn_model_requested_model_overrides_configured_pin() {
+    for requested in ["openai-api:gpt-5.5", "  openai-api:gpt-5.5 \t"] {
+        let selection = resolve_swarm_spawn_selection(
+            Some(requested.to_string()),
+            Some("claude-oauth:claude-opus-4-8".to_string()),
+            &coordinator_identity(
+                Some("claude-fable-5"),
+                Some("claude-oauth"),
+                Some("claude-oauth"),
+            ),
+        );
+
+        assert_eq!(selection.model.as_deref(), Some("gpt-5.5"));
+        assert_eq!(selection.provider_key.as_deref(), Some("openai-api-key"));
+        assert_eq!(
+            selection.route_api_method.as_deref(),
+            Some("openai-api-key")
+        );
+    }
+}
+
+#[test]
+fn resolve_swarm_spawn_model_requested_inherit_overrides_configured_pin() {
+    for requested in [
+        "inherit",
+        "INHERIT",
+        "coordinator",
+        " COORDINATOR ",
+        " inherit ",
+    ] {
+        let selection = resolve_swarm_spawn_selection(
+            Some(requested.to_string()),
+            Some("openai-api:gpt-5.5".to_string()),
+            &coordinator_identity(
+                Some("claude-fable-5"),
+                Some("claude-api"),
+                Some("claude-api"),
+            ),
+        );
+
+        assert_eq!(selection.model.as_deref(), Some("claude-fable-5"));
+        assert_eq!(selection.provider_key.as_deref(), Some("claude-api"));
+        assert_eq!(selection.route_api_method.as_deref(), Some("claude-api"));
+    }
+}
+
+#[test]
+fn resolve_swarm_spawn_model_requested_matching_coordinator_model_keeps_route() {
+    let selection = resolve_swarm_spawn_selection(
+        Some(" custom-model ".to_string()),
+        Some("openai-api:gpt-5.5".to_string()),
+        &coordinator_identity(
+            Some("custom-model"),
+            Some("custom-provider"),
+            Some("custom-route"),
+        ),
+    );
+
+    assert_eq!(selection.model.as_deref(), Some("custom-model"));
+    assert_eq!(selection.provider_key.as_deref(), Some("custom-provider"));
+    assert_eq!(selection.route_api_method.as_deref(), Some("custom-route"));
+}
+
+#[test]
+fn resolve_swarm_spawn_model_blank_requested_model_falls_back_to_config() {
+    for requested in ["", "   ", "\t\n"] {
+        let selection = resolve_swarm_spawn_selection(
+            Some(requested.to_string()),
+            Some("openai-api:gpt-5.5".to_string()),
+            &coordinator_identity(
+                Some("claude-fable-5"),
+                Some("claude-oauth"),
+                Some("claude-oauth"),
+            ),
+        );
+
+        assert_eq!(selection.model.as_deref(), Some("gpt-5.5"));
+        assert_eq!(selection.provider_key.as_deref(), Some("openai-api-key"));
+        assert_eq!(
+            selection.route_api_method.as_deref(),
+            Some("openai-api-key")
+        );
+    }
+}
+
+#[test]
+fn resolve_swarm_spawn_model_omitted_request_trims_configured_model() {
+    let selection = resolve_swarm_spawn_selection(
+        None,
+        Some(" \topenai-api:gpt-5.5 \n".to_string()),
+        &coordinator_identity(
+            Some("claude-fable-5"),
+            Some("claude-oauth"),
+            Some("claude-oauth"),
+        ),
+    );
+
+    assert_eq!(selection.model.as_deref(), Some("gpt-5.5"));
+    assert_eq!(selection.provider_key.as_deref(), Some("openai-api-key"));
+    assert_eq!(
+        selection.route_api_method.as_deref(),
+        Some("openai-api-key")
+    );
+}
+
+#[test]
+fn resolve_swarm_spawn_model_blank_requested_model_inherits_when_unconfigured() {
+    let selection = resolve_swarm_spawn_selection(
+        Some(" \t\n".to_string()),
+        None,
+        &coordinator_identity(
+            Some("custom-model"),
+            Some("custom-provider"),
+            Some("custom-route"),
+        ),
+    );
+
+    assert_eq!(selection.model.as_deref(), Some("custom-model"));
+    assert_eq!(selection.provider_key.as_deref(), Some("custom-provider"));
+    assert_eq!(selection.route_api_method.as_deref(), Some("custom-route"));
 }
 
 #[tokio::test]
@@ -1067,4 +1197,27 @@ async fn spawn_admission_lock_serializes_per_swarm_only() {
             .await
             .is_ok()
     );
+}
+
+#[test]
+fn swarm_spawn_effort_prefers_explicit_then_config_pin_then_inherit() {
+    use super::resolve_swarm_spawn_effort;
+
+    // Explicit spawn argument wins over the config pin (#1165).
+    assert_eq!(
+        resolve_swarm_spawn_effort(Some("low"), Some("medium")),
+        Some("low".to_string())
+    );
+    // A missing or blank spawn argument falls back to `agents.swarm_effort`.
+    assert_eq!(
+        resolve_swarm_spawn_effort(None, Some("medium")),
+        Some("medium".to_string())
+    );
+    assert_eq!(
+        resolve_swarm_spawn_effort(Some("  "), Some(" medium ")),
+        Some("medium".to_string())
+    );
+    // With neither, the worker inherits the provider-wide effort.
+    assert_eq!(resolve_swarm_spawn_effort(None, None), None);
+    assert_eq!(resolve_swarm_spawn_effort(Some(""), Some("")), None);
 }

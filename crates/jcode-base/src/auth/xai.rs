@@ -324,6 +324,7 @@ pub async fn login(options: LoginOptions) -> Result<XaiTokens> {
         &verification_url,
         "Or scan this QR on another device:",
         "    ",
+        crate::auth::browser_suppressed(options.no_browser),
     ) {
         eprintln!("{qr}\n");
     }

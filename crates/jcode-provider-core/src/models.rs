@@ -2,16 +2,17 @@
 pub const DEFAULT_CLAUDE_MODEL: &str = "claude-opus-5";
 
 /// Quality-first default for OpenAI-capable routes.
-pub const DEFAULT_OPENAI_MODEL: &str = "gpt-5.6-sol";
+pub const DEFAULT_OPENAI_MODEL: &str = "gpt-6-astra";
 
 /// Available Claude models used by model lists and provider routing.
 ///
 /// NOTE: The Mythos preview family was retired by Anthropic and 404s, so it is
 /// intentionally NOT listed here. `claude-fable-5` was briefly retired but is
-/// live again. The list is curated best-first; position 0 is the flagship
+/// live again. `claude-fable-5-1` went live 2026-08-28. The list is curated best-first; position 0 is the flagship
 /// used for post-login default selection.
 pub const ALL_CLAUDE_MODELS: &[&str] = &[
     DEFAULT_CLAUDE_MODEL,
+    "claude-fable-5-1",
     "claude-fable-5",
     "claude-opus-4-8",
     "claude-opus-4-6",
@@ -57,7 +58,11 @@ pub fn is_openai_api_only_pro_model(model: &str) -> bool {
 }
 
 pub const ALL_OPENAI_MODELS: &[&str] = &[
+    // GPT-6 Astra: newest OpenAI flagship (live on api.openai.com and
+    // OpenRouter as of 2026-09). Listed explicitly because the frontier
+    // auto-promoter only accepts bare numeric ids and would skip the suffix.
     DEFAULT_OPENAI_MODEL,
+    "gpt-5.6-sol",
     "gpt-5.6-pro",
     // ChatGPT web-only route. The `[web]` suffix is intentionally part of the
     // jcode model id so it can never be mistaken for an API/Codex model with
@@ -97,6 +102,7 @@ mod gpt_5_6_catalog_tests {
     #[test]
     fn openai_catalog_exposes_the_complete_gpt_5_6_family() {
         for model in [
+            "gpt-6-astra",
             "gpt-5.6-sol",
             "gpt-5.6-pro",
             "gpt-5.6-pro[web]",
@@ -108,6 +114,8 @@ mod gpt_5_6_catalog_tests {
         }
         assert!(is_openai_api_only_pro_model("gpt-5.6-pro"));
         assert!(!is_openai_api_only_pro_model("gpt-5.6-sol"));
+        assert_eq!(DEFAULT_OPENAI_MODEL, "gpt-6-astra");
+        assert_eq!(ALL_OPENAI_MODELS[0], "gpt-6-astra");
     }
 }
 
@@ -314,8 +322,28 @@ pub fn context_limit_for_model_with_provider_and_cache(
         return Some(official_openai_limit.map_or(limit, |published| published.max(limit)));
     }
 
-    if official_openai_limit.is_some() {
-        return official_openai_limit;
+    // Spark variant has a smaller context window than the full codex model.
+    if model.starts_with("gpt-5.3-codex-spark") {
+        return Some(128_000);
+    }
+
+    if model.starts_with("gpt-5.2-chat")
+        || model.starts_with("gpt-5.1-chat")
+        || model.starts_with("gpt-5-chat")
+    {
+        return Some(128_000);
+    }
+
+    // GPT-5.4-family and GPT-6-family models should default to the long-context
+    // window. The live Codex OAuth catalog can still override this via the
+    // dynamic cache above.
+    if model.starts_with("gpt-5.4") || model.starts_with("gpt-6") {
+        return Some(1_000_000);
+    }
+
+    // Most GPT-5.x codex/reasoning models: 272k per Codex backend API.
+    if model.starts_with("gpt-5") {
+        return Some(272_000);
     }
 
     if model.starts_with("gemini-2.0-flash")

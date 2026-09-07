@@ -8,6 +8,9 @@ QR/code that embeds the current session id (`jcode://pair?...&session=S`); the i
 app pairs and `subscribe`s straight to that session. See `docs/IOS_APP.md` and
 `crates/jcode-base/src/gateway/control.rs`. This is "attach over the relay/gateway,"
 not migration: ownership stays on the host and the phone is just another client.
+Status: migration exploration. Native SSH attach is implemented separately in
+[NATIVE_SSH.md](NATIVE_SSH.md). The proposed `/handoff`, `/attach`, and event-cursor
+replay interfaces below are not implemented.
 
 ## The idea
 
@@ -73,11 +76,10 @@ is the single change that makes the rest cheap.
 4. Transcript backfill uses the existing `client_has_local_history` path so we do not
    resend the whole session over a slow link.
 
-Failure mode to design for explicitly: link drops mid-turn. The remote server should
-keep executing the turn (it already does when a client disconnects) and the client
-should reconnect and replay from the last received event id. That requires event ids to
-be monotonic per session, which they are not clearly guaranteed to be today. Worth
-fixing regardless of handoff.
+Failure mode to design for explicitly: link drops mid-turn. Native SSH attach now
+opts into `continue_on_disconnect`; ordinary local disconnects do not imply that
+an active turn survives. Reconnect currently refreshes full remote history, not an
+event cursor. A future replay design would need monotonic per-session event IDs.
 
 ### Layer 2: migration
 

@@ -36,7 +36,7 @@ pub fn is_cache_ttl_1h() -> bool {
 }
 
 /// User-Agent for OAuth requests, matching the official Claude Code CLI.
-pub const CLAUDE_CLI_USER_AGENT: &str = "claude-cli/2.1.123 (external, sdk-cli)";
+pub const CLAUDE_CLI_USER_AGENT: &str = "claude-cli/2.1.257 (external, sdk-cli)";
 
 pub const OAUTH_BETA_HEADERS: &str = ANTHROPIC_OAUTH_BETA_HEADERS;
 
@@ -72,6 +72,7 @@ pub fn apply_oauth_attribution_headers(
 /// Available models
 pub const AVAILABLE_MODELS: &[&str] = &[
     "claude-opus-5",
+    "claude-fable-5-1",
     "claude-fable-5",
     "claude-opus-4-8",
     "claude-opus-4-6",
