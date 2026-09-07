@@ -7,12 +7,14 @@
 
 pub mod query;
 pub mod rank;
+pub mod rank_bm25;
 pub mod scan;
 pub mod schema;
 pub mod symbols;
 
 pub use query::{CoChange, DepEdge, GraphDb, SymbolRow};
 pub use rank::{cochanges_from_log, pagerank};
+pub use rank_bm25::{Lane, RankedSymbol, SymbolDoc, rank_route, ranked_symbols};
 pub use scan::{ScanExclusions, scan_repo};
 pub use schema::{SCHEMA_VERSION, ensure_schema};
 pub use symbols::{ExportedSymbol, detect_language, exported_symbols, import_specs};
