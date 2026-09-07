@@ -87,6 +87,23 @@ agent → code_query pipeline [search → rank → filter → outline → read]
 4. **C3 — annotation:** churn (git log) + complexity + test-coverage flags inline on ranked rows.
 5. Only then consider B (sidecar) for languages jcode's index handles poorly.
 
+## Probe results (kev-a7h, executed 2026-09-07)
+
+Binary: ripwire v0.3.8 macos-arm64 (sha256-verified, kept out of repo). Corpus: `crates/jcode-app-core/src/tool`
+(99 files). Report: **2548 symbols, 7368 edges, 324 modules, 0 skipped, ~0.12s cold.**
+
+- Coverage parity: native ALL-items regex count on the same tree = 2551 (1984 fn + 567 types).
+  Ripwire's tree-sitter Rust grammar misses nothing measurable.
+- Native gap confirmed: `exported_symbols()` (pub-only regexes) finds **290 symbols (11%)**. It misses
+  private fns, all methods, impl blocks, test fns. **C2 must widen symbol detection to all-items first**
+  (mirror the 2551-count set; prefer tree-sitter over more regex), then add BM25 lanes + route disclosure.
+- Ranking works on Rust: 5/5 name queries rank-1; conceptual query landed the right rows with
+  cx/churn/amp inline; `--callers`/`--uses` correct (edit.rs:68 + multiedit.rs:78 for the async variant).
+- Limitations: single-file path arg indexes nothing (root must be a dir); `--tree` shows top-3 symbols/file;
+  call edges are name-based heuristics (trait dispatch invisible, disclosed); 0-counts need verify-before-trust;
+  v0.3.8 is 2026-08-13.
+- Verdict: **PROCEED TO C2 WITH REDESIGN.** C1 (token budgets) unaffected, proceeds independently.
+
 ## Risks / open questions
 
 - Assumption check (user away): outcome = research only, no prototype. Confirm before building C1+.
