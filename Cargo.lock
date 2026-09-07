@@ -3311,6 +3311,7 @@ dependencies = [
  "jcode-base",
  "jcode-build-meta",
  "jcode-build-support",
+ "jcode-codegraph",
  "jcode-command-risk",
  "jcode-core",
  "jcode-import-core",
@@ -3477,6 +3478,17 @@ dependencies = [
  "jcode-storage",
  "serde",
  "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "jcode-codegraph"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "regex",
+ "rusqlite",
+ "serde",
  "tempfile",
 ]
 
