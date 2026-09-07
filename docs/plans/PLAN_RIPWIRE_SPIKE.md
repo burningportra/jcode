@@ -124,6 +124,39 @@ Scope: regex-widen Rust detection in `jcode-codegraph`; focused tests; benchmark
 - Follow-up for BM25 bead: method rows need parent-type context (kind only today) to disambiguate
   same-named methods.
 
+## BM25 lanes (kev-t5h, planned)
+
+Scope: crate-level ranked retrieval over the widened `symbols` table; preserve `pagerank`/`cochanges`/
+`find_symbols` behavior untouched. Tree-sitter still deferred.
+
+- New API in `jcode-codegraph` (new module `rank_bm25.rs`, re-exported from `lib.rs`):
+  `ranked_symbols(&GraphDb, query, top_k) -> Vec<RankedSymbol>` where
+  `RankedSymbol { path, name, kind, line, score, lane }` and `lane: NameExact | Conceptual`.
+  Route disclosure: `rank_route(query) -> Lane` — identifier-shaped query (single camelCase/snake token,
+  or all content words matching known symbol names) routes name-exact; everything else conceptual.
+  Mirror ripwire's `route=` honesty surface: callers log/display which lane fired.
+  `ranked_symbols` reads the `symbols` + `files` tables via the existing `GraphDb::symbols` path shape
+  (no new SQL tables; BM25 runs in-memory over rows fetched with the current `symbols()` query).
+- Name-exact lane: whole-name match on `symbols.name` (case-sensitive exact first, then case-insensitive),
+  ordered exact > case-folded > prefix. No scoring beyond rank tiers; deterministic. Empty/whitespace
+  query returns empty vec (never error); unknown token returns empty vec. top_k=0 means no limit.
+- Conceptual lane: BM25 (k1=1.2, b=0.75, same constants as `memory.rs::bm25_rank`) over per-symbol
+  documents of `name + kind + path`. Subtokenize camelCase/snake_case on both sides (mirror ripwire's
+  subtoken lane); per-query IDF over the symbol corpus; zero-overlap rows dropped; top_k cut.
+  Path weighting: path subtokens score at half weight so filename vocabulary cannot outrank symbol-name
+  vocabulary (ripwire's fixture-pollution lesson: test-file twins must not beat real sources).
+- Same-named methods: rank rows carry `(path, line)` identity; display joins `path:line:name` so
+  `new` in `impl A` vs `impl B` are distinguishable without parent-type context (parent-type
+  recording deferred to a later bead).
+- Tests (in `rank_bm25.rs` `mod tests` + `query.rs` roundtrip): name-exact rank-1 on the 5 probe
+  queries against a fixture DB; conceptual query ("blast radius dependents code impact") lands
+  `code_impact` rows first; empty query returns empty; unknown token returns empty (never error);
+  existing `pagerank`/`cochanges`/`find_symbols` tests unchanged and green.
+- Benchmark bar: 5/5 probe queries rank-1 via name-exact; 1 conceptual check mirrors the probe;
+  rank latency measured on the 2557-symbol tool/ corpus (<100ms target, in-memory BM25).
+- Non-goals: doc-comment bodies (symbols table has no body column — needs schema change, deferred);
+  FTS5 `symbols_fts` integration (keep `find_symbols` as-is); BM25 over call edges; tree-sitter.
+
 ## Probe results (kev-a7h, executed 2026-09-07)
 
 Binary: ripwire v0.3.8 macos-arm64 (sha256-verified, kept out of repo). Corpus: `crates/jcode-app-core/src/tool`
