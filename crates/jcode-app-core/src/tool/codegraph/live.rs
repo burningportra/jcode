@@ -523,6 +523,9 @@ pub fn cochanges_live(root: &Path, rel: &str) -> (Vec<RelatedFile>, GraphSource,
 }
 
 /// Exported symbols via per-language regexes (advisory kinds, not AST).
+///
+/// Delegates to `jcode-codegraph` so the indexed and live paths share one
+/// detection implementation (C2 redesign: all-items, all visibilities).
 pub fn exported_symbols_live(root: &Path, rel: &str) -> Vec<ExportedSymbol> {
     let abs = match resolve_within_root(root, rel) {
         Ok(p) => p,
@@ -532,67 +535,12 @@ pub fn exported_symbols_live(root: &Path, rel: &str) -> Vec<ExportedSymbol> {
         Ok(c) => c,
         Err(_) => return vec![],
     };
-    let lang = detect_language(rel);
-    let pats: &[(&str, &str)] = match lang {
-        "rust" => &[
-            (r"(?m)^\s*pub\s+fn\s+(\w+)", "function"),
-            (r"(?m)^\s*pub\s+struct\s+(\w+)", "class"),
-            (r"(?m)^\s*pub\s+enum\s+(\w+)", "enum"),
-            (r"(?m)^\s*pub\s+trait\s+(\w+)", "interface"),
-            (r"(?m)^\s*pub\s+(?:const|static)\s+(\w+)", "constant"),
-            (r"(?m)^\s*pub\s+mod\s+(\w+)", "module"),
-        ],
-        "ts" | "js" => &[
-            (
-                r"(?m)^\s*export\s+(?:async\s+)?function\s+(\w+)",
-                "function",
-            ),
-            (r"(?m)^\s*export\s+(?:default\s+)?class\s+(\w+)", "class"),
-            (
-                r"(?m)^\s*export\s+(?:default\s+)?interface\s+(\w+)",
-                "interface",
-            ),
-            (r"(?m)^\s*export\s+type\s+(\w+)", "type"),
-            (r"(?m)^\s*export\s+(?:const|let|var)\s+(\w+)", "variable"),
-            (r"(?m)^\s*export\s+enum\s+(\w+)", "enum"),
-        ],
-        "python" => &[
-            (r"(?m)^\s*def\s+(\w+)", "function"),
-            (r"(?m)^\s*class\s+(\w+)", "class"),
-        ],
-        "go" => &[
-            (
-                r"(?m)^\s*func\s+(?:\(\w+\s+\*?\w+\)\s+)?([A-Z]\w*)",
-                "function",
-            ),
-            (r"(?m)^\s*type\s+([A-Z]\w*)", "type"),
-        ],
-        _ => &[
-            (r"(?m)^\s*(?:function\s+|fn\s+|def\s+)(\w+)", "function"),
-            (r"(?m)^\s*(?:class|struct)\s+(\w+)", "class"),
-        ],
-    };
-    let mut out = vec![];
-    let mut seen = HashSet::new();
-    for (pat, kind) in pats {
-        let Ok(re) = regex::Regex::new(pat) else {
-            continue;
-        };
-        for cap in re.captures_iter(&content) {
-            if let Some(m) = cap.get(1) {
-                let name = m.as_str().to_string();
-                if seen.insert(name.clone()) {
-                    out.push(ExportedSymbol {
-                        name,
-                        kind: kind.to_string(),
-                    });
-                }
-            }
-        }
-    }
-    // Python dunder/private filter: keep public names only for exports.
-    if lang == "python" {
-        out.retain(|s| !s.name.starts_with('_'));
-    }
-    out
+    // Shared implementation; drop line numbers for the live shape.
+    jcode_codegraph::symbols::exported_symbols(rel, &content)
+        .into_iter()
+        .map(|s| ExportedSymbol {
+            name: s.name,
+            kind: s.kind,
+        })
+        .collect()
 }

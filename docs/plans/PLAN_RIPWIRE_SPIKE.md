@@ -87,6 +87,43 @@ agent → code_query pipeline [search → rank → filter → outline → read]
 4. **C3 — annotation:** churn (git log) + complexity + test-coverage flags inline on ranked rows.
 5. Only then consider B (sidecar) for languages jcode's index handles poorly.
 
+## C2 redesign: all-items detection (implemented)
+
+Scope: regex-widen Rust detection in `jcode-codegraph`; focused tests; benchmark. BM25 and tree-sitter deferred.
+
+- Widen `exported_symbols()` Rust patterns in `crates/jcode-codegraph/src/symbols.rs` from pub-only to
+  all-items: `fn` (any visibility, incl. `async`/`unsafe`/`extern`), methods inside `impl` blocks
+  (kind `method` via brace-depth span tracking), `struct`/`enum`/`trait`/`mod`/`const`/`static`/`type`
+  at any visibility, `#[test]` fns (kind `test`). Mirror the same widening in `exported_symbols_live()`
+  (`crates/jcode-app-core/src/tool/codegraph/live.rs`) now delegates to the shared crate function
+  instead of duplicating patterns.
+- Dedup key must become (name, line), not name: methods named `new`/`execute` repeat across impl blocks
+  (the current `seen` set on name alone would collapse them).
+- Kind vocabulary addition: `method`, `test`, `type`. Existing consumers (`query.rs` FTS insert,
+  `code_query`, `code_impact`) read kind as opaque string; no schema change (`symbols` table already
+  stores kind/line).
+- Tests (in `symbols.rs` `mod tests`): private fn detected; `pub(crate)` fn detected; method in
+  `impl Foo` detected as `method`; `#[test] fn` detected as `test`; line numbers correct; no-duplicate
+  collapse for same-named methods at different lines; existing pub-only behavior preserved as subset.
+- Benchmark bar (from kev-a7h probe): native count on `crates/jcode-app-core/src/tool/` (99 files) moves
+  290 toward ~2551 (ripwire 2548); the 5 probe queries (CodeImpactTool, ImpactReport, compute_report,
+  advisory_blast_line_async, render) must resolve in the widened index (name-exact lookup, pre-BM25).
+- Non-goals: BM25 lanes, route disclosure, tree-sitter, other languages (Rust only in this step).
+
+### C2 results (executed)
+
+- `cargo test -p jcode-codegraph`: **15 passed, 0 failed** (7 symbol tests incl. 5 new focused tests).
+- `cargo test -p jcode-app-core --lib codegraph`: 23 passed, 1 failed —
+  `repo_root_stops_at_home_boundary` fails on the clean tree too (pre-existing, environment-dependent:
+  asserts `~/.git` exists; unrelated to this change; verified via stash).
+- Benchmark: widened patterns yield **2557 symbols over 97 `.rs` files in 0.20s** vs ripwire 2548
+  (over 99 files incl. 2 `.html` testdata docs) and probe naive count 2551. Delta of +6-9 is within
+  regex-vs-tree-sitter noise. Bar met: 290 -> 2557 (~8.8x).
+- Rank check: all 5 probe queries are pub items in the widened set (strict superset of old detection),
+  so name-exact resolution holds pre-BM25.
+- Follow-up for BM25 bead: method rows need parent-type context (kind only today) to disambiguate
+  same-named methods.
+
 ## Probe results (kev-a7h, executed 2026-09-07)
 
 Binary: ripwire v0.3.8 macos-arm64 (sha256-verified, kept out of repo). Corpus: `crates/jcode-app-core/src/tool`

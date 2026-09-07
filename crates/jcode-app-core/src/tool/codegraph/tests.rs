@@ -104,10 +104,10 @@ fn rust_symbols_extracted() {
     );
     let syms = exported_symbols_live(&root, "lib.rs");
     let names: Vec<_> = syms.iter().map(|s| s.name.as_str()).collect();
-    for want in ["alpha", "Beta", "Gamma", "Delta", "E"] {
+    // All-items detection (C2 redesign): private fns included.
+    for want in ["alpha", "Beta", "Gamma", "Delta", "E", "private"] {
         assert!(names.contains(&want), "names={names:?}");
     }
-    assert!(!names.contains(&"private"));
 }
 
 #[test]
