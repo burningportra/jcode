@@ -854,6 +854,8 @@ fn pwa_shaped_subscribe_json_is_accepted_by_the_real_handler() {
         initial_subscribe_working_dir(&bad_request).is_err(),
         "a working_dir-less subscribe must be rejected (the bug we fixed)"
     );
+}
+
 #[test]
 fn remote_subscribe_requires_an_existing_server_directory() -> anyhow::Result<()> {
     let directory = tempfile::tempdir()?;

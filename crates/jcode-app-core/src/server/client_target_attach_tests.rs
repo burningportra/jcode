@@ -58,6 +58,8 @@ fn subscribe(target: &str) -> Request {
         crash_on_disconnect: false,
         continue_on_disconnect: false,
         terminal_env: vec![],
+        prompt_suggestions: false,
+        prompt_suggestion_generation: None,
     }
 }
 
