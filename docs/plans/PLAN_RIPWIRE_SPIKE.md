@@ -41,6 +41,28 @@
 | B | **Bundled sidecar invocation** | Vendor or auto-install the ripwire binary; `code_query`/`code_impact` shell out to it with fallback to native codegraph | M: install/download plumbing, output parsing, fallback logic | High where installed; new binary dependency + platform matrix (macOS arm64 ok? verify releases) + version skew |
 | C | **Port the ideas natively** | Add ranked symbol retrieval + token budgets + churn/cx annotation to `jcode-codegraph`/`code_query`; add task-shaped skills | L (fits existing roadmap: graph-AI phases) | Highest long-term: no dependency, works offline everywhere, compounds with existing index; slowest payoff |
 | D | **MCP client mode** | jcode speaks to `ripwire --mcp` as an MCP server | M: MCP client plumbing for one server | Low: jcode already has `mcp` tool + CLI is simpler; MCP adds framing overhead for a local binary |
+| E | **Hybrid: native first, ripwire fallback** | `code_query` ranks from the native SQLite index; when the query hits languages/symbols the native scan handles poorly, shell out to an optional ripwire binary for that slice only | M: fallback detection + slice merging + ranking merge rule | Medium-high: best answer quality without full sidecar dependence; complexity is the merge rule (whose rank wins) |
+
+## Data flow (options C/E)
+
+```
+agent → code_query pipeline [search → rank → filter → outline → read]
+                       │
+              ┌────────┴────────┐
+              │ rank stage (new) │
+              │ name-exact BM25  │── symbols + doc comments from jcode-codegraph index
+              │ conceptual BM25  │── (E only) ripwire slice merged here on fallback
+              └────────┬────────┘
+                       │ ranked rows + route= disclosure + est_tokens
+              ┌────────┴────────┐
+              │ annotate (C3)   │── churn (git log) + complexity + tested flags
+              └────────┬────────┘
+                       │ budget cut (C1): top-k / max-tokens / signatures-only
+                  outline/read
+```
+
+`code_impact` is unchanged structurally: it consumes the same annotated index for dependents/co-changes.
+`agentgrep` stays the lexical substrate; ranking sits above it, not instead of it.
 
 ## Recommendation
 
@@ -68,11 +90,35 @@
 ## Risks / open questions
 
 - Assumption check (user away): outcome = research only, no prototype. Confirm before building C1+.
-- License compatibility of vendored tree-sitter grammars if we port parsers (verify before copying).
+- Tree-sitter grammars are vendored C++ in ripwire's tree; porting parsers means porting grammar + table row
+  under Apache-2.0 with attribution (NOTICE compliance). Prefer reusing existing Rust tree-sitter crates over
+  copying ripwire's vendored sources.
 - ripwire's Rust grammar quality vs jcode's regex-based symbol scan — unknown; test on this repo.
+  Concrete probe: index jcode with ripwire, compare symbol counts against `jcode-codegraph` scan on
+  `crates/jcode-app-core/src/tool/`; investigate the delta before committing to C2.
 - Skill-loading cost: ripwire's own agent-loop pilot showed +80% token overhead from reading SKILL.md
   bodies mid-task before they added frontmatter stop rules. Our skills must carry stop rules in frontmatter.
-- No cross-model review was possible in this spike (single session); recommendation is author-only.
+- No cross-model review was possible in this spike: the spawned reviewer (gemma-4-31b via Cerebras) failed
+  on endpoint auth, so all passes are same-model fresh-eyes. Recommendation stays author-only; treat the
+  options table as provisional until a second model weighs in.
+
+## Non-goals (explicit)
+
+- No vendored ripwire binary in the jcode release; no new daemon or background indexer.
+- No quality-panel / quality-delta port in this initiative (flag as follow-up; C1–C3 are retrieval only).
+- No `--partition` multi-agent split support until single-agent ranking proves out.
+- No changes to approval policy: ranking is advisory, never blocks edits (existing contract).
+
+## Edge cases and failure handling
+
+- **ripwire absent (A/E):** detect via PATH probe at tool init; degrade silently to native codegraph, disclose
+  `source: native (ripwire not found)` on the bundle. Never hard-error a query because an optional binary is missing.
+- **Stale or partial index:** reuse the existing degraded-first contract — partial rows + `partial: true` +
+  named source; `refresh` flag forces reindex.
+- **Non-git repos:** churn annotation degrades to `churn: unknown`; ranking still works off symbols + doc comments.
+- **Ambiguous symbol names:** refuse to guess; return did-you-mean candidates (mirrors ripwire's resolver).
+- **Token budget overflow:** cut at the relevance cliff, disclose `capped=N`; never silently drop top-ranked rows.
+- **Version skew (B/E):** pin minimum ripwire version; on parse failure of its output, fall back to native and log.
 
 ## Verification (if built)
 
