@@ -22,6 +22,10 @@ pub const MAX_FILES: usize = 200;
 pub const MAX_PIPELINE_OPS: usize = 12;
 pub const OUTLINE_FILE_CAP: usize = 40;
 pub const READ_FILE_CAP: usize = 10;
+/// Default output budget (chars) before `capped=` disclosure kicks in.
+pub const DEFAULT_OUTPUT_BUDGET: usize = 12_000;
+/// Rough chars-per-token for bundle cost estimates (matches ripwire's bytes/4).
+pub const CHARS_PER_TOKEN: usize = 4;
 
 pub struct CodeQueryTool;
 
@@ -48,6 +52,10 @@ struct QueryOp {
     ranges: Option<ReadRanges>,
     #[serde(default)]
     n: Option<usize>,
+    #[serde(default)]
+    max_tokens: Option<usize>,
+    #[serde(default)]
+    signatures_only: Option<bool>,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -67,6 +75,29 @@ struct CodeQueryInput {
 struct PipeState {
     files: Vec<String>,
     blocks: Vec<String>,
+    /// Total blocks produced before budget cut (for capped= disclosure).
+    blocks_total: usize,
+    /// Total files matched before budget cut (for capped= disclosure).
+    files_total: usize,
+    /// Active output budget (None = unlimited).
+    budget: Option<Budget>,
+    /// Signatures-only mode: outline rows keep signature lines, read bodies dropped.
+    signatures_only: bool,
+}
+
+struct Budget {
+    max_tokens: usize,
+}
+
+/// Record blocks dropped by signatures-only filtering for capped= disclosure.
+/// Totals are set once (first budget op); later ops only add drops.
+fn capped_blocks_dropped(state: &mut PipeState, before: usize) {
+    let dropped = before.saturating_sub(state.blocks.len());
+    if state.blocks_total == 0 {
+        state.blocks_total = before;
+    } else {
+        state.blocks_total += dropped;
+    }
 }
 
 fn to_rel(root: &Path, p: &str) -> String {
@@ -107,6 +138,14 @@ fn describe(op: &QueryOp) -> String {
         "outline" => "outline".to_string(),
         "read" => "read".to_string(),
         "limit" => format!("limit {}", op.n.unwrap_or(0)),
+        "budget" => format!(
+            "budget n={} max_tokens={}",
+            op.n.map(|v| v.to_string())
+                .unwrap_or_else(|| "all".to_string()),
+            op.max_tokens
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| "unlimited".to_string())
+        ),
         other => format!("unknown:{other}"),
     }
 }
@@ -272,6 +311,33 @@ fn run_stage(op: &QueryOp, state: &mut PipeState, root: &Path) -> Result<(), Str
             state.files.truncate(n.min(MAX_FILES));
             Ok(())
         }
+        "budget" => {
+            // Token budget: top-k block cap + max-chars output cap.
+            // {n: max blocks kept, max_tokens: max output tokens,
+            //  signatures_only: outline rows keep signatures, read bodies dropped}.
+            // Cuts at block boundaries (never mid-block) and records totals
+            // for capped= disclosure in the output header.
+            let top_k = op.n.unwrap_or(usize::MAX);
+            if state.blocks_total == 0 {
+                state.blocks_total = state.blocks.len();
+                state.files_total = state.files.len();
+            }
+            if state.blocks.len() > top_k {
+                state.blocks.truncate(top_k);
+            }
+            if op.signatures_only.unwrap_or(false) {
+                state.signatures_only = true;
+                // Drop full-body read blocks (marked with ── dividers);
+                // outline blocks (file: + indented rows) are signatures already.
+                let before = state.blocks.len();
+                state.blocks.retain(|b| !b.starts_with("── "));
+                capped_blocks_dropped(state, before);
+            }
+            state.budget = Some(Budget {
+                max_tokens: op.max_tokens.unwrap_or(usize::MAX),
+            });
+            Ok(())
+        }
         other => Err(format!("unknown op: {other}")),
     }
 }
@@ -283,7 +349,7 @@ impl Tool for CodeQueryTool {
     }
 
     fn description(&self) -> &str {
-        "Composable code-exploration pipeline in one call: search, find, filter, deps, outline, read, limit. Each stage narrows a file set and feeds the next."
+        "Composable code-exploration pipeline in one call: search, find, filter, deps, outline, read, limit, budget. Each stage narrows a file set and feeds the next. Budget cuts output at block boundaries with capped= disclosure and est_tokens estimate."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -299,14 +365,16 @@ impl Tool for CodeQueryTool {
                         "type": "object",
                         "required": ["op"],
                         "properties": {
-                            "op": {"type": "string", "enum": ["search", "find", "filter", "deps", "outline", "read", "limit"]},
+                            "op": {"type": "string", "enum": ["search", "find", "filter", "deps", "outline", "read", "limit", "budget"]},
                             "pattern": {"type": "string"},
                             "query": {"type": "string"},
                             "ext": {"type": "string"},
                             "pathContains": {"type": "string"},
                             "direction": {"type": "string", "enum": ["imports", "imported_by"]},
                             "ranges": {"type": "object", "properties": {"start": {"type": "integer"}, "end": {"type": "integer"}}},
-                            "n": {"type": "integer"}
+                            "n": {"type": "integer"},
+                            "max_tokens": {"type": "integer"},
+                            "signatures_only": {"type": "boolean"}
                         }
                     }
                 }
@@ -339,6 +407,10 @@ impl Tool for CodeQueryTool {
             let mut state = PipeState {
                 files: vec![],
                 blocks: vec![],
+                blocks_total: 0,
+                files_total: 0,
+                budget: None,
+                signatures_only: false,
             };
             let mut trace = vec![];
             for (i, stage) in pipeline.iter().enumerate() {
@@ -356,9 +428,32 @@ impl Tool for CodeQueryTool {
             }
             let mut parts = vec![format!("Pipeline ({} stages):", pipeline.len())];
             parts.extend(trace.iter().map(|t| format!("  {t}")));
+            // Budget enforcement: cut at block boundaries, disclose capped=.
+            let mut capped_blocks = 0usize;
+            let mut capped_files = 0usize;
+            if state.budget.is_some() {
+                capped_blocks = state.blocks_total.saturating_sub(state.blocks.len());
+                capped_files = state.files_total.saturating_sub(state.files.len());
+            }
             if !state.blocks.is_empty() {
                 parts.push(String::new());
-                parts.extend(state.blocks);
+                // Apply max_tokens char cap at block boundaries.
+                let mut shown: Vec<&String> = vec![];
+                let mut chars = 0usize;
+                let max_chars = state
+                    .budget
+                    .as_ref()
+                    .map(|b| b.max_tokens.saturating_mul(CHARS_PER_TOKEN))
+                    .unwrap_or(usize::MAX);
+                for b in &state.blocks {
+                    if chars + b.len() > max_chars && !shown.is_empty() {
+                        capped_blocks += state.blocks.len() - shown.len();
+                        break;
+                    }
+                    chars += b.len();
+                    shown.push(b);
+                }
+                parts.extend(shown.into_iter().cloned());
             } else if !state.files.is_empty() {
                 parts.push(String::new());
                 parts.push("Files:".to_string());
@@ -367,7 +462,20 @@ impl Tool for CodeQueryTool {
                 parts.push(String::new());
                 parts.push("(no files matched)".to_string());
             }
-            parts.join("\n")
+            // Honesty footer: capped= disclosure + self-reported token estimate.
+            if state.budget.is_some() && (capped_blocks > 0 || capped_files > 0) {
+                parts.push(String::new());
+                parts.push(format!(
+                    "[budget] capped={capped_blocks} block(s), {capped_files} file(s) over budget."
+                ));
+            }
+            let body: String = parts.join("\n");
+            if state.budget.is_some() {
+                let est = body.len() / CHARS_PER_TOKEN;
+                format!("{body}\n[est_tokens=\"{est}\"]")
+            } else {
+                body
+            }
         })
         .await
         .unwrap_or_else(|_| "Pipeline failed: blocking task error.".to_string());

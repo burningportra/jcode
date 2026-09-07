@@ -142,3 +142,84 @@ async fn read_stage_returns_contents() {
     assert!(out.output.contains("line2"), "out={}", out.output);
     assert!(!out.output.contains("line1"), "out={}", out.output);
 }
+
+#[tokio::test]
+async fn budget_top_k_caps_blocks_with_disclosure() {
+    let tool = CodeQueryTool::new();
+    let dir = fixture("budget-n");
+    for i in 0..5 {
+        fs::write(dir.join(format!("f{i}.txt")), format!("needle {i}\n")).unwrap();
+    }
+    let full = tool
+        .execute(
+            json!({"pipeline": [
+                {"op": "search", "pattern": "needle"},
+                {"op": "read"}
+            ]}),
+            ctx_with_dir(Some(dir.clone())),
+        )
+        .await
+        .unwrap();
+    assert!(!full.output.contains("capped="), "out={}", full.output);
+    assert!(!full.output.contains("est_tokens"), "out={}", full.output);
+    let cut = tool
+        .execute(
+            json!({"pipeline": [
+                {"op": "search", "pattern": "needle"},
+                {"op": "read"},
+                {"op": "budget", "n": 2}
+            ]}),
+            ctx_with_dir(Some(dir)),
+        )
+        .await
+        .unwrap();
+    assert!(
+        cut.output.contains("capped=3 block(s)"),
+        "out={}",
+        cut.output
+    );
+    assert!(cut.output.contains("est_tokens"), "out={}", cut.output);
+}
+
+#[tokio::test]
+async fn budget_max_tokens_caps_at_block_boundary() {
+    let tool = CodeQueryTool::new();
+    let dir = fixture("budget-tok");
+    fs::write(dir.join("a.txt"), "alpha needle\n").unwrap();
+    fs::write(dir.join("b.txt"), "beta needle\n").unwrap();
+    let out = tool
+        .execute(
+            json!({"pipeline": [
+                {"op": "search", "pattern": "needle"},
+                {"op": "read"},
+                {"op": "budget", "max_tokens": 1}
+            ]}),
+            ctx_with_dir(Some(dir)),
+        )
+        .await
+        .unwrap();
+    // At least one block survives (never empty when input non-empty); cap disclosed.
+    assert!(out.output.contains("capped="), "out={}", out.output);
+    assert!(out.output.contains("est_tokens"), "out={}", out.output);
+}
+
+#[tokio::test]
+async fn budget_signatures_only_drops_read_bodies() {
+    let tool = CodeQueryTool::new();
+    let dir = fixture("budget-sig");
+    fs::write(dir.join("core.ts"), "export function core() {}\n").unwrap();
+    let out = tool
+        .execute(
+            json!({"pipeline": [
+                {"op": "search", "pattern": "core"},
+                {"op": "outline"},
+                {"op": "read"},
+                {"op": "budget", "signatures_only": true}
+            ]}),
+            ctx_with_dir(Some(dir)),
+        )
+        .await
+        .unwrap();
+    assert!(!out.output.contains("── "), "out={}", out.output);
+    assert!(out.output.contains("capped="), "out={}", out.output);
+}
