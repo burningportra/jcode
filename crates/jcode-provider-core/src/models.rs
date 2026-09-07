@@ -327,6 +327,13 @@ pub fn context_limit_for_model_with_provider_and_cache(
         return Some(128_000);
     }
 
+    // A published official limit wins over family fallbacks below (local
+    // pre-merge guard dropped by the theirs-resolution; restored post-merge
+    // to fix configured_context_window_overrides_gpt_family_fallback).
+    if official_openai_limit.is_some() {
+        return official_openai_limit;
+    }
+
     if model.starts_with("gpt-5.2-chat")
         || model.starts_with("gpt-5.1-chat")
         || model.starts_with("gpt-5-chat")
