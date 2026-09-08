@@ -208,3 +208,47 @@ Verify with temporary repository fixtures, input-routing tests and an isolated T
 
 
 Implementation is committed as `54424904e` and verified by the checks above. Confidence: **96%**. The main remaining limitations are deliberate: case-insensitive substring matching rather than fuzzy matching, nonignored workspace files rather than every tracked Git file, and no native-SSH remote catalog. Large or inaccessible catalogs show an explicit partial/unavailable notice. See [the user guide](../FILE_REFERENCES.md).
+
+## Requirement-to-evidence ledger
+
+This ledger maps the explicit request and changed public behavior to observed checks. “Inspection” is not runtime verification. Cross-platform integration outside the tested macOS host remains unverified.
+
+| Requirement or changed output | Concrete check | Observed result |
+|---|---|---|
+| Generate 30 brief ideas before evaluating them | Count numbered entries in First pass | Exactly 30, numbered 1–30 |
+| Critically evaluate every idea with a reason | Compare scrutiny table IDs with First pass | All 30 have a decision and reason |
+| Detail every retained idea, including action, downside and confidence | Inspect five Selected plans sections | Five concrete plans, each with downsides and numeric confidence; snippets for storage and proposed doctor JSON |
+| Implement top ideas now | Inspect commits and changed production paths | Ideas 1–4 implemented; idea 5 explicitly plan-only |
+| Select files using @ in the selected workspace | Final binary: `python3 -u tests/test_file_mentions_tui.py "$PWD/target/selfdev/jcode"` | All six reported real-TUI workflow checks passed after final rebuild |
+| Never erase unreadable environment contents on update/removal | `env_update_and_removal_preserve_unreadable_contents`, `env_update_rejects_directory_without_renaming_it` | Passed; original contents/directory preserved |
+| Preserve normal environment create/replace/remove behavior | `env_update_creates_replaces_and_removes_only_requested_key` | Passed |
+| Prefer valid primary JSON | `valid_primary_wins_without_recovery_events` | Passed, no recovery event |
+| Recover corrupt/invalid-UTF8 primary without changing either file | `backup_recovery_preserves_primary_and_backup_bytes` | Passed |
+| Do not overwrite a newer concurrent save during recovery | `backup_recovery_does_not_overwrite_newer_save` | Passed with deterministic save in recovery callback |
+| Missing/corrupt backup errors and deleted-primary behavior | `corrupt_primary_without_valid_backup_returns_error_without_writes`, `missing_primary_is_not_resurrected_from_backup` | Passed |
+| Restore terminal on early setup failure, unwind and resume failure | `initialization_terminal_failure_and_unwind_are_guarded`, `initialization_resume_failure_at_each_operation_is_guarded` | Passed injected failure checks |
+| Retain cleanup ownership after partial mode/keyboard writes | `initialization_mode_flush_failures_restore_once`, `initialization_keyboard_flush_failure_retains_pop_ownership`, `initialization_keyboard_unwind_is_guarded` | Passed, including actual crossterm bytes accepted before injected flush failure |
+| Preserve successful/inherited/disabled terminal mode semantics | `initialization_success_retains_guard_without_double_keyboard_push`, `initialization_disabled_modes_do_not_attempt_keyboard_push`, existing guard/handoff tests | All 17 selected terminal tests passed |
+| Bound clipboard payload delivery to a non-reader | `large_payload_to_nonreading_helper_times_out` | Passed with real child process and large payload; this does not bound OS process creation or reap time |
+| Deliver complete clipboard payload and support live owner | `large_consuming_helper_receives_entire_payload`, `long_lived_helper_counts_as_a_copy_without_blocking` | Passed, consumer completion marker checked before reading output |
+| Preserve clipboard error and Wayland/X11 helper priority behavior | `helper_that_exits_nonzero_falls_through`, `missing_helper_binary_falls_through`, `wayland_still_wins_when_wl_copy_works`, `xclip_takes_over_when_wl_copy_fails`, `xsel_takes_over_when_wl_copy_and_xclip_are_missing`, `no_working_helper_reports_failure_so_later_fallbacks_run` | Passed with child-process fixtures, not a Linux compositor |
+| @ token boundaries and UTF-8; email not a token | `file_mention_tokens_are_cursor_and_utf8_safe` plus PTY email check | Passed |
+| Active workspace subtree, ignore rules, untracked paths | `file_mention_walker_respects_ignore_and_subtree` plus PTY ignored-file check | Passed; intentionally not a complete tracked Git index |
+| Cursor changes invalidate suggestions | `file_mention_same_input_new_cursor_invalidates_frame_cache` | Passed |
+| Enter/Tab preserve surrounding draft and undo | `file_mention_enter_and_tab_preserve_draft_and_undo_once` plus real PTY Enter/Tab | Passed, no prompt submission |
+| Arrows select and disconnected input works | `file_mention_selection_arrows_and_disconnected_tab` | Passed |
+| Connected daemon Enter/Tab do not send or queue a prompt | `file_mention_daemon_client_enter_and_tab_are_not_submission` plus real PTY daemon client | Passed |
+| Esc preserves draft and does not cancel the agent | `file_mention_escape_suppresses_until_token_changes_without_cancel` plus PTY Esc | Passed |
+| Loading and empty rows cannot submit or become inserted text | `file_mention_pending_and_empty_rows_never_submit_or_insert` plus PTY empty-result Enter | Passed |
+| Credential-entry state suppresses file listing | `file_mention_pending_credentials_suppress_listing` | Passed |
+| Partial/unavailable status is not a selectable path | `file_mention_partial_notice_is_not_selectable_or_inserted`, `file_mention_missing_root_is_unavailable_not_process_cwd` | Passed |
+| Asynchronous root changes discard stale results and redraw | `file_mention_async_root_switch_and_idle_poll` | Passed; final PTY test also observed completed rendered suggestions |
+| Do not traverse symlinks | `file_mention_walker_never_follows_symlinks` | Passed |
+| Quote filenames containing spaces | PTY spaced-filename acceptance and reference insertion assertions | Passed |
+| References do not automatically attach file contents | Inspect acceptance path and resulting PTY composer text | Only path replacement occurs; no attachment/content read operation added |
+| Case-insensitive substring matching and bounded catalog | Inspect `file_mentions.rs` filtering and walker | Uses lowercase substring lookup; checks 20,000 files, 50,000 entries and two-second budget between walker iterations, not a hard deadline on filesystem calls |
+| Native SSH must not enumerate local client files | Inspect SSH guard before starting worker | Guard present; native SSH end-to-end behavior not exercised |
+| Preserve existing autocomplete and platform labels | Existing autocomplete and suggestion filters | 6 autocomplete tests and 50 suggestion tests passed, one benchmark ignored; macOS test expectation now uses platform formatter |
+| Commit and activate implemented work | Git commits plus `selfdev status` after successful build-reload | Current and shared-server channels both `ec6d60729-dirty-490a9d433b49`; final rebuilt artifact passed PTY acceptance again |
+
+Limits: no full-workspace test run, Windows runtime checks, native-SSH acceptance or real Linux compositor validation was performed. These are unverified coverage boundaries, not implied passes. The remaining generated codegraph database is not part of the implementation commits.
