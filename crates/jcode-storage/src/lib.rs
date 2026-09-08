@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use std::io::Write;
@@ -475,7 +475,14 @@ pub fn upsert_env_file_value(path: &Path, env_key: &str, value: Option<&str>) ->
         anyhow::bail!("environment variable value cannot contain a newline");
     }
 
-    let existing = std::fs::read_to_string(path).unwrap_or_default();
+    let existing = match std::fs::read_to_string(path) {
+        Ok(existing) => existing,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(error) => {
+            return Err(error)
+                .with_context(|| format!("Failed to read environment file {}", path.display()));
+        }
+    };
     let prefix = format!("{}=", env_key);
 
     let mut lines = Vec::new();
@@ -644,25 +651,29 @@ pub fn read_json<T: DeserializeOwned>(path: &Path) -> Result<T> {
     })
 }
 
+/// Read JSON, falling back to a valid backup when the primary is corrupt.
+///
+/// Recovery does not repair the primary on disk: a read-side repair could
+/// overwrite a newer concurrent save. Missing primaries remain errors so reads
+/// do not resurrect deliberately deleted state.
 pub fn read_json_with_recovery_handler<T, F>(path: &Path, mut on_recovery: F) -> Result<T>
 where
     T: DeserializeOwned,
     F: FnMut(StorageRecoveryEvent<'_>),
 {
-    let data = std::fs::read_to_string(path)?;
-    match serde_json::from_str(&data) {
+    let data = std::fs::read(path)?;
+    match serde_json::from_slice(&data) {
         Ok(val) => Ok(val),
         Err(e) => {
             let bak_path = path.with_extension("bak");
             if bak_path.exists() {
                 on_recovery(StorageRecoveryEvent::CorruptPrimary { path, error: &e });
-                let bak_data = std::fs::read_to_string(&bak_path)?;
-                match serde_json::from_str(&bak_data) {
+                let bak_data = std::fs::read(&bak_path)?;
+                match serde_json::from_slice(&bak_data) {
                     Ok(val) => {
                         on_recovery(StorageRecoveryEvent::RecoveredFromBackup {
                             backup_path: &bak_path,
                         });
-                        let _ = std::fs::copy(&bak_path, path);
                         Ok(val)
                     }
                     Err(bak_err) => Err(anyhow::anyhow!(
