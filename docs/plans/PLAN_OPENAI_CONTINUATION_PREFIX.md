@@ -18,7 +18,7 @@ Maintain this state at fresh successful response and every successful continuati
 
 ## Alternatives and review gate
 
-Count-only reuse is disproven by incident evidence. Disabling all WebSockets is broader and sacrifices valid reuse. Fingerprint validation with conservative full replay is the proposed minimum. Independent read-only reviewer is checking current implementation and test requirements before edits. This compressed repair does not claim a verified cross-model review.
+Count-only reuse is disproven by incident evidence. Disabling all WebSockets is broader and sacrifices valid reuse. Fingerprint validation with conservative full replay is the proposed minimum. Independent read-only reviewer goat checked the current implementation and found no blocking design gap. This compressed repair used one independent session, not a verified cross-model review. Architecture/failure review and subsequent state/simplicity review found no structural gaps after these requirements were incorporated. No cross-model review was performed, which remains a review limitation.
 
 ## Execution and test obligations
 
@@ -29,4 +29,4 @@ Count-only reuse is disproven by incident evidence. Disabling all WebSockets is 
 
 ## Convergence and handoff
 
-No beads required for this bounded single-session repair. Todo ordering is evidence -> reviewed plan -> implementation/regression -> build and verification -> distillation. Do not implement until reviewer gaps have been folded into this body. Remaining uncertainty is exact history-reordering source, not the violated transport invariant. Broader history normalization changes are deferred unless the prefix guard is insufficient.
+No beads required for this bounded single-session repair. Todo ordering is evidence -> reviewed plan -> implementation/regression -> build and verification -> distillation. Reviewer requirements are incorporated: fingerprint FULL canonical input, never the filtered delta; update fingerprint/count/response ID together only after completed success in both paths; initialize all prewarm/test constructors; bounds-check before slicing; validate before any response.create send. The existing stable_hash_json serializes the same Value deterministically and is suitable as a conservative internal fingerprint. Loopback acceptance must inspect the actual fallback payload for both call and result. Implementation gate passed. Remaining uncertainty is exact history-reordering source, not the violated transport invariant. Broader history normalization changes are deferred unless the prefix guard is insufficient.
