@@ -121,6 +121,8 @@ pub struct TuiRuntimeGuard {
 
 #[cfg(test)]
 thread_local! {
+    // Intercept cleanup only within opted-in tests, never touch their real TTY.
+    static TEST_CLEANUPS: std::cell::RefCell<Option<Vec<(bool, bool, bool, bool)>>> = const { std::cell::RefCell::new(None) };
     /// Counts how many times the guard's `Drop` performed an emergency restore.
     /// Used by tests to verify the error/panic safety net fires exactly once.
     static GUARD_DROP_RESTORES: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
@@ -372,75 +374,51 @@ pub fn init_tui_runtime() -> Result<(ratatui::DefaultTerminal, TuiRuntimeGuard)>
     // new process still took the resume path, leaving it on the primary screen
     // without mouse capture.
     let inherited_terminal = has_terminal_exec_handoff(is_resuming, inherited_modes);
-    if inherited_terminal {
-        // OSC terminal queries are unsafe here because the previous process
-        // deliberately exec'd without leaving raw mode or the alternate screen.
-        crate::tui::theme_detect::init_theme_mode_for_resume(inherited_theme.as_deref());
-    } else {
-        // The OSC 11 query needs the cooked terminal and must happen before init.
-        crate::tui::theme_detect::init_theme_mode();
-    }
-    let terminal = init_tui_terminal(inherited_terminal)?;
-    crate::tui::mermaid::install_jcode_mermaid_hooks();
-    crate::tui::markdown::install_jcode_markdown_hooks();
-    crate::tui::mermaid::init_picker();
-
     let perf_policy = crate::perf::tui_policy();
-    // These private handoff values apply only to this exec boundary. Avoid
-    // leaking them into tools or unrelated child jcode processes.
-    crate::env::remove_var(INHERITED_MODES_ENV);
-    crate::env::remove_var(INHERITED_THEME_ENV);
-
-    let fallback_modes = InheritedTerminalModes {
-        mouse_capture: perf_policy.enable_mouse_capture,
-        keyboard_enhanced: perf_policy.enable_keyboard_enhancement,
-        focus_change: perf_policy.enable_focus_change,
-    };
-    let modes = if inherited_terminal {
-        // The previous process intentionally preserved these modes across exec.
-        // Reassert idempotent modes because terminals, multiplexers, or an older
-        // process may have cleared them during the handoff. Do not push Kitty's
-        // stack-based keyboard enhancement flags again. A later normal exit must
-        // still disable every inherited mode, so retain them in the guard.
-        let modes = inherited_modes.unwrap_or(fallback_modes);
-        crossterm::execute!(std::io::stdout(), crossterm::event::EnableBracketedPaste)?;
-        if modes.focus_change {
-            crossterm::execute!(std::io::stdout(), crossterm::event::EnableFocusChange)?;
-        }
-        if modes.mouse_capture {
-            crossterm::execute!(std::io::stdout(), crossterm::event::EnableMouseCapture)?;
-            if let Err(err) = sync_windows_vt_mouse_capture(true) {
-                crate::logging::warn(&format!(
-                    "failed to enable Windows VT mouse tracking: {err}"
-                ));
-            }
-        }
-        modes
-    } else {
-        let keyboard_enhanced = if perf_policy.enable_keyboard_enhancement {
-            tui::enable_keyboard_enhancement()
-        } else {
-            false
-        };
-        let modes = InheritedTerminalModes {
+    let modes = inherited_modes
+        .filter(|_| inherited_terminal)
+        .unwrap_or(InheritedTerminalModes {
             mouse_capture: perf_policy.enable_mouse_capture,
-            keyboard_enhanced,
+            keyboard_enhanced: perf_policy.enable_keyboard_enhancement,
             focus_change: perf_policy.enable_focus_change,
-        };
-        crossterm::execute!(std::io::stdout(), crossterm::event::EnableBracketedPaste)?;
-        if modes.focus_change {
-            crossterm::execute!(std::io::stdout(), crossterm::event::EnableFocusChange)?;
-        }
-        if modes.mouse_capture {
-            crossterm::execute!(std::io::stdout(), crossterm::event::EnableMouseCapture)?;
-            if let Err(err) = sync_windows_vt_mouse_capture(true) {
-                crate::logging::warn(&format!(
-                    "failed to enable Windows VT mouse tracking: {err}"
-                ));
+        });
+    // Own inherited modes before even theme/terminal setup can fail or unwind.
+    let guard = TuiRuntimeGuard::new(TuiRuntimeState {
+        mouse_capture: modes.mouse_capture,
+        keyboard_enhanced: inherited_terminal && modes.keyboard_enhanced,
+        focus_change: modes.focus_change,
+    });
+    // Reassert idempotent modes on resume, but never push the Kitty stack twice.
+    let (terminal, guard) = init_tui_runtime_with(
+        guard,
+        !inherited_terminal && modes.keyboard_enhanced,
+        || {
+            if inherited_terminal {
+                // OSC queries are unsafe while the inherited terminal is raw.
+                crate::tui::theme_detect::init_theme_mode_for_resume(inherited_theme.as_deref());
+            } else {
+                crate::tui::theme_detect::init_theme_mode();
             }
+            let terminal = init_tui_terminal(inherited_terminal)?;
+            crate::tui::mermaid::install_jcode_mermaid_hooks();
+            crate::tui::markdown::install_jcode_markdown_hooks();
+            crate::tui::mermaid::init_picker();
+            // Handoff values belong only to this exec boundary.
+            crate::env::remove_var(INHERITED_MODES_ENV);
+            crate::env::remove_var(INHERITED_THEME_ENV);
+            Ok(terminal)
+        },
+        tui::enable_keyboard_enhancement,
+        &mut io::stdout(),
+    )?;
+    if guard.state.mouse_capture {
+        if let Err(err) = sync_windows_vt_mouse_capture(true) {
+            crate::logging::warn(&format!(
+                "failed to enable Windows VT mouse tracking: {err}"
+            ));
         }
-        modes
-    };
+    }
+    let modes = &guard.state;
 
     crate::logging::info(&format!(
         "EVENT event=TUI_TERMINAL_MODES phase=initialized pid={} resuming={} handoff={} handoff_raw={} raw_mode={} mouse_capture={} keyboard_enhanced={} focus_change={} idempotent_modes_reasserted={}",
@@ -455,17 +433,56 @@ pub fn init_tui_runtime() -> Result<(ratatui::DefaultTerminal, TuiRuntimeGuard)>
         inherited_terminal,
     ));
 
-    Ok((
-        terminal,
-        TuiRuntimeGuard::new(TuiRuntimeState {
-            mouse_capture: modes.mouse_capture,
-            keyboard_enhanced: modes.keyboard_enhanced,
-            focus_change: modes.focus_change,
-        }),
-    ))
+    Ok((terminal, guard))
+}
+
+/// Shared sequencing keeps the guard alive across terminal creation and every
+/// mode write. Closures and the writer allow failures without touching a TTY.
+fn init_tui_runtime_with<T>(
+    mut guard: TuiRuntimeGuard,
+    push_keyboard: bool,
+    init_terminal: impl FnOnce() -> Result<T>,
+    enable_keyboard: impl FnOnce() -> bool,
+    writer: &mut impl Write,
+) -> Result<(T, TuiRuntimeGuard)> {
+    let terminal = init_terminal()?;
+    if push_keyboard {
+        // A failed flush can follow a successful push. Keep ownership so both
+        // errors and unwinds attempt a pop instead of leaking the keyboard stack.
+        guard.state.keyboard_enhanced = true;
+        if !enable_keyboard() {
+            anyhow::bail!("failed to enable terminal keyboard enhancement");
+        }
+    }
+    crossterm::execute!(writer, crossterm::event::EnableBracketedPaste)?;
+    if guard.state.focus_change {
+        crossterm::execute!(writer, crossterm::event::EnableFocusChange)?;
+    }
+    if guard.state.mouse_capture {
+        crossterm::execute!(writer, crossterm::event::EnableMouseCapture)?;
+    }
+    Ok((terminal, guard))
 }
 
 fn cleanup_tui_runtime(state: &TuiRuntimeState, restore_terminal: bool) {
+    #[cfg(test)]
+    if TEST_CLEANUPS.with(|records| {
+        let mut records = records.borrow_mut();
+        if let Some(records) = records.as_mut() {
+            records.push((
+                state.mouse_capture,
+                state.keyboard_enhanced,
+                state.focus_change,
+                restore_terminal,
+            ));
+            true
+        } else {
+            false
+        }
+    }) {
+        return;
+    }
+
     crate::logging::info(&format!(
         "EVENT event=TUI_TERMINAL_MODES phase=cleanup pid={} restore_terminal={} raw_mode={} mouse_capture={} keyboard_enhanced={} focus_change={}",
         std::process::id(),
@@ -562,17 +579,23 @@ fn write_session_resume_hint(mut writer: impl Write, session_id: &str) -> io::Re
 fn init_tui_terminal_resume() -> Result<ratatui::DefaultTerminal> {
     use ratatui::{Terminal, backend::CrosstermBackend};
 
-    crossterm::terminal::enable_raw_mode()
-        .map_err(|e| anyhow::anyhow!("failed to enable raw mode on resume: {}", e))?;
+    init_tui_terminal_resume_with(
+        crossterm::terminal::enable_raw_mode,
+        || Terminal::new(CrosstermBackend::new(io::stdout())),
+        |terminal| terminal.clear(),
+    )
+}
 
-    let backend = CrosstermBackend::new(io::stdout());
-    let mut terminal = Terminal::new(backend)
-        .map_err(|e| anyhow::anyhow!("failed to create terminal on resume: {}", e))?;
-
-    terminal
-        .clear()
+fn init_tui_terminal_resume_with<T>(
+    enable_raw: impl FnOnce() -> io::Result<()>,
+    create: impl FnOnce() -> io::Result<T>,
+    clear: impl FnOnce(&mut T) -> io::Result<()>,
+) -> Result<T> {
+    enable_raw().map_err(|e| anyhow::anyhow!("failed to enable raw mode on resume: {}", e))?;
+    let mut terminal =
+        create().map_err(|e| anyhow::anyhow!("failed to create terminal on resume: {}", e))?;
+    clear(&mut terminal)
         .map_err(|e| anyhow::anyhow!("failed to clear terminal on resume: {}", e))?;
-
     Ok(terminal)
 }
 
@@ -675,6 +698,250 @@ mod tests {
             keyboard_enhanced: false,
             focus_change: false,
         })
+    }
+
+    struct CaptureCleanup;
+
+    impl CaptureCleanup {
+        fn new() -> Self {
+            TEST_CLEANUPS.with(|records| *records.borrow_mut() = Some(Vec::new()));
+            GUARD_DROP_RESTORES.with(|count| count.set(0));
+            Self
+        }
+
+        fn assert(&self, expected: &[(bool, bool, bool, bool)], drops: u32) {
+            TEST_CLEANUPS.with(|records| assert_eq!(records.borrow().as_deref(), Some(expected)));
+            GUARD_DROP_RESTORES.with(|count| assert_eq!(count.get(), drops));
+        }
+    }
+
+    impl Drop for CaptureCleanup {
+        fn drop(&mut self) {
+            TEST_CLEANUPS.with(|records| *records.borrow_mut() = None);
+        }
+    }
+
+    fn initialization_guard(inherited: bool) -> TuiRuntimeGuard {
+        TuiRuntimeGuard::new(TuiRuntimeState {
+            mouse_capture: true,
+            keyboard_enhanced: inherited,
+            focus_change: true,
+        })
+    }
+
+    #[test]
+    fn initialization_terminal_failure_and_unwind_are_guarded() {
+        for inherited in [false, true] {
+            for unwind in [false, true] {
+                let capture = CaptureCleanup::new();
+                let mut writer = Vec::new();
+                let outcome = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+                    init_tui_runtime_with(
+                        initialization_guard(inherited),
+                        !inherited,
+                        || -> Result<()> {
+                            if unwind {
+                                panic!("injected terminal panic");
+                            }
+                            anyhow::bail!("injected terminal failure")
+                        },
+                        || panic!("keyboard setup must not run"),
+                        &mut writer,
+                    )
+                }));
+                assert!(matches!(outcome, Err(_) | Ok(Err(_))));
+                assert!(writer.is_empty());
+                capture.assert(&[(true, inherited, true, true)], 1);
+            }
+        }
+    }
+
+    #[test]
+    fn initialization_resume_failure_at_each_operation_is_guarded() {
+        for fail_at in 0..3 {
+            let capture = CaptureCleanup::new();
+            let calls = std::cell::RefCell::new(Vec::new());
+            let step = |index| {
+                calls.borrow_mut().push(index);
+                if index == fail_at {
+                    Err(io::Error::other("injected resume failure"))
+                } else {
+                    Ok(())
+                }
+            };
+            let mut writer = Vec::new();
+            let result = init_tui_runtime_with(
+                initialization_guard(true),
+                false,
+                || init_tui_terminal_resume_with(|| step(0), || step(1), |_| step(2)),
+                || panic!("resume must not push keyboard flags"),
+                &mut writer,
+            );
+            assert!(result.is_err());
+            assert_eq!(*calls.borrow(), (0..=fail_at).collect::<Vec<_>>());
+            assert!(writer.is_empty());
+            capture.assert(&[(true, true, true, true)], 1);
+        }
+    }
+
+    #[test]
+    fn initialization_mode_flush_failures_restore_once() {
+        struct FailFlush {
+            flushes: usize,
+            fail_at: usize,
+        }
+        impl Write for FailFlush {
+            fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                self.flushes += 1;
+                if self.flushes == self.fail_at {
+                    Err(io::Error::other("injected flush failure"))
+                } else {
+                    Ok(())
+                }
+            }
+        }
+        for inherited in [false, true] {
+            // Paste, focus, then mouse. Failure happens after bytes were written.
+            for fail_at in 1..=3 {
+                let capture = CaptureCleanup::new();
+                let keyboard_calls = std::cell::Cell::new(0);
+                let mut writer = FailFlush {
+                    flushes: 0,
+                    fail_at,
+                };
+                let result = init_tui_runtime_with(
+                    initialization_guard(inherited),
+                    !inherited,
+                    || Ok(()),
+                    || {
+                        keyboard_calls.set(keyboard_calls.get() + 1);
+                        true
+                    },
+                    &mut writer,
+                );
+                assert!(result.is_err());
+                assert_eq!(writer.flushes, fail_at);
+                assert_eq!(keyboard_calls.get(), usize::from(!inherited));
+                capture.assert(&[(true, true, true, true)], 1);
+            }
+        }
+    }
+
+    #[test]
+    fn initialization_success_retains_guard_without_double_keyboard_push() {
+        for inherited in [false, true] {
+            let capture = CaptureCleanup::new();
+            let keyboard_calls = std::cell::Cell::new(0);
+            let mut writer = Vec::new();
+            let (_, guard) = init_tui_runtime_with(
+                initialization_guard(inherited),
+                !inherited,
+                || Ok(()),
+                || {
+                    keyboard_calls.set(keyboard_calls.get() + 1);
+                    true
+                },
+                &mut writer,
+            )
+            .unwrap();
+            assert_eq!(keyboard_calls.get(), usize::from(!inherited));
+            let mut expected = Vec::new();
+            crossterm::execute!(
+                &mut expected,
+                crossterm::event::EnableBracketedPaste,
+                crossterm::event::EnableFocusChange,
+                crossterm::event::EnableMouseCapture
+            )
+            .unwrap();
+            assert_eq!(writer, expected);
+            capture.assert(&[], 0);
+            // Exec teardown leaves modes intact and disarms emergency cleanup.
+            guard.finish(false);
+            capture.assert(&[(true, true, true, false)], 0);
+        }
+    }
+
+    #[test]
+    fn initialization_disabled_modes_do_not_attempt_keyboard_push() {
+        let capture = CaptureCleanup::new();
+        let mut writer = Vec::new();
+        let (_, guard) = init_tui_runtime_with(
+            test_guard(),
+            false,
+            || Ok(()),
+            || panic!("disabled keyboard mode must not push"),
+            &mut writer,
+        )
+        .unwrap();
+        let mut expected = Vec::new();
+        crossterm::execute!(&mut expected, crossterm::event::EnableBracketedPaste).unwrap();
+        assert_eq!(writer, expected);
+        guard.finish(true);
+        capture.assert(&[(false, false, false, true)], 0);
+    }
+
+    #[test]
+    fn initialization_keyboard_flush_failure_retains_pop_ownership() {
+        #[derive(Default)]
+        struct FailKeyboardFlush {
+            bytes: Vec<u8>,
+            flushes: usize,
+        }
+        impl Write for FailKeyboardFlush {
+            fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+                self.bytes.extend_from_slice(bytes);
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                self.flushes += 1;
+                Err(io::Error::other("injected keyboard flush failure"))
+            }
+        }
+        let capture = CaptureCleanup::new();
+        let mut keyboard_writer = FailKeyboardFlush::default();
+        let mut mode_writer = Vec::new();
+        let result = init_tui_runtime_with(
+            test_guard(),
+            true,
+            || Ok(()),
+            || {
+                crossterm::execute!(
+                    &mut keyboard_writer,
+                    crossterm::event::PushKeyboardEnhancementFlags(
+                        crossterm::event::KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
+                    )
+                )
+                .is_ok()
+            },
+            &mut mode_writer,
+        );
+        let error = result
+            .err()
+            .expect("failed keyboard push must abort initialization");
+        assert!(error.to_string().contains("keyboard enhancement"));
+        assert_eq!(keyboard_writer.bytes, b"\x1b[>1u");
+        assert_eq!(keyboard_writer.flushes, 1);
+        assert!(mode_writer.is_empty(), "later mode setup must not run");
+        capture.assert(&[(false, true, false, true)], 1);
+    }
+
+    #[test]
+    fn initialization_keyboard_unwind_is_guarded() {
+        let capture = CaptureCleanup::new();
+        let outcome = panic::catch_unwind(|| {
+            init_tui_runtime_with(
+                initialization_guard(false),
+                true,
+                || Ok(()),
+                || panic!("injected keyboard panic"),
+                &mut Vec::new(),
+            )
+        });
+        assert!(outcome.is_err());
+        capture.assert(&[(true, true, true, true)], 1);
     }
 
     #[test]
