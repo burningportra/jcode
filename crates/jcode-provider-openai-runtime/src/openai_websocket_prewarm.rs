@@ -251,6 +251,8 @@ async fn warm_socket(
                             // continuation must send ALL input, including reasoning.
                             message_count: 0,
                             last_input_item_count: 0,
+                            last_input_fingerprint:
+                                jcode_provider_core::fingerprint::stable_hash_json(&[] as &[Value]),
                         });
                     }
                     Some("response.in_progress") => {}

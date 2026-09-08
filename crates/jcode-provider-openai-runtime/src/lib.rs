@@ -285,8 +285,10 @@ struct PersistentWsState {
     last_response_completed_at: Instant,
     /// Number of messages sent in this conversation chain
     message_count: usize,
-    /// Number of items we sent in the last full request (for detecting conversation changes)
+    /// Number of items in the last successfully completed canonical input.
     last_input_item_count: usize,
+    /// Fingerprint of the full canonical input, never the filtered continuation delta.
+    last_input_fingerprint: u64,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -404,6 +406,12 @@ fn summarize_ws_input(items: &[Value]) -> WsInputStats {
         }
     }
     stats
+}
+
+fn persistent_ws_prefix_matches(input: &[Value], previous_count: usize, fingerprint: u64) -> bool {
+    input.get(..previous_count).is_some_and(|prefix| {
+        jcode_provider_core::fingerprint::stable_hash_json(prefix) == fingerprint
+    })
 }
 
 fn persistent_ws_incremental_items(input: &[Value], start_index: usize) -> (Vec<Value>, usize) {

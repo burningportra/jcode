@@ -84,6 +84,9 @@ pub(super) async fn test_persistent_ws_state() -> (PersistentWsState, tokio::tas
             last_response_completed_at: Instant::now(),
             message_count: 1,
             last_input_item_count: 1,
+            last_input_fingerprint: jcode_provider_core::fingerprint::stable_hash_json(&[
+                serde_json::json!({"type": "message", "role": "user", "content": "first"}),
+            ]),
         },
         server,
     )
@@ -138,6 +141,9 @@ async fn test_persistent_ws_state_with_ping_notify() -> (
             last_response_completed_at: Instant::now(),
             message_count: 1,
             last_input_item_count: 1,
+            last_input_fingerprint: jcode_provider_core::fingerprint::stable_hash_json(&[
+                serde_json::json!({"type": "message", "role": "user", "content": "first"}),
+            ]),
         },
         server,
         ping_notify,

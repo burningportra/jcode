@@ -542,6 +542,9 @@ async fn persistent_ws_does_not_reuse_response_cancelled_before_completion() {
         last_response_completed_at: Instant::now(),
         message_count: 1,
         last_input_item_count: 1,
+        last_input_fingerprint: jcode_provider_core::fingerprint::stable_hash_json(&[
+            serde_json::json!({"type": "message", "role": "user", "content": "first"}),
+        ]),
     })));
     let (tx, rx) = mpsc::channel(1);
     drop(rx); // Mirrors a soft interrupt cancelling the active stream consumer.
@@ -596,7 +599,10 @@ async fn persistent_ws_rejects_identity_changed_by_another_fork() {
 
 #[tokio::test]
 async fn persistent_ws_rechecks_identity_after_presend_backpressure() {
-    let (state, server) = test_persistent_ws_state().await;
+    let (mut state, server) = test_persistent_ws_state().await;
+    state.last_input_fingerprint = jcode_provider_core::fingerprint::stable_hash_json(&[
+        serde_json::json!({"role":"user", "content":"previous"}),
+    ]);
     let persistent_ws = Arc::new(Mutex::new(Some(state)));
     let credentials = Arc::new(RwLock::new(prewarm_test_credentials()));
     let (tx, mut rx) = mpsc::channel(1);
@@ -639,4 +645,168 @@ async fn persistent_ws_rechecks_identity_after_presend_backpressure() {
         .await
         .expect("stale socket must close before generation")
         .unwrap();
+}
+
+#[test]
+fn persistent_ws_prefix_fingerprint_checks_full_input_and_bounds() {
+    let prior = vec![
+        serde_json::json!({"type":"message","role":"user","content":"first"}),
+        serde_json::json!({"type":"reasoning","id":"rs_prior","encrypted_content":"original"}),
+    ];
+    let fingerprint = jcode_provider_core::fingerprint::stable_hash_json(&prior);
+    assert!(persistent_ws_prefix_matches(
+        &prior,
+        prior.len(),
+        fingerprint
+    ));
+    let mut growing = prior.clone();
+    growing
+        .push(serde_json::json!({"type":"function_call_output","call_id":"todo","output":"saved"}));
+    assert!(persistent_ws_prefix_matches(
+        &growing,
+        prior.len(),
+        fingerprint
+    ));
+    growing[1]["encrypted_content"] = serde_json::json!("changed");
+    assert!(!persistent_ws_prefix_matches(
+        &growing,
+        prior.len(),
+        fingerprint
+    ));
+    growing.swap(0, 1);
+    assert!(!persistent_ws_prefix_matches(
+        &growing,
+        prior.len(),
+        fingerprint
+    ));
+    assert!(!persistent_ws_prefix_matches(
+        &prior[..1],
+        prior.len(),
+        fingerprint
+    ));
+    assert!(!persistent_ws_prefix_matches(
+        &prior,
+        usize::MAX,
+        fingerprint
+    ));
+    assert!(persistent_ws_prefix_matches(
+        &prior,
+        0,
+        jcode_provider_core::fingerprint::stable_hash_json(&[] as &[Value])
+    ));
+}
+
+#[tokio::test]
+async fn persistent_ws_changed_prefix_sends_no_delta_and_replays_tool_pair() {
+    let _lock = jcode_base::storage::lock_test_env();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let _base = EnvVarGuard::set("JCODE_OPENAI_API_BASE", &format!("http://{addr}/v1"));
+        let _transport = EnvVarGuard::set("JCODE_OPENAI_TRANSPORT", "websocket");
+        let _prewarm = EnvVarGuard::set("JCODE_OPENAI_PREWARM", "0");
+        let mut messages: Vec<_> = (0..66).map(|i| prewarm_user_message(&format!("turn {i}"))).collect();
+        let mut prior_messages = jcode_message_types::messages_with_dynamic_system_context(&messages, "dynamic reminder");
+        prior_messages.push(prewarm_user_message("ephemeral memory"));
+        let prior = build_responses_input(&prior_messages);
+        messages.push(assistant_tool_use("call_todo", "todo", serde_json::json!({})));
+        messages.push(ChatMessage {
+            role: Role::User,
+            content: vec![ContentBlock::ToolResult { tool_use_id: "call_todo".into(), content: "persisted result".into(), is_error: None }],
+            timestamp: None,
+            tool_duration_ms: None,
+        });
+        messages.push(prewarm_user_message("queued user turn"));
+        let messages = jcode_message_types::messages_with_dynamic_system_context(&messages, "dynamic reminder");
+        let current = build_responses_input(&messages);
+        assert_eq!(prior.len(), 68);
+        assert_eq!(current.len(), 70);
+        assert_eq!(prior.iter().zip(&current).take_while(|(a,b)| a == b).count(), 66);
+        let expected = current.clone();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut old = tokio_tungstenite::accept_async(stream).await.unwrap();
+            while let Some(frame) = old.next().await {
+                match frame {
+                    Ok(WsMessage::Text(text)) => panic!("changed prefix sent a delta: {text}"),
+                    Ok(WsMessage::Ping(payload)) => old.send(WsMessage::Pong(payload)).await.unwrap(),
+                    Ok(WsMessage::Close(_)) | Err(_) => break,
+                    _ => {}
+                }
+            }
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut fresh = tokio_tungstenite::accept_async(stream).await.unwrap();
+            let payload: Value = serde_json::from_str(&fresh.next().await.unwrap().unwrap().into_text().unwrap()).unwrap();
+            assert_eq!(payload["type"], "response.create");
+            assert!(payload.get("previous_response_id").is_none());
+            assert_eq!(payload["input"], serde_json::json!(expected));
+            let input = payload["input"].as_array().unwrap();
+            assert!(input.iter().any(|v| v["type"] == "function_call" && v["call_id"] == "call_todo"));
+            assert!(input.iter().any(|v| v["type"] == "function_call_output" && v["call_id"] == "call_todo" && v["output"] == "persisted result"));
+            fresh.send(WsMessage::Text(r#"{"type":"response.created","response":{"id":"resp_replayed"}}"#.into())).await.unwrap();
+            fresh.send(WsMessage::Text(r#"{"type":"response.completed","response":{"id":"resp_replayed","status":"completed","output":[]}}"#.into())).await.unwrap();
+            let delta: Value = serde_json::from_str(&fresh.next().await.unwrap().unwrap().into_text().unwrap()).unwrap();
+            assert_eq!(delta["previous_response_id"], "resp_replayed");
+            assert_eq!(delta["input"].as_array().unwrap().len(), 1);
+            assert!(delta["input"][0].to_string().contains("append only"));
+            fresh.send(WsMessage::Text(r#"{"type":"response.created","response":{"id":"resp_appended"}}"#.into())).await.unwrap();
+            fresh.send(WsMessage::Text(r#"{"type":"response.completed","response":{"id":"resp_appended","status":"completed","output":[]}}"#.into())).await.unwrap();
+        });
+        let (client_ws, _) = connect_async(format!("ws://{addr}")).await.unwrap();
+        let provider = OpenAIProvider::new(prewarm_test_credentials());
+        *provider.credentials.write().await = prewarm_test_credentials();
+        provider.set_transport("websocket").unwrap();
+        provider.set_model("gpt-5.6-sol").unwrap();
+        *provider.persistent_ws.lock().await = Some(PersistentWsState {
+            ws_stream: client_ws,
+            identity: openai_websocket_prewarm::prewarm_identity(&prewarm_test_credentials()),
+            last_response_id: "resp_previous".into(),
+            connected_at: Instant::now(), last_activity_at: Instant::now(), last_response_completed_at: Instant::now(),
+            message_count: 1, last_input_item_count: prior.len(),
+            last_input_fingerprint: jcode_provider_core::fingerprint::stable_hash_json(&prior),
+        });
+        let mut events = provider.complete(&messages, &[], "system", None).await.unwrap();
+        while let Some(event) = events.next().await { event.unwrap(); }
+        let guard = provider.persistent_ws.lock().await;
+        let state = guard.as_ref().expect("fresh completed response saved");
+        assert_eq!(state.last_response_id, "resp_replayed");
+        assert_eq!(state.last_input_item_count, current.len());
+        assert_eq!(state.last_input_fingerprint, jcode_provider_core::fingerprint::stable_hash_json(&current));
+        drop(guard);
+        let mut messages = messages;
+        messages.push(prewarm_user_message("append only"));
+        let appended = build_responses_input(&messages);
+        let mut events = provider.complete(&messages, &[], "system", None).await.unwrap();
+        while let Some(event) = events.next().await { event.unwrap(); }
+        server.await.unwrap();
+        let guard = provider.persistent_ws.lock().await;
+        let state = guard.as_ref().expect("append-only response saved");
+        assert_eq!(state.last_response_id, "resp_appended");
+        assert_eq!(state.last_input_item_count, appended.len());
+        assert_eq!(state.last_input_fingerprint, jcode_provider_core::fingerprint::stable_hash_json(&appended));
+    }).await.expect("loopback regression finished");
+}
+
+#[tokio::test]
+async fn persistent_ws_unchanged_or_shrinking_input_clears_state() {
+    for input in [
+        vec![],
+        vec![serde_json::json!({"type":"message","role":"user","content":"first"})],
+    ] {
+        let (state, server) = test_persistent_ws_state().await;
+        let persistent_ws = Arc::new(Mutex::new(Some(state)));
+        let (tx, _rx) = mpsc::channel(10);
+        let result = try_persistent_ws_continuation(
+            &persistent_ws,
+            &Arc::new(RwLock::new(prewarm_test_credentials())),
+            &serde_json::json!({"model":"gpt-5.6-sol"}),
+            &input,
+            input.len(),
+            &tx,
+        )
+        .await;
+        assert!(matches!(result, PersistentWsResult::NotAvailable));
+        assert!(persistent_ws.lock().await.is_none());
+        server.abort();
+    }
 }

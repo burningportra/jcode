@@ -518,6 +518,23 @@ pub(super) async fn try_persistent_ws_continuation(
         return PersistentWsResult::NotAvailable;
     }
 
+    if !persistent_ws_prefix_matches(
+        input,
+        state.last_input_item_count,
+        state.last_input_fingerprint,
+    ) {
+        *guard = None;
+        log_openai_stream_lifecycle(
+            jcode_base::logging::LogLevel::Info,
+            "persistent_state_reset",
+            vec![
+                ("model", request_model.clone()),
+                ("reason", "input_prefix_changed".to_string()),
+            ],
+        );
+        return PersistentWsResult::NotAvailable;
+    }
+
     // Compute incremental items: everything after the last_input_item_count.
     //
     // When continuing with `previous_response_id`, OpenAI already has every
@@ -993,7 +1010,8 @@ pub(super) async fn try_persistent_ws_continuation(
     // Update persistent state for next turn
     if let Some(resp_id) = new_response_id {
         state.last_response_id = resp_id;
-        state.last_input_item_count = input_item_count;
+        state.last_input_item_count = input.len();
+        state.last_input_fingerprint = jcode_provider_core::fingerprint::stable_hash_json(input);
         state.message_count += 1;
         state.last_activity_at = Instant::now();
         state.last_response_completed_at = Instant::now();
@@ -1438,7 +1456,13 @@ pub(super) async fn stream_response_websocket_persistent(
             last_activity_at: Instant::now(),
             last_response_completed_at: Instant::now(),
             message_count: 1,
-            last_input_item_count: input_item_count,
+            last_input_item_count: request_event["input"].as_array().map_or(0, Vec::len),
+            last_input_fingerprint: jcode_provider_core::fingerprint::stable_hash_json(
+                request_event["input"]
+                    .as_array()
+                    .map(Vec::as_slice)
+                    .unwrap_or(&[]),
+            ),
         });
         drop(guard);
         spawn_persistent_ws_keepalive(
