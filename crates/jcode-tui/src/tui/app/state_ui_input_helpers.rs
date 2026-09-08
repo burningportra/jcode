@@ -1214,6 +1214,9 @@ impl App {
     /// before consulting the input buffer.
     pub(super) fn command_suggestions_signature(&self) -> CommandSuggestionsSignature {
         CommandSuggestionsSignature {
+            cursor_pos: self.cursor_pos,
+            file_root: commands::active_working_dir(self),
+            inline_active: self.inline_interactive_state.is_some(),
             pending_login: self.pending_login.is_some(),
             pending_account_input: self.pending_account_input.is_some(),
             pending_ssh_remote_name: self.pending_ssh_remote_name.is_some(),
@@ -1264,6 +1267,11 @@ impl App {
                 return Vec::new();
             }
         }
+        if self.inline_interactive_state.is_none()
+            && let Some(rows) = self.file_mention_suggestions()
+        {
+            return rows;
+        }
         self.get_suggestions_for(&self.input)
     }
 
@@ -1302,6 +1310,16 @@ impl App {
         code: KeyCode,
         modifiers: KeyModifiers,
     ) -> bool {
+        if self.handle_file_mention_key(code, modifiers) {
+            return true;
+        }
+        if self
+            .command_suggestions()
+            .iter()
+            .any(|(_, label)| matches!(*label, "Repository file" | "Repository files"))
+        {
+            return false;
+        }
         if self.command_suggestions().is_empty() {
             return false;
         }

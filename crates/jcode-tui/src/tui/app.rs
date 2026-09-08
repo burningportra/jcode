@@ -66,6 +66,7 @@ mod copy_selection;
 mod debug;
 mod dictation;
 mod event_wrappers;
+mod file_mentions;
 mod handterm_native_scroll;
 pub(crate) mod helpers;
 mod hotkey_feedback;
@@ -690,8 +691,11 @@ struct CommandSuggestionsCache {
 
 /// Non-input state that [`App::command_suggestions`] branches on before it
 /// ever consults the input buffer.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct CommandSuggestionsSignature {
+    cursor_pos: usize,
+    file_root: Option<std::path::PathBuf>,
+    inline_active: bool,
     pending_login: bool,
     pending_account_input: bool,
     pending_ssh_remote_name: bool,
@@ -853,6 +857,7 @@ pub struct App {
     /// Per-input memo for `command_suggestions()`; see
     /// [`CommandSuggestionsCache`].
     command_suggestions_cache: RefCell<Option<CommandSuggestionsCache>>,
+    file_mentions: RefCell<file_mentions::FileMentionState>,
     /// Monotonic frame counter bounding the lifetime of
     /// `command_suggestions_cache` to a single frame.
     command_suggestions_epoch: std::cell::Cell<u64>,

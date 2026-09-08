@@ -44,6 +44,7 @@ chrono = { version = "0.4", features = ["serde"] }
 regex = "1"
 dirs = "5"
 similar = "2"
+ignore = "0.4.25"
 tempfile = "3"
 open = "5"
 

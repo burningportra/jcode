@@ -4265,6 +4265,7 @@ dependencies = [
  "futures",
  "global-hotkey",
  "hex",
+ "ignore",
  "image",
  "jcode-app-core",
  "jcode-build-meta",

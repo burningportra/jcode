@@ -136,6 +136,7 @@ pub(super) async fn handle_tick(app: &mut App, remote: &mut RemoteConnection) ->
     needs_redraw |= app.refresh_side_panel_linked_content_if_due();
     needs_redraw |= app.poll_model_picker_load();
     needs_redraw |= app.poll_session_picker_load();
+    needs_redraw |= app.poll_file_mentions();
     needs_redraw |= app.poll_session_picker_presence();
     needs_redraw |= app.onboarding_tick();
     needs_redraw |= app.progress_update_simulator();
@@ -1913,6 +1914,10 @@ fn handle_disconnected_key_internal(
     }
 
     if input::handle_scroll_overlay_key(app, code)? {
+        return Ok(());
+    }
+
+    if app.handle_file_mention_key(code, modifiers) {
         return Ok(());
     }
 
