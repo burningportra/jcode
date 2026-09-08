@@ -41,3 +41,6 @@ No beads required for this bounded single-session repair. Todo ordering is evide
 - Independent read-only production/test diff review found no concrete defects. Live installation is a separate coordinated build/reload step, not inferred from unit tests.
 
 Distillation: ephemeral prompt context can move or disappear between otherwise-growing turns. Transport deltas must validate their canonical prefix rather than infer append-only history from counts. Valid history transformations should cause safe full replay, not callback loss.
+
+
+Activation verified: running/current/shared-server revision is b60d5f50f after coordinated build/reload. Live logs subsequently recorded `persistent_state_reset reason=input_prefix_changed` while this conversation continued successfully. This confirms the new guard executed outside the loopback tests.

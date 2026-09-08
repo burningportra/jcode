@@ -1,5 +1,7 @@
 # tgrep fit assessment
 
+Historical preliminary assessment. The user subsequently selected both surfaces and delegated lifecycle decisions. See the [executed spike and adoption decisions](../reviews/2026-09-08-tgrep-spike.md), which also accounts for the existing FFF backend.
+
 ## Elicitation and bounded scope
 
 The user proposed https://github.com/microsoft/tgrep after delivery of @ file selection. Whether they intend filename completion or agent content search is unanswered. Proceed under the lowest-risk interpretation: evaluate both and recommend a next step, without installing software, starting an index/server, or changing production search. This is a compressed single-session goal, not an approved integration project.
