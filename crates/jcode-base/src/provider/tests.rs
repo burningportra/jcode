@@ -100,6 +100,14 @@ fn enter_test_runtime() -> tokio::runtime::Runtime {
         .expect("build tokio runtime")
 }
 
+fn enter_multi_thread_test_runtime() -> tokio::runtime::Runtime {
+    tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()
+        .expect("build tokio runtime")
+}
+
 #[test]
 fn openai_compatible_profile_catalog_cache_is_fresh_before_soft_refresh_boundary() {
     assert!(!openai_compatible_profile_catalog_cache_is_stale(
@@ -229,6 +237,560 @@ fn test_multi_provider_with_openai() -> MultiProvider {
         post_auth_refreshes_pending: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         inference: RwLock::new(None),
     }
+}
+
+#[derive(Clone, Debug)]
+struct AutoRoutingCall {
+    provider: &'static str,
+    model: String,
+    image_blocks: usize,
+}
+
+#[derive(Default)]
+struct AutoRoutingMockState {
+    calls: std::sync::Mutex<Vec<AutoRoutingCall>>,
+    failures: std::sync::Mutex<std::collections::HashMap<String, usize>>,
+}
+
+impl AutoRoutingMockState {
+    fn fail_once(&self, model: &str) {
+        self.fail_times(model, 1);
+    }
+
+    fn fail_times(&self, model: &str, times: usize) {
+        self.failures
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .insert(model.to_string(), times);
+    }
+
+    fn calls(&self) -> Vec<AutoRoutingCall> {
+        self.calls
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
+    }
+}
+
+struct AutoRoutingMockProvider {
+    provider: &'static str,
+    provider_label: &'static str,
+    api_method: &'static str,
+    models: &'static [&'static str],
+    supports_images: bool,
+    model: std::sync::RwLock<String>,
+    credential_mode: std::sync::RwLock<jcode_provider_core::CredentialMode>,
+    state: Arc<AutoRoutingMockState>,
+}
+
+impl AutoRoutingMockProvider {
+    fn new(
+        provider: &'static str,
+        provider_label: &'static str,
+        api_method: &'static str,
+        models: &'static [&'static str],
+        supports_images: bool,
+        state: Arc<AutoRoutingMockState>,
+    ) -> Self {
+        Self {
+            provider,
+            provider_label,
+            api_method,
+            models,
+            supports_images,
+            model: std::sync::RwLock::new(models[0].to_string()),
+            credential_mode: std::sync::RwLock::new(jcode_provider_core::CredentialMode::Auto),
+            state,
+        }
+    }
+
+    fn openai(state: Arc<AutoRoutingMockState>, supports_images: bool) -> Self {
+        Self::new(
+            "openai",
+            "OpenAI",
+            "openai-oauth",
+            &["gpt-fast", "gpt-5.5", "gpt-codex-frontier", "gpt-5.4"],
+            supports_images,
+            state,
+        )
+    }
+
+    fn anthropic(state: Arc<AutoRoutingMockState>, supports_images: bool) -> Self {
+        Self::new(
+            "anthropic",
+            "Anthropic",
+            "claude-oauth",
+            &["claude-sonnet-4-6", "claude-opus-4-8"],
+            supports_images,
+            state,
+        )
+    }
+}
+
+#[async_trait::async_trait]
+impl Provider for AutoRoutingMockProvider {
+    async fn complete(
+        &self,
+        messages: &[Message],
+        _tools: &[ToolDefinition],
+        _system: &str,
+        _resume_session_id: Option<&str>,
+    ) -> anyhow::Result<EventStream> {
+        let model = self.model();
+        let image_blocks = messages
+            .iter()
+            .flat_map(|message| &message.content)
+            .filter(|block| matches!(block, crate::message::ContentBlock::Image { .. }))
+            .count();
+        self.state
+            .calls
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .push(AutoRoutingCall {
+                provider: self.provider,
+                model: model.clone(),
+                image_blocks,
+            });
+
+        let mut failures = self
+            .state
+            .failures
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(remaining) = failures.get_mut(&model)
+            && *remaining > 0
+        {
+            *remaining -= 1;
+            anyhow::bail!("429 retryable failure for {model}");
+        }
+
+        Ok(Box::pin(futures::stream::empty()))
+    }
+
+    fn name(&self) -> &'static str {
+        self.provider
+    }
+
+    fn model(&self) -> String {
+        self.model
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
+    }
+
+    fn set_model(&self, model: &str) -> anyhow::Result<()> {
+        let trimmed = model.trim();
+        if !self.models.contains(&trimmed) {
+            anyhow::bail!("unsupported test model {trimmed}");
+        }
+        *self
+            .model
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = trimmed.to_string();
+        Ok(())
+    }
+
+    fn available_models_display(&self) -> Vec<String> {
+        self.models.iter().map(|model| model.to_string()).collect()
+    }
+
+    fn available_models_for_switching(&self) -> Vec<String> {
+        self.available_models_display()
+    }
+
+    fn model_routes(&self) -> Vec<ModelRoute> {
+        self.available_models_display()
+            .into_iter()
+            .map(|model| ModelRoute {
+                model,
+                provider: self.provider_label.to_string(),
+                api_method: self.api_method.to_string(),
+                available: true,
+                detail: String::new(),
+                cheapness: None,
+            })
+            .collect()
+    }
+
+    fn supports_image_input(&self) -> bool {
+        self.supports_images
+    }
+
+    fn credential_mode(&self) -> jcode_provider_core::CredentialMode {
+        *self
+            .credential_mode
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    fn set_credential_mode(&self, mode: jcode_provider_core::CredentialMode) -> anyhow::Result<()> {
+        *self
+            .credential_mode
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = mode;
+        Ok(())
+    }
+
+    fn fork(&self) -> Arc<dyn Provider> {
+        let fork = Self::new(
+            self.provider,
+            self.provider_label,
+            self.api_method,
+            self.models,
+            self.supports_images,
+            Arc::clone(&self.state),
+        );
+        fork.set_model(&self.model()).expect("fork model is valid");
+        Arc::new(fork)
+    }
+}
+
+fn write_auto_router_override_config(frontier: &str, implement: &str, fast: &str) {
+    let path = crate::config::Config::path().expect("config path");
+    std::fs::create_dir_all(path.parent().expect("config parent")).expect("create config dir");
+    std::fs::write(
+        path,
+        format!(
+            r#"
+[auto_router]
+enabled = true
+frontier = "{frontier}"
+implement = "{implement}"
+fast = "{fast}"
+fast_provider = "auto"
+"#
+        ),
+    )
+    .expect("write auto router config");
+}
+
+fn auto_test_multi_provider(
+    openai_state: Arc<AutoRoutingMockState>,
+    anthropic_state: Option<Arc<AutoRoutingMockState>>,
+    openai_supports_images: bool,
+    anthropic_supports_images: bool,
+) -> MultiProvider {
+    save_test_openai_oauth_credentials();
+    MultiProvider {
+        claude: RwLock::new(None),
+        anthropic: RwLock::new(anthropic_state.map(|state| {
+            Arc::new(AutoRoutingMockProvider::anthropic(
+                state,
+                anthropic_supports_images,
+            )) as Arc<dyn Provider>
+        })),
+        openai: RwLock::new(Some(Arc::new(AutoRoutingMockProvider::openai(
+            openai_state,
+            openai_supports_images,
+        )) as Arc<dyn Provider>)),
+        copilot_api: RwLock::new(None),
+        antigravity: RwLock::new(None),
+        gemini: RwLock::new(None),
+        cursor: RwLock::new(None),
+        bedrock: RwLock::new(None),
+        openrouter: RwLock::new(None),
+        openai_compatible_profiles: RwLock::new(std::collections::HashMap::new()),
+        active_openai_compatible_profile: RwLock::new(None),
+        active: RwLock::new(ActiveProvider::OpenAI),
+        auto_active: RwLock::new(false),
+        auto_route_state: RwLock::new(auto_router::AutoRouteState::new()),
+        use_claude_cli: false,
+        startup_notices: RwLock::new(Vec::new()),
+        initial_provider: None,
+        routes_memo: std::sync::Mutex::new(None),
+        post_auth_refreshes_pending: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+        inference: RwLock::new(None),
+    }
+}
+
+#[test]
+fn auto_router_dispatch_reaches_resolved_mock_provider_and_records_decision() {
+    with_clean_provider_test_env(|| {
+        write_auto_router_override_config(
+            "openai-oauth:gpt-codex-frontier",
+            "openai-oauth:gpt-5.5",
+            "openai-oauth:gpt-fast",
+        );
+        let runtime = enter_multi_thread_test_runtime();
+        runtime.block_on(async {
+            let state = Arc::new(AutoRoutingMockState::default());
+            let provider = auto_test_multi_provider(Arc::clone(&state), None, true, true);
+            provider
+                .set_model(auto_router::AUTO_MODEL_ID)
+                .expect("auto on");
+            provider
+                .set_auto_tier(Some("implement"))
+                .expect("force implement");
+
+            let _stream = provider
+                .complete(&[Message::user("implement this")], &[], "system", None)
+                .await
+                .expect("auto completion succeeds");
+
+            let calls = state.calls();
+            assert_eq!(calls.len(), 1);
+            assert_eq!(calls[0].provider, "openai");
+            assert_eq!(calls[0].model, "gpt-5.5");
+
+            let snapshot = provider.auto_state_snapshot().expect("auto state");
+            let decision = snapshot.last_resolved.expect("last decision");
+            assert_eq!(decision.tier, "implement");
+            assert_eq!(decision.model_spec, "openai-oauth:gpt-5.5");
+            assert_eq!(decision.provider_family, "openai");
+            assert!(decision.reason.contains("implement"));
+        });
+    });
+}
+
+#[test]
+fn auto_router_concurrent_calls_do_not_mutate_shared_provider_state() {
+    with_clean_provider_test_env(|| {
+        write_auto_router_override_config(
+            "openai-oauth:gpt-codex-frontier",
+            "openai-oauth:gpt-5.5",
+            "openai-oauth:gpt-fast",
+        );
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .expect("runtime");
+        runtime.block_on(async {
+            let state = Arc::new(AutoRoutingMockState::default());
+            let provider = Arc::new(auto_test_multi_provider(
+                Arc::clone(&state),
+                None,
+                true,
+                true,
+            ));
+            provider
+                .openai_provider()
+                .expect("template openai")
+                .set_model("gpt-fast")
+                .unwrap();
+            provider
+                .set_model(auto_router::AUTO_MODEL_ID)
+                .expect("auto on");
+
+            let a = Arc::clone(&provider);
+            let b = Arc::clone(&provider);
+            let first = tokio::spawn(async move {
+                a.set_auto_tier(Some("implement")).expect("force implement");
+                a.complete(&[Message::user("implement a")], &[], "system", None)
+                    .await
+            });
+            let second = tokio::spawn(async move {
+                b.set_auto_tier(Some("frontier")).expect("force frontier");
+                b.complete(&[Message::user("plan b")], &[], "system", None)
+                    .await
+            });
+            let _first_stream = first.await.expect("join first").expect("first succeeds");
+            let _second_stream = second.await.expect("join second").expect("second succeeds");
+
+            assert_eq!(provider.model(), auto_router::AUTO_MODEL_ID);
+            assert_eq!(provider.active_provider(), ActiveProvider::OpenAI);
+            assert_eq!(
+                provider.openai_provider().expect("template openai").model(),
+                "gpt-fast",
+                "resolved per-call models must be applied only to forks"
+            );
+            assert_eq!(state.calls().len(), 2);
+        });
+    });
+}
+
+#[test]
+fn auto_router_escalates_retryable_failures_fast_to_implement_to_frontier() {
+    with_clean_provider_test_env(|| {
+        write_auto_router_override_config(
+            "openai-oauth:gpt-codex-frontier",
+            "openai-oauth:gpt-5.5",
+            "openai-oauth:gpt-fast",
+        );
+        let runtime = enter_multi_thread_test_runtime();
+        runtime.block_on(async {
+            let state = Arc::new(AutoRoutingMockState::default());
+            state.fail_once("gpt-fast");
+            state.fail_once("gpt-5.5");
+            let provider = auto_test_multi_provider(Arc::clone(&state), None, true, true);
+            provider
+                .set_model(auto_router::AUTO_MODEL_ID)
+                .expect("auto on");
+            provider.set_auto_tier(Some("fast")).expect("force fast");
+
+            let _stream = provider
+                .complete(&[Message::user("format this")], &[], "system", None)
+                .await
+                .expect("frontier escalation succeeds");
+
+            let models = state
+                .calls()
+                .into_iter()
+                .map(|call| call.model)
+                .collect::<Vec<_>>();
+            assert_eq!(models, vec!["gpt-fast", "gpt-5.5", "gpt-codex-frontier"]);
+            assert_eq!(
+                provider.auto_last_resolved_model().as_deref(),
+                Some("openai-oauth:gpt-codex-frontier")
+            );
+        });
+    });
+}
+
+#[test]
+fn auto_router_image_filtering_uses_resolved_candidate_capability() {
+    with_clean_provider_test_env(|| {
+        write_auto_router_override_config(
+            "openai-oauth:gpt-codex-frontier",
+            "openai-oauth:gpt-5.5",
+            "openai-oauth:gpt-fast",
+        );
+        let runtime = enter_multi_thread_test_runtime();
+        runtime.block_on(async {
+            let state = Arc::new(AutoRoutingMockState::default());
+            let provider = auto_test_multi_provider(Arc::clone(&state), None, true, true);
+            provider
+                .set_model(auto_router::AUTO_MODEL_ID)
+                .expect("auto on");
+            let _stream = provider
+                .complete(
+                    &[Message::user_with_images(
+                        "plan with image",
+                        vec![("image/png".to_string(), "abc".to_string())],
+                    )],
+                    &[],
+                    "system",
+                    None,
+                )
+                .await
+                .expect("image-capable candidate succeeds");
+            assert_eq!(state.calls()[0].image_blocks, 1);
+        });
+
+        write_auto_router_override_config(
+            "openai-oauth:gpt-codex-frontier",
+            "openai-oauth:gpt-5.5",
+            "openai-oauth:gpt-fast",
+        );
+        let runtime = enter_multi_thread_test_runtime();
+        runtime.block_on(async {
+            let state = Arc::new(AutoRoutingMockState::default());
+            let provider = auto_test_multi_provider(Arc::clone(&state), None, false, true);
+            provider
+                .set_model(auto_router::AUTO_MODEL_ID)
+                .expect("auto on");
+            let _stream = provider
+                .complete(
+                    &[Message::user_with_images(
+                        "plan with image",
+                        vec![("image/png".to_string(), "abc".to_string())],
+                    )],
+                    &[],
+                    "system",
+                    None,
+                )
+                .await
+                .expect("text-only candidate succeeds");
+            assert_eq!(state.calls()[0].image_blocks, 0);
+        });
+    });
+}
+
+#[test]
+fn auto_router_portability_violation_skips_cross_family_candidate() {
+    with_clean_provider_test_env(|| {
+        write_auto_router_override_config(
+            "claude-oauth:claude-opus-4-8",
+            "claude-oauth:claude-sonnet-4-6",
+            "openai-oauth:gpt-fast",
+        );
+        let runtime = enter_multi_thread_test_runtime();
+        runtime.block_on(async {
+            let openai_state = Arc::new(AutoRoutingMockState::default());
+            let anthropic_state = Arc::new(AutoRoutingMockState::default());
+            let provider = auto_test_multi_provider(
+                Arc::clone(&openai_state),
+                Some(Arc::clone(&anthropic_state)),
+                true,
+                true,
+            );
+            provider
+                .set_model(auto_router::AUTO_MODEL_ID)
+                .expect("auto on");
+            {
+                let mut state = provider
+                    .auto_route_state
+                    .write()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                state.record_decision(
+                    auto_router::TurnCategory::Planning,
+                    auto_router::AutoDecision {
+                        tier: auto_router::AutoTier::Frontier,
+                        model_spec: "claude-oauth:claude-opus-4-8".to_string(),
+                        provider_family: "anthropic".to_string(),
+                        reason: "pinned family".to_string(),
+                        at: std::time::Instant::now(),
+                    },
+                );
+            }
+
+            let _stream = provider
+                .complete(
+                    &[
+                        Message::user("earlier task"),
+                        Message::assistant_text("previous"),
+                        Message {
+                            role: crate::message::Role::Assistant,
+                            content: vec![crate::message::ContentBlock::AnthropicThinking {
+                                thinking: "private".to_string(),
+                                signature: "sig".to_string(),
+                            }],
+                            timestamp: None,
+                            tool_duration_ms: None,
+                        },
+                        Message::user("format this"),
+                    ],
+                    &[],
+                    "system",
+                    None,
+                )
+                .await
+                .expect("in-family fallback succeeds");
+
+            assert!(openai_state.calls().is_empty());
+            let calls = anthropic_state.calls();
+            assert_eq!(calls.len(), 1);
+            assert_eq!(calls[0].model, "claude-sonnet-4-6");
+        });
+    });
+}
+
+#[test]
+fn non_auto_completion_keeps_existing_image_filtering_path() {
+    with_clean_provider_test_env(|| {
+        let runtime = enter_multi_thread_test_runtime();
+        runtime.block_on(async {
+            let state = Arc::new(AutoRoutingMockState::default());
+            let provider = auto_test_multi_provider(Arc::clone(&state), None, false, true);
+            let _stream = provider
+                .complete(
+                    &[Message::user_with_images(
+                        "plain non-auto request",
+                        vec![("image/png".to_string(), "abc".to_string())],
+                    )],
+                    &[],
+                    "system",
+                    None,
+                )
+                .await
+                .expect("non-auto completion succeeds");
+            let calls = state.calls();
+            assert_eq!(calls.len(), 1);
+            assert_eq!(calls[0].model, "gpt-fast");
+            assert_eq!(calls[0].image_blocks, 0);
+            assert!(!provider.is_auto_active());
+        });
+    });
 }
 
 #[test]

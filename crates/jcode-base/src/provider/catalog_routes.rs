@@ -385,7 +385,7 @@ fn append_auto_model_route_from_config(
     });
 }
 
-fn auto_candidates_for_routes(
+pub(super) fn auto_candidates_for_routes(
     routes: &[ModelRoute],
     config: &jcode_config_types::AutoRouterConfig,
 ) -> Vec<super::auto_router::AutoModelCandidate> {

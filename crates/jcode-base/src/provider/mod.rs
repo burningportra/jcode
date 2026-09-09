@@ -484,6 +484,138 @@ impl MultiProvider {
             .clone()
     }
 
+    fn fork_multi_provider(&self) -> Self {
+        let current_model = self.model();
+        let active = self.active_provider();
+
+        let claude = if matches!(active, ActiveProvider::Claude) && self.claude_provider().is_some()
+        {
+            external::instantiate_expected_external_provider(external::CLAUDE_CLI_RUNTIME)
+        } else {
+            None
+        };
+        let anthropic = if self.anthropic_provider().is_some() {
+            external::instantiate_expected_external_provider(external::ANTHROPIC_RUNTIME)
+        } else {
+            None
+        };
+        let openai = if self.openai_provider().is_some() {
+            external::instantiate_expected_external_provider(external::OPENAI_RUNTIME)
+        } else {
+            None
+        };
+        let copilot_api = self
+            .copilot_api
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
+        let antigravity_provider = self
+            .antigravity
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
+        let gemini_provider = self
+            .gemini
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
+        let cursor_provider = if self
+            .cursor
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .is_some()
+        {
+            external::instantiate_expected_external_provider(external::CURSOR_RUNTIME)
+        } else {
+            None
+        };
+        let bedrock_provider = if self.bedrock_provider().is_some() {
+            Some(Arc::new(bedrock::BedrockProvider::new()))
+        } else {
+            None
+        };
+        let openrouter = if self
+            .openrouter
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .is_some()
+        {
+            external::instantiate_openrouter_runtime(external::OpenRouterRuntimeSpec::Default).ok()
+        } else {
+            None
+        };
+
+        let provider = Self {
+            claude: RwLock::new(claude),
+            anthropic: RwLock::new(anthropic),
+            openai: RwLock::new(openai),
+            copilot_api: RwLock::new(copilot_api),
+            antigravity: RwLock::new(antigravity_provider),
+            gemini: RwLock::new(gemini_provider),
+            cursor: RwLock::new(cursor_provider),
+            bedrock: RwLock::new(bedrock_provider),
+            openrouter: RwLock::new(openrouter),
+            inference: RwLock::new(None),
+            openai_compatible_profiles: RwLock::new(HashMap::new()),
+            active_openai_compatible_profile: RwLock::new(None),
+            active: RwLock::new(active),
+            auto_active: RwLock::new(self.is_auto_active()),
+            auto_route_state: RwLock::new(self.auto_route_state_snapshot()),
+            use_claude_cli: self.use_claude_cli,
+            startup_notices: RwLock::new(Vec::new()),
+            initial_provider: self.initial_provider,
+            routes_memo: Mutex::new(None),
+            post_auth_refreshes_pending: Arc::clone(&self.post_auth_refreshes_pending),
+        };
+
+        provider.spawn_anthropic_catalog_refresh_if_needed();
+        provider.spawn_openai_catalog_refresh_if_needed();
+        let switch_request = self.fork_model_switch_request(active, &current_model);
+        let _ = provider.set_model(&switch_request);
+        provider
+    }
+
+    fn fork_multi_provider_for_request(&self) -> Self {
+        Self {
+            claude: RwLock::new(self.claude_provider().map(|provider| provider.fork())),
+            anthropic: RwLock::new(self.anthropic_provider().map(|provider| provider.fork())),
+            openai: RwLock::new(self.openai_provider().map(|provider| provider.fork())),
+            copilot_api: RwLock::new(self.copilot_provider().map(|provider| provider.fork())),
+            antigravity: RwLock::new(self.antigravity_provider().map(|provider| provider.fork())),
+            gemini: RwLock::new(self.gemini_provider().map(|provider| provider.fork())),
+            cursor: RwLock::new(self.cursor_provider().map(|provider| provider.fork())),
+            bedrock: RwLock::new(if self.bedrock_provider().is_some() {
+                Some(Arc::new(bedrock::BedrockProvider::new()))
+            } else {
+                None
+            }),
+            openrouter: RwLock::new(self.openrouter_provider().map(|provider| provider.fork())),
+            inference: RwLock::new(self.inference_provider().map(|provider| provider.fork())),
+            openai_compatible_profiles: RwLock::new(
+                self.openai_compatible_profiles
+                    .read()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .iter()
+                    .map(|(key, provider)| (key.clone(), provider.fork()))
+                    .collect(),
+            ),
+            active_openai_compatible_profile: RwLock::new(
+                self.active_openai_compatible_profile
+                    .read()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .clone(),
+            ),
+            active: RwLock::new(self.active_provider()),
+            auto_active: RwLock::new(self.is_auto_active()),
+            auto_route_state: RwLock::new(self.auto_route_state_snapshot()),
+            use_claude_cli: self.use_claude_cli,
+            startup_notices: RwLock::new(Vec::new()),
+            initial_provider: self.initial_provider,
+            routes_memo: Mutex::new(None),
+            post_auth_refreshes_pending: Arc::clone(&self.post_auth_refreshes_pending),
+        }
+    }
+
     /// Drop this instance's route-catalog memo. Use for changes that are
     /// captured by [`Self::routes_memo_key`] (model/provider/profile switches):
     /// the shared memo stays valid because those instances key differently.
@@ -654,18 +786,31 @@ impl MultiProvider {
         self.spawn_anthropic_catalog_refresh_if_needed();
         self.spawn_openai_catalog_refresh_if_needed();
 
+        let auto_active = self.is_auto_active();
+
         // Provider capabilities are authoritative at this request chokepoint.
         // Keep images in persisted history, but replace them in the ephemeral
         // request snapshot when the selected model/provider is text-only (#755).
-        let filtered_messages =
-            image_clamp::filter_unsupported_outbound_images(messages, self.supports_image_input());
+        // Auto routing resolves a concrete provider/model first, then applies the
+        // same filtering in `complete_on_provider_with_model` using the fork's
+        // resolved capabilities.
+        let filtered_messages = (!auto_active)
+            .then(|| {
+                image_clamp::filter_unsupported_outbound_images(
+                    messages,
+                    self.supports_image_input(),
+                )
+            })
+            .flatten();
         let messages: &[Message] = filtered_messages.as_deref().unwrap_or(messages);
 
         // Downscale any images whose pixel dimensions exceed provider per-image
         // limits before they reach the wire. Resuming a session with >20 large
         // screenshots otherwise trips Anthropic's many-image 2000px cap and the
         // whole turn is rejected (#381). Only clones when a clamp is required.
-        let clamped_messages = image_clamp::clamp_outbound_images(messages);
+        let clamped_messages = (!auto_active)
+            .then(|| image_clamp::clamp_outbound_images(messages))
+            .flatten();
         let messages: &[Message] = clamped_messages.as_deref().unwrap_or(messages);
 
         let active = self.active_provider();
@@ -736,31 +881,44 @@ impl MultiProvider {
                 continue;
             }
 
-            let attempt = match mode {
-                CompletionMode::Unified { system } => {
-                    self.complete_on_provider(candidate, messages, tools, system, resume_session_id)
+            let attempt = if auto_active && candidate == active {
+                self.complete_auto_routed(messages, tools, mode, resume_session_id)
+                    .await
+            } else {
+                match mode {
+                    CompletionMode::Unified { system } => {
+                        self.complete_on_provider(
+                            candidate,
+                            messages,
+                            tools,
+                            system,
+                            resume_session_id,
+                        )
                         .await
-                }
-                CompletionMode::Split {
-                    system_static,
-                    system_dynamic,
-                } => {
-                    self.complete_split_on_provider(
-                        candidate,
-                        messages,
-                        tools,
+                    }
+                    CompletionMode::Split {
                         system_static,
                         system_dynamic,
-                        resume_session_id,
-                    )
-                    .await
+                    } => {
+                        self.complete_split_on_provider(
+                            candidate,
+                            messages,
+                            tools,
+                            system_static,
+                            system_dynamic,
+                            resume_session_id,
+                        )
+                        .await
+                    }
                 }
             };
 
             match attempt {
                 Ok(stream) => {
                     clear_provider_unavailable_for_account(key);
-                    self.record_provider_activity(candidate);
+                    if !(auto_active && candidate == active) {
+                        self.record_provider_activity(candidate);
+                    }
                     if candidate != active {
                         self.set_active_provider(candidate);
                         let from_label = Self::provider_label(active);
@@ -3018,94 +3176,7 @@ impl Provider for MultiProvider {
     }
 
     fn fork(&self) -> Arc<dyn Provider> {
-        let current_model = self.model();
-        let active = self.active_provider();
-
-        let claude = if matches!(active, ActiveProvider::Claude) && self.claude_provider().is_some()
-        {
-            external::instantiate_expected_external_provider(external::CLAUDE_CLI_RUNTIME)
-        } else {
-            None
-        };
-        let anthropic = if self.anthropic_provider().is_some() {
-            external::instantiate_expected_external_provider(external::ANTHROPIC_RUNTIME)
-        } else {
-            None
-        };
-        let openai = if self.openai_provider().is_some() {
-            external::instantiate_expected_external_provider(external::OPENAI_RUNTIME)
-        } else {
-            None
-        };
-        let copilot_api = self
-            .copilot_api
-            .read()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .clone();
-        let antigravity_provider = self
-            .antigravity
-            .read()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .clone();
-        let gemini_provider = self
-            .gemini
-            .read()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .clone();
-        let cursor_provider = if self
-            .cursor
-            .read()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .is_some()
-        {
-            external::instantiate_expected_external_provider(external::CURSOR_RUNTIME)
-        } else {
-            None
-        };
-        let bedrock_provider = if self.bedrock_provider().is_some() {
-            Some(Arc::new(bedrock::BedrockProvider::new()))
-        } else {
-            None
-        };
-        let openrouter = if self
-            .openrouter
-            .read()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .is_some()
-        {
-            external::instantiate_openrouter_runtime(external::OpenRouterRuntimeSpec::Default).ok()
-        } else {
-            None
-        };
-
-        let provider = Self {
-            claude: RwLock::new(claude),
-            anthropic: RwLock::new(anthropic),
-            openai: RwLock::new(openai),
-            copilot_api: RwLock::new(copilot_api),
-            antigravity: RwLock::new(antigravity_provider),
-            gemini: RwLock::new(gemini_provider),
-            cursor: RwLock::new(cursor_provider),
-            bedrock: RwLock::new(bedrock_provider),
-            openrouter: RwLock::new(openrouter),
-            inference: RwLock::new(None),
-            openai_compatible_profiles: RwLock::new(HashMap::new()),
-            active_openai_compatible_profile: RwLock::new(None),
-            active: RwLock::new(active),
-            auto_active: RwLock::new(self.is_auto_active()),
-            auto_route_state: RwLock::new(self.auto_route_state_snapshot()),
-            use_claude_cli: self.use_claude_cli,
-            startup_notices: RwLock::new(Vec::new()),
-            initial_provider: self.initial_provider,
-            routes_memo: Mutex::new(None),
-            post_auth_refreshes_pending: Arc::clone(&self.post_auth_refreshes_pending),
-        };
-
-        provider.spawn_anthropic_catalog_refresh_if_needed();
-        provider.spawn_openai_catalog_refresh_if_needed();
-        let switch_request = self.fork_model_switch_request(active, &current_model);
-        let _ = provider.set_model(&switch_request);
-        Arc::new(provider)
+        Arc::new(self.fork_multi_provider())
     }
 
     fn fork_for_new_session(&self) -> Arc<dyn Provider> {

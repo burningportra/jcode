@@ -539,11 +539,14 @@ fn pick_candidate_for_tier<'a>(
     candidates: &'a [AutoModelCandidate],
     history_portable: bool,
 ) -> Option<&'a AutoModelCandidate> {
+    let pinned_family = state
+        .last_resolved
+        .as_ref()
+        .map(|decision| decision.provider_family.as_str())
+        .or(state.conversation_provider_family.as_deref());
     candidates.iter().find(|candidate| {
         candidate.tier == tier
-            && state
-                .conversation_provider_family
-                .as_deref()
+            && pinned_family
                 .map(|family| family == candidate.provider_family || history_portable)
                 .unwrap_or(true)
     })
