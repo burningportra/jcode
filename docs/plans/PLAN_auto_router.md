@@ -1,6 +1,6 @@
 # PLAN: Auto Router Model (Cursor-style adaptive routing)
 
-Status: draft v2 (premortem-revised, elicitation-converged)
+Status: v2.1 (premortem-revised + cross-model review findings folded)
 Initiative: Auto Router Model
 Scope: jcode-base provider layer, config, TUI picker/status, session persistence
 
@@ -56,11 +56,98 @@ Premortem failure modes this design explicitly counters:
 
 ## 4. Core types and data model
 
+### 4.1 Findings folded from cross-model review (gpt-5.5, verified)
+
+1. **Virtual id collision (was Critical).** A real provider-local model named
+   `auto` already exists (Belvedir, provider_catalog.rs:589-591), and the TUI
+   groups picker rows by `route.model`, so bare `auto` collides.
+   **Resolution:** the virtual id is namespaced as `jcode-auto`
+   (`AUTO_MODEL_ID = "jcode-auto"`); `is_virtual_model` matches that string
+   only. No collision with any live catalog id; picker grouping is
+   unambiguous.
+2. **Session restore leaks `auto` into concrete providers (was Critical).**
+   Restore prefixes model ids by route method (`claude:auto` etc.,
+   selection.rs:461-487), so a persisted virtual id can be sent to a concrete
+   provider. **Resolution:** the virtual id is special-cased BEFORE any
+   provider-key prefixing in `model_switch_request_for_session_route`: bare
+   `jcode-auto` re-enters auto mode (re-resolve at first turn of the resumed
+   conversation); prefixed forms (`claude:jcode-auto`) are treated as the bare
+   virtual id too.
+3. **Provider affinity vs FAST tier contradiction (was Critical).** Vercel/
+   OpenRouter FAST belongs to different ActiveProvider families, so strict
+   "no cross-provider" affinity makes FAST unreachable after an Anthropic
+   frontier turn. **Resolution:** affinity is refined into *history-format
+   affinity*: switching between providers is safe when the conversation
+   history is portable (plain text + tool use/result with no
+   provider-signed blocks). Provider-signed content (Anthropic thinking,
+   OpenAI reasoning items) pins the conversation to that family. So:
+   FAST (Vercel/OpenRouter) is reachable from a Claude-frontier conversation
+   as long as replay of the frontier turn's signed blocks is not required;
+   if it is (OpenAI reasoning chain), the FAST candidate is skipped and the
+   in-family implement tier is used. The router checks `last_resolved.family
+   == candidate.family OR history_is_portable(messages)` before selecting.
+4. **No request-scoped dispatch (was Critical).** Dispatch is by
+   ActiveProvider, and selecting a concrete model mutates shared provider
+   state (mod.rs:1065-1283). **Resolution (v2.1 core change):** Auto does NOT
+   mutate active provider/model per turn. Instead, resolve to a
+   `RouteSelection` and call the resolved family's provider runtime directly
+   via a new internal `complete_on_provider_with_model(provider, model_spec,
+   ...)` seam: obtain the family's `Arc<dyn Provider>`, call its
+   `set_route_selection`-equivalent on a **forked provider instance**
+   (`fork()` already exists and is per-session) so shared state is never
+   mutated. Concurrency: the fork is taken per completion call; the shared
+   template is untouched, so concurrent turns/forks are race-free.
+   `Provider::model()` of the fork reports the concrete model while the
+   session-facing `MultiProvider::model()` still reports `jcode-auto`.
+5. **Capability filtering order (High).** Image filtering runs before
+   resolution using the active provider's capabilities. **Resolution:** when
+   auto is active, image clamp/filter moves AFTER resolution and uses the
+   resolved candidate's `supports_image_input()`.
+6. **Escalation vs failover semantics (High).** Existing failover is
+   provider-level and bails on cross-provider when a reason exists.
+   **Resolution:** tier escalation happens INSIDE the auto seam (retry the
+   same family one tier up on retryable errors, before returning to
+   `complete_with_failover`'s provider failover), which composes with, not
+   replaces, existing provider failover.
+7. **Vercel assumptions (High).** Vercel has no static model fallback and
+   routes carry `cheapness: None`, so live-catalog price ranking has no data
+   for Vercel routes today. **Resolution:** FAST resolution for Vercel uses
+   the cached live catalog only (no price ranking: seed tps order is
+   authoritative); add `cheapness` for compatible-profile routes as a small
+   follow-up, not launch-blocking.
+8. **Typed route identity (Med-high).** `ModelRouteApiMethod` has no Auto
+   variant; unknown methods become `Other` and lose identity.
+   **Resolution:** add `ModelRouteApiMethod::Auto` and a matching
+   `RuntimeKey`-aware `RouteSelection` so `routed_model_spec()` returns the
+   bare virtual id and round-trips through set_route_selection.
+9. **Remote protocol surface (Med-high).** `/auto` and forced tiers live in
+   the daemon (MultiProvider state) but remote clients need read/write
+   access. **Resolution:** extend the wire protocol: `set_auto_tier {tier?}`
+   request and an `auto_state` field on the existing state/status event
+   carrying `{active, last_resolved, decisions_tail}`. TUI local mode reads
+   MultiProvider directly.
+10. **Swarm spawn rejection (Med).** Spawns treat any non-`inherit` model as
+    concrete; `auto` would create a route-less session and coordinator
+    inheritance propagates the virtual id. **Resolution:** reject
+    `is_virtual_model()` in spawn model resolution with an actionable error,
+    and resolve `inherit`-from-auto to the coordinator's last concrete
+    resolved model (not the virtual id).
+11. **Context-window filtering (Med).** No authoritative per-candidate
+    context metadata for gateway routes. **Resolution:** conservative default
+    context for unknown gateway candidates (128k); only filter when metadata
+    exists; rely on existing in-flight overflow errors + escalation as the
+    backstop.
+12. **Status data path (Med).** Widget has no virtual-vs-resolved field.
+    **Resolution:** extend the model status payload with `resolved_model:
+    Option<String>` set by the auto seam; widget renders `auto → <resolved>`
+    when present; remote clients get it via the state event.
+
 New module `crates/jcode-base/src/provider/auto_router.rs`:
 
 ```rust
-pub const AUTO_MODEL_ID: &str = "auto";
+pub const AUTO_MODEL_ID: &str = "jcode-auto";
 pub fn is_virtual_model(model: &str) -> bool { model.trim() == AUTO_MODEL_ID }
+
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum AutoTier { Frontier, Implement, Fast }
