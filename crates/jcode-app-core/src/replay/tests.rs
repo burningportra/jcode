@@ -385,6 +385,9 @@ fn test_load_swarm_sessions_discovers_related_sessions() {
 
     let mut seed = Session::create_with_id("session_seed".to_string(), None, None);
     seed.working_dir = Some("/tmp/repo".to_string());
+    // The test home is fresh, so force the snapshot write: a brand-new session
+    // with no visible messages and no parent would otherwise skip persisting.
+    seed.saved = true;
     seed.record_swarm_status_event(vec![SwarmMemberStatus {
         session_id: "session_seed".to_string(),
         friendly_name: Some("seed".to_string()),
