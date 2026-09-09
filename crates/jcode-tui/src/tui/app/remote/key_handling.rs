@@ -1221,6 +1221,31 @@ async fn handle_remote_key_internal(
                     return Ok(());
                 }
 
+                if trimmed == "/auto" || trimmed == "/auto status" || trimmed == "/auto audit" {
+                    app.push_display_message(DisplayMessage::system(
+                        app_mod::model_context::format_auto_router_audit(
+                            app.remote_auto_state.as_ref(),
+                        ),
+                    ));
+                    return Ok(());
+                }
+
+                if let Some(tier) = trimmed.strip_prefix("/auto ") {
+                    let Some(tier) = app_mod::model_context::normalize_auto_tier(tier) else {
+                        app.push_display_message(DisplayMessage::error(
+                            app_mod::model_context::auto_tier_usage(),
+                        ));
+                        return Ok(());
+                    };
+                    remote.set_auto_tier(Some(tier)).await?;
+                    app.remote_provider_model = Some("jcode-auto".to_string());
+                    app.push_display_message(DisplayMessage::system(
+                        app_mod::model_context::auto_tier_success_message(tier),
+                    ));
+                    app.set_status_notice(format!("Auto: next turn -> {tier}"));
+                    return Ok(());
+                }
+
                 if trimmed == "/effort" {
                     let current = app.remote_reasoning_effort_hint();
                     let current = current.as_deref();

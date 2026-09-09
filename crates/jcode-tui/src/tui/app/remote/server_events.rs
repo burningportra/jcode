@@ -938,6 +938,15 @@ pub(in crate::tui::app) fn handle_server_event(
             false
         }
         ServerEvent::Pong { .. } => false,
+        ServerEvent::State {
+            resolved_model,
+            auto_state,
+            ..
+        } => app.apply_remote_auto_state_snapshot(
+            app.remote_provider_model.clone().as_deref(),
+            resolved_model,
+            auto_state,
+        ),
         ServerEvent::ConnectionPhase { phase } => {
             let cp = match phase.as_str() {
                 "authenticating" => crate::message::ConnectionPhase::Authenticating,
@@ -971,7 +980,11 @@ pub(in crate::tui::app) fn handle_server_event(
             eager_stream_redraw
         }
         ServerEvent::StatusDetail { detail } => {
-            app.status_detail = Some(detail);
+            app.status_detail = Some(detail.clone());
+            if detail.trim_start().starts_with("auto:") {
+                app.push_display_message(DisplayMessage::system(detail));
+                return true;
+            }
             eager_stream_redraw
         }
         ServerEvent::MessageEnd { .. } => {

@@ -774,6 +774,15 @@ impl RemoteConnection {
         Ok(id)
     }
 
+    pub async fn set_auto_tier(&mut self, tier: Option<&str>) -> Result<()> {
+        let request = Request::SetAutoTier {
+            id: self.next_request_id,
+            tier: tier.map(str::to_string),
+        };
+        self.next_request_id += 1;
+        self.send_request(request).await
+    }
+
     /// Set or clear the session-scoped subagent model on the server.
     pub async fn set_subagent_model(&mut self, model: Option<String>) -> Result<()> {
         let request = Request::SetSubagentModel {

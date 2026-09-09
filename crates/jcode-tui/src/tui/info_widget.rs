@@ -606,6 +606,8 @@ pub struct InfoWidgetData {
     pub queue_mode: Option<bool>,
     pub context_limit: Option<usize>,
     pub model: Option<String>,
+    /// Concrete model resolved behind a virtual model such as `jcode-auto`.
+    pub resolved_model: Option<String>,
     pub reasoning_effort: Option<String>,
     pub service_tier: Option<String>,
     pub native_compaction_mode: Option<String>,

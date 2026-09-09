@@ -1160,6 +1160,8 @@ pub struct App {
     remote_client_instance_id: String,
     remote_provider_name: Option<String>,
     remote_provider_model: Option<String>,
+    remote_resolved_model: Option<String>,
+    remote_auto_state: Option<jcode_provider_core::AutoRouterStateSnapshot>,
     /// Monotonic counter bumped each time the server pushes a fresh remote model
     /// catalog snapshot (`AvailableModelsUpdated`). The onboarding readiness
     /// validation uses this to wait for the post-login catalog refresh to land

@@ -123,6 +123,7 @@ pub(super) fn picker_route_model_spec(entry: &PickerEntry, route: &PickerOption)
     let bare_name = model_entry_base_name(entry);
     let api_method = crate::provider::ModelRouteApiMethod::parse(&route.api_method);
     match api_method {
+        crate::provider::ModelRouteApiMethod::Auto => bare_name,
         crate::provider::ModelRouteApiMethod::Copilot => format!("copilot:{}", bare_name),
         crate::provider::ModelRouteApiMethod::ClaudeOAuth => {
             format!("claude-oauth:{}", bare_name)

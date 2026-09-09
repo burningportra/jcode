@@ -641,10 +641,48 @@ impl App {
         jcode_provider_core::ModelCatalogSnapshot::new(
             self.remote_provider_name.clone(),
             self.remote_provider_model.clone(),
-            None,
+            self.remote_resolved_model.clone(),
             self.remote_available_entries.clone(),
             self.remote_model_options.clone(),
         )
+        .with_auto_state(self.remote_auto_state.clone())
+    }
+
+    pub(super) fn apply_remote_auto_state_snapshot(
+        &mut self,
+        provider_model: Option<&str>,
+        resolved_model: Option<String>,
+        auto_state: Option<jcode_provider_core::AutoRouterStateSnapshot>,
+    ) -> bool {
+        let next_resolved = resolved_model.or_else(|| {
+            auto_state
+                .as_ref()
+                .and_then(|state| state.last_resolved.as_ref())
+                .map(|decision| decision.model_spec.clone())
+        });
+        let provider_model = provider_model
+            .map(str::trim)
+            .filter(|model| !model.is_empty());
+        let keep_existing_resolved = provider_model.is_some_and(|model| model == "jcode-auto");
+
+        let mut changed = false;
+        if let Some(resolved) = next_resolved {
+            if self.remote_resolved_model.as_deref() != Some(resolved.as_str()) {
+                self.remote_resolved_model = Some(resolved);
+                changed = true;
+            }
+        } else if !keep_existing_resolved && self.remote_resolved_model.take().is_some() {
+            changed = true;
+        }
+
+        if auto_state.is_some() || !keep_existing_resolved {
+            if self.remote_auto_state != auto_state {
+                self.remote_auto_state = auto_state;
+                changed = true;
+            }
+        }
+
+        changed
     }
 
     pub(super) fn replace_remote_model_catalog_snapshot(
@@ -667,6 +705,11 @@ impl App {
             self.remote_provider_model = Some(model);
             provider_meta_changed = true;
         }
+        let auto_state_changed = self.apply_remote_auto_state_snapshot(
+            self.remote_provider_model.clone().as_deref(),
+            snapshot.resolved_model,
+            snapshot.auto_state,
+        );
         // A names-only snapshot (models without route expansion) arrives when the
         // server downgrades an oversized AvailableModelsUpdated frame. Keep the
         // previously known detailed routes in that case; the picker synthesizes
@@ -680,6 +723,7 @@ impl App {
         // forces a picker-cache rebuild, an ~100KB cache rewrite to disk, and a
         // full-frame redraw on every idle client, which starves the input line.
         let catalog_changed = provider_meta_changed
+            || auto_state_changed
             || self.remote_available_entries != snapshot.available_models
             || (replace_routes && self.remote_model_options != snapshot.model_routes);
         if !catalog_changed {
@@ -901,6 +945,11 @@ impl App {
         if self.remote_provider_model.is_none() {
             self.remote_provider_model = snapshot.provider_model;
         }
+        self.apply_remote_auto_state_snapshot(
+            self.remote_provider_model.clone().as_deref(),
+            snapshot.resolved_model,
+            snapshot.auto_state,
+        );
         if self.remote_available_entries.is_empty() {
             self.remote_available_entries = snapshot.available_models;
         }
@@ -1617,15 +1666,16 @@ impl App {
         fn route_sort_key(r: &PickerOption) -> (u8, u8, u64, String) {
             let avail = if r.available { 0 } else { 1 };
             let method = match crate::provider::ModelRouteApiMethod::parse(&r.api_method) {
+                crate::provider::ModelRouteApiMethod::Auto => 0,
                 crate::provider::ModelRouteApiMethod::ClaudeOAuth
                 | crate::provider::ModelRouteApiMethod::OpenAIOAuth
-                | crate::provider::ModelRouteApiMethod::OpenAIApiKey => 0,
+                | crate::provider::ModelRouteApiMethod::OpenAIApiKey => 1,
                 crate::provider::ModelRouteApiMethod::AnthropicApiKey
-                | crate::provider::ModelRouteApiMethod::OpenAiCompatible { .. } => 1,
-                crate::provider::ModelRouteApiMethod::Cursor => 2,
-                crate::provider::ModelRouteApiMethod::Copilot => 3,
-                crate::provider::ModelRouteApiMethod::OpenRouter => 4,
-                _ => 5,
+                | crate::provider::ModelRouteApiMethod::OpenAiCompatible { .. } => 2,
+                crate::provider::ModelRouteApiMethod::Cursor => 3,
+                crate::provider::ModelRouteApiMethod::Copilot => 4,
+                crate::provider::ModelRouteApiMethod::OpenRouter => 5,
+                _ => 6,
             };
             let cheapness = r.estimated_reference_cost_micros.unwrap_or(u64::MAX);
             (avail, method, cheapness, r.provider.clone())

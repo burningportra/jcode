@@ -4,6 +4,7 @@ use super::*;
 /// refusals are model-side policy stops, so retrying the same model rarely
 /// helps; hopping to the strongest Anthropic route often does.
 const GUARDRAIL_REROUTE_MODEL: &str = "claude-opus-4-8";
+const AUTO_MODEL_ID: &str = "jcode-auto";
 
 impl App {
     fn format_failover_count(value: usize) -> String {
@@ -1410,6 +1411,115 @@ impl App {
         }
         self.push_display_message(DisplayMessage::system(content));
     }
+}
+
+fn auto_decision_line(decision: &jcode_provider_core::AutoRouterDecisionSnapshot) -> String {
+    let provider = decision.provider_family.trim();
+    let provider = if provider.is_empty() {
+        String::new()
+    } else {
+        format!(" via {provider}")
+    };
+    let reason = decision.reason.trim();
+    if reason.is_empty() {
+        format!("{} -> {}{}", decision.tier, decision.model_spec, provider)
+    } else {
+        format!(
+            "{} -> {}{} ({})",
+            decision.tier, decision.model_spec, provider, reason
+        )
+    }
+}
+
+pub(super) fn format_auto_router_audit(
+    state: Option<&jcode_provider_core::AutoRouterStateSnapshot>,
+) -> String {
+    let Some(state) = state else {
+        return "Auto router: inactive. Select `jcode-auto` with /model jcode-auto to enable per-turn routing."
+            .to_string();
+    };
+
+    let mut lines = Vec::new();
+    lines.push(format!(
+        "Auto router: {}",
+        if state.active { "active" } else { "inactive" }
+    ));
+
+    if let Some(last) = &state.last_resolved {
+        lines.push(format!("Last decision: {}", auto_decision_line(last)));
+    } else {
+        lines.push("Last decision: none yet".to_string());
+    }
+
+    if state.decisions_tail.is_empty() {
+        lines.push("Recent decisions: none yet".to_string());
+    } else {
+        lines.push("Recent decisions:".to_string());
+        for decision in state.decisions_tail.iter().rev().take(8).rev() {
+            lines.push(format!("• {}", auto_decision_line(decision)));
+        }
+    }
+
+    lines.push(
+        "Use /auto frontier, /auto implement, or /auto fast to force exactly one next turn."
+            .to_string(),
+    );
+    lines.join("\n")
+}
+
+pub(super) fn normalize_auto_tier(input: &str) -> Option<&'static str> {
+    match input.trim().to_ascii_lowercase().as_str() {
+        "frontier" | "plan" | "planning" => Some("frontier"),
+        "implement" | "implementation" | "impl" => Some("implement"),
+        "fast" | "mechanical" => Some("fast"),
+        _ => None,
+    }
+}
+
+pub(super) fn auto_tier_usage() -> &'static str {
+    "Usage: /auto [frontier|implement|fast]"
+}
+
+pub(super) fn auto_tier_success_message(tier: &str) -> String {
+    format!("Auto router will use `{tier}` for exactly one next turn.")
+}
+
+pub(super) fn handle_auto_command(app: &mut App, trimmed: &str) -> bool {
+    if trimmed == "/auto" || trimmed == "/auto status" || trimmed == "/auto audit" {
+        app.push_display_message(DisplayMessage::system(format_auto_router_audit(
+            app.provider.auto_state_snapshot().as_ref(),
+        )));
+        return true;
+    }
+
+    let Some(rest) = trimmed.strip_prefix("/auto ") else {
+        return false;
+    };
+    let rest = rest.trim();
+    let Some(tier) = normalize_auto_tier(rest) else {
+        app.push_display_message(DisplayMessage::error(auto_tier_usage()));
+        return true;
+    };
+
+    match app.provider.set_auto_tier(Some(tier)) {
+        Ok(()) => {
+            let active_model = app.finalize_model_switch(AUTO_MODEL_ID);
+            app.push_display_message(DisplayMessage::system(auto_tier_success_message(tier)));
+            app.set_status_notice(format!("Auto: next turn -> {tier}"));
+            crate::logging::event_info(
+                "auto_router_tier_forced_local",
+                vec![("tier", tier.to_string()), ("model", active_model)],
+            );
+        }
+        Err(error) => {
+            app.push_display_message(DisplayMessage::error(format!(
+                "Failed to set auto tier: {}",
+                error
+            )));
+            app.set_status_notice("Auto tier failed");
+        }
+    }
+    true
 }
 
 pub(super) fn handle_model_command(app: &mut App, trimmed: &str) -> bool {

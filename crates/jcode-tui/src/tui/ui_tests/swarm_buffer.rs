@@ -64,6 +64,7 @@ fn fact_test_state(input: String, scheduled: bool) -> TestState {
     });
     let info_widget_data = info_widget::InfoWidgetData {
         model: Some("gpt-5.6-sol".to_string()),
+        resolved_model: None,
         reasoning_effort: Some("high".to_string()),
         context_limit: Some(256_000),
         provider_name: Some("openai".to_string()),

@@ -37,6 +37,7 @@ fn todo(id: &str, status: &str) -> crate::todo::TodoItem {
 fn contended_data() -> InfoWidgetData {
     InfoWidgetData {
         model: Some("claude-test-1".to_string()),
+        resolved_model: None,
         provider_name: Some("anthropic".to_string()),
         session_count: Some(3),
         queue_mode: Some(true),

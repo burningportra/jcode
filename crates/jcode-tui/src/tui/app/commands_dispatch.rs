@@ -179,6 +179,7 @@ pub(super) fn dispatch_local_command(app: &mut App, trimmed: &str) -> bool {
         || super::commands::handle_diff_command(app, trimmed)
         || super::commands::handle_model_status_command(app, trimmed)
         || super::debug::handle_debug_command(app, trimmed)
+        || super::model_context::handle_auto_command(app, trimmed)
         || super::model_context::handle_model_command(app, trimmed)
         || super::commands::handle_usage_command(app, trimmed)
         || super::productivity::handle_productivity_command(app, trimmed)

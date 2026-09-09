@@ -677,7 +677,10 @@ impl App {
                                         }
                                     }
                                     StreamEvent::StatusDetail { detail } => {
-                                        self.status_detail = Some(detail);
+                                        self.status_detail = Some(detail.clone());
+                                        if detail.trim_start().starts_with("auto:") {
+                                            self.push_display_message(DisplayMessage::system(detail));
+                                        }
                                         if eager_stream_redraw {
                                             status_spinner_renderer.draw_full(self, terminal)?;
                                         }

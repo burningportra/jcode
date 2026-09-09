@@ -255,6 +255,7 @@ mod tests {
     fn compute_page_layout_falls_back_to_compact_page() {
         let data = InfoWidgetData {
             model: Some("gpt-test".to_string()),
+            resolved_model: None,
             queue_mode: Some(true),
             ..Default::default()
         };

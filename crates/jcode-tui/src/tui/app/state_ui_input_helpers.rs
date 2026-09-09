@@ -42,6 +42,7 @@ const REGISTERED_COMMANDS: &[RegisteredCommand] = &[
     RegisteredCommand::public("/commands", "Alias for /help"),
     RegisteredCommand::public("/model", "List or switch models"),
     RegisteredCommand::public("/models", "Alias for /model"),
+    RegisteredCommand::public("/auto", "Show auto-router audit or force one tier"),
     RegisteredCommand::public(
         "/provider-test-coverage",
         "Show live-test evidence for the current provider/model",
@@ -772,6 +773,30 @@ impl App {
                     .map(|e| (format!("/effort {}", e), effort_display_label(e)))
                     .collect(),
             );
+        }
+
+        if prefix.starts_with("/auto ") {
+            let tiers = [
+                ("frontier", "Force the next turn to the frontier tier"),
+                ("implement", "Force the next turn to the implement tier"),
+                ("fast", "Force the next turn to the fast tier"),
+            ];
+            return self.rank_suggestions(
+                input,
+                tiers
+                    .iter()
+                    .map(|(tier, help)| (format!("/auto {}", tier), *help))
+                    .collect(),
+            );
+        }
+
+        if prefix_trimmed == "/auto" {
+            return vec![
+                ("/auto".into(), "Show auto-router decision audit"),
+                ("/auto frontier".into(), "Force the next turn to frontier"),
+                ("/auto implement".into(), "Force the next turn to implement"),
+                ("/auto fast".into(), "Force the next turn to fast"),
+            ];
         }
 
         if prefix.starts_with("/fast ") {
@@ -1658,6 +1683,7 @@ impl App {
                 | "/splitview"
                 | "/split-view"
                 | "/model"
+                | "/auto"
                 | "/agents"
                 | "/effort"
                 | "/fast"

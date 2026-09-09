@@ -62,6 +62,7 @@ fn first_prompt_stays_visible_with_widgets_during_processing_at_47x51() {
                 chat_native_scrollbar: scrollbar,
                 info_widget_data: info_widget::InfoWidgetData {
                     model: Some(WIDGET.into()),
+                    resolved_model: None,
                     reasoning_effort: Some("high".into()),
                     context_limit: Some(256_000),
                     observed_context_tokens: Some(1_000),
@@ -366,7 +367,14 @@ fn test_copy_badge_reserves_right_margin_for_info_widgets() {
     };
     let copy_badge_ui = crate::tui::app::CopyBadgeUiState::default();
 
-    reserve_copy_badge_margins(&mut margins, 10, 13, &[(11, 'a')], &copy_badge_ui, Instant::now());
+    reserve_copy_badge_margins(
+        &mut margins,
+        10,
+        13,
+        &[(11, 'a')],
+        &copy_badge_ui,
+        Instant::now(),
+    );
 
     assert_eq!(margins.right_widths[0], 30);
     assert_eq!(margins.right_widths[1], 16);
@@ -440,7 +448,10 @@ fn test_copy_badge_truncation_marks_cut_content_with_ellipsis() {
         .iter()
         .map(|span| span.content.as_ref())
         .collect();
-    assert!(text.ends_with('…'), "cut content must show ellipsis: {text:?}");
+    assert!(
+        text.ends_with('…'),
+        "cut content must show ellipsis: {text:?}"
+    );
     assert!(line.width() <= 10);
 
     // Content that fits is left intact (trailing spaces trimmed only).

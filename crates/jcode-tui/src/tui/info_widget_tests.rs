@@ -1096,12 +1096,14 @@ fn contextual_subgraph_prefers_memory_hub() {
 fn overview_requires_multiple_sections() {
     let one_section = InfoWidgetData {
         model: Some("gpt-test".to_string()),
+        resolved_model: None,
         ..Default::default()
     };
     assert!(!one_section.has_data_for(WidgetKind::Overview));
 
     let two_sections = InfoWidgetData {
         model: Some("gpt-test".to_string()),
+        resolved_model: None,
         queue_mode: Some(true),
         ..Default::default()
     };
@@ -1122,6 +1124,7 @@ fn overview_widget_is_placed_when_space_allows() {
 
     let data = InfoWidgetData {
         model: Some("gpt-test".to_string()),
+        resolved_model: None,
         queue_mode: Some(true),
         ..Default::default()
     };
@@ -1158,6 +1161,7 @@ fn workspace_widget_has_high_priority_when_enabled() {
             sessions: vec![crate::tui::workspace_map::WorkspaceSessionTile::new("fox")],
         }],
         model: Some("gpt-test".to_string()),
+        resolved_model: None,
         queue_mode: Some(true),
         ..Default::default()
     };
@@ -1182,6 +1186,7 @@ fn workspace_widget_has_high_priority_when_enabled() {
 fn model_widget_renders_connection_type() {
     let data = InfoWidgetData {
         model: Some("gpt-5.3-codex".to_string()),
+        resolved_model: None,
         provider_name: Some("openai".to_string()),
         connection_type: Some("websocket".to_string()),
         ..Default::default()
@@ -1601,6 +1606,7 @@ fn sticky_placement_clamps_width_to_current_margin() {
 
     let data = InfoWidgetData {
         model: Some("gpt-test".to_string()),
+        resolved_model: None,
         queue_mode: Some(true),
         ..Default::default()
     };
@@ -1664,6 +1670,7 @@ fn placements_never_include_border_only_widgets() {
 
     let data = InfoWidgetData {
         model: Some("gpt-test".to_string()),
+        resolved_model: None,
         session_count: Some(2),
         context_info: Some(crate::prompt::ContextInfo {
             system_prompt_chars: 24_000,
@@ -1738,6 +1745,7 @@ fn compact_page_height_estimate_matches_rendered_lines() {
     // background section (rendered last) is included.
     let data = InfoWidgetData {
         model: Some("claude-test-1".to_string()),
+        resolved_model: None,
         provider_name: Some("anthropic".to_string()),
         session_count: Some(2),
         context_info: Some(crate::prompt::ContextInfo {
@@ -1789,6 +1797,7 @@ fn compact_page_height_matches_for_cost_based_usage() {
 
     let data = InfoWidgetData {
         model: Some("gpt-test".to_string()),
+        resolved_model: None,
         background_info: Some(BackgroundInfo {
             running_count: 1,
             running_tasks: vec!["bash".to_string()],

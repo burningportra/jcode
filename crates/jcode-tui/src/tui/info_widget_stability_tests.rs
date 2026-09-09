@@ -5,6 +5,7 @@ use crate::tui::info_widget::InfoWidgetData;
 fn sample_data() -> InfoWidgetData {
     InfoWidgetData {
         model: Some("gpt-test".to_string()),
+        resolved_model: None,
         queue_mode: Some(true),
         ..Default::default()
     }
@@ -17,6 +18,7 @@ fn rich_data() -> InfoWidgetData {
     use crate::tui::info_widget::{BackgroundInfo, UsageInfo, UsageProvider};
     InfoWidgetData {
         model: Some("gpt-test".to_string()),
+        resolved_model: None,
         queue_mode: Some(true),
         todos: vec![
             crate::todo::TodoItem {

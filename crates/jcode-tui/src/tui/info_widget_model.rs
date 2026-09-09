@@ -10,7 +10,7 @@ pub(super) fn render_model_widget(data: &InfoWidgetData, inner: Rect) -> Vec<Lin
 
     let mut lines: Vec<Line> = Vec::new();
 
-    let short_name = crate::tui::session_facts::pretty_model(model);
+    let short_name = model_status_label(model, data.resolved_model.as_deref());
     let max_len = inner.width.saturating_sub(2) as usize;
 
     let mut spans = vec![
@@ -173,7 +173,7 @@ pub(super) fn render_model_info(data: &InfoWidgetData, inner: Rect) -> Vec<Line<
         return Vec::new();
     };
 
-    let short_name = crate::tui::session_facts::pretty_model(model);
+    let short_name = model_status_label(model, data.resolved_model.as_deref());
     let max_len = inner.width.saturating_sub(2) as usize;
 
     let mut spans = vec![Span::styled(
@@ -347,6 +347,27 @@ fn append_model_runtime_metadata(spans: &mut Vec<Span<'static>>, data: &InfoWidg
     }
 }
 
+fn model_status_label(model: &str, resolved_model: Option<&str>) -> String {
+    let short_name = crate::tui::session_facts::pretty_model(model);
+    let Some(resolved) = resolved_model
+        .map(str::trim)
+        .filter(|resolved| !resolved.is_empty() && *resolved != model.trim())
+    else {
+        return short_name;
+    };
+
+    let virtual_label = if model.trim() == "jcode-auto" {
+        "auto".to_string()
+    } else {
+        short_name
+    };
+    format!(
+        "{} -> {}",
+        virtual_label,
+        crate::tui::session_facts::pretty_model(resolved)
+    )
+}
+
 fn short_reasoning_effort(effort: &str) -> Option<&str> {
     let effort = effort.trim();
     if effort.is_empty() {
@@ -397,6 +418,7 @@ mod tests {
             queue_mode: None,
             context_limit: None,
             model: Some("gpt-5-codex".to_string()),
+            resolved_model: None,
             reasoning_effort: Some("high".to_string()),
             service_tier: Some("priority".to_string()),
             native_compaction_mode: None,
@@ -481,5 +503,19 @@ mod tests {
 
         assert!(!first_line_text(render_model_widget(&data, rect)).contains("[fast]"));
         assert!(!first_line_text(render_model_info(&data, rect)).contains("[fast]"));
+    }
+
+    #[test]
+    fn virtual_auto_model_renders_resolved_model() {
+        let rect = Rect::new(0, 0, 80, 8);
+        let mut data = data();
+        data.model = Some("jcode-auto".to_string());
+        data.resolved_model = Some("claude-sonnet-4-20250514".to_string());
+
+        let independent = first_line_text(render_model_widget(&data, rect));
+        let overview = first_line_text(render_model_info(&data, rect));
+
+        assert!(independent.contains("auto -> Sonnet 4"), "{independent}");
+        assert!(overview.contains("auto -> Sonnet 4"), "{overview}");
     }
 }

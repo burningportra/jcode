@@ -1348,6 +1348,7 @@ impl crate::tui::TuiState for App {
             service_tier,
             native_compaction_mode,
             native_compaction_threshold_tokens,
+            resolved_model,
         ) = if uses_remote_widget_metadata {
             (
                 self.remote_provider_model.clone(),
@@ -1355,6 +1356,12 @@ impl crate::tui::TuiState for App {
                 self.remote_service_tier.clone(),
                 None,
                 None,
+                self.remote_resolved_model.clone().or_else(|| {
+                    self.remote_auto_state
+                        .as_ref()
+                        .and_then(|state| state.last_resolved.as_ref())
+                        .map(|decision| decision.model_spec.clone())
+                }),
             )
         } else {
             (
@@ -1363,6 +1370,7 @@ impl crate::tui::TuiState for App {
                 self.provider.service_tier(),
                 self.provider.native_compaction_mode(),
                 self.provider.native_compaction_threshold_tokens(),
+                self.provider.auto_last_resolved_model(),
             )
         };
 
@@ -1624,6 +1632,7 @@ impl crate::tui::TuiState for App {
             queue_mode: Some(self.queue_mode),
             context_limit: Some(self.context_limit as usize),
             model,
+            resolved_model,
             reasoning_effort,
             service_tier,
             native_compaction_mode,
