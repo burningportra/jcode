@@ -256,8 +256,11 @@ impl MultiProvider {
                 .cmp(&(family_rank(b.provider_family.as_str()), tier_rank(b.tier)))
         });
         let candidate = ordered.into_iter().next()?;
-        // History portability still applies: a pinned-family failure must not
-        // jump to an incompatible history transport.
+        // History portability: prefer a candidate in the pinned family so the
+        // conversation history stays on a compatible transport. But if every
+        // remaining portable candidate is exhausted, allow the jump to another
+        // transport: a dead provider (402/429) with converted history is
+        // better than failing the turn outright.
         if !history_portable {
             let pinned = self
                 .auto_route_state
@@ -267,6 +270,12 @@ impl MultiProvider {
                 .clone();
             if let Some(pinned) = pinned
                 && pinned != candidate.provider_family
+                && candidates.iter().any(|c| {
+                    c.provider_family == pinned
+                        && !attempted_specs
+                            .iter()
+                            .any(|spec| spec == &c.model_spec)
+                })
             {
                 return None;
             }
