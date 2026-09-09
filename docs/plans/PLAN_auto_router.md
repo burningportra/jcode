@@ -6,15 +6,17 @@ Scope: jcode-base provider layer, config, TUI picker/status, session persistence
 
 ## 1. Executive summary
 
-Introduce a virtual `auto` model. When selected, jcode routes each turn to a
+Introduce a virtual `jcode-auto` model. When selected, jcode routes each turn to a
 concrete model chosen from three tiers: FRONTIER (subscription OAuth Claude/GPT
 flagships) for planning/judgment/first-turns, IMPLEMENT (subscription mid-tier)
 for normal coding, and FAST (served-throughput >100 tps openweight/flash models
 via Vercel AI Gateway, then OpenRouter) for mechanical work. The design is
-premortem-informed: conversation-scoped provider affinity (no cross-provider
-switching mid-conversation, which corrupts provider-affine history and forfeits
-cache), conservative-first classification (a wrongly-cheap turn costs retries; a
-wrongly-expensive turn costs cents), and mandatory transparency (visible
+premortem-informed: conversation-scoped *history-format* affinity (provider
+switches are allowed only when conversation history is portable; provider-signed
+blocks pin the family), conservative-first classification (a wrongly-cheap turn
+costs retries; a wrongly-expensive turn costs cents), request-scoped dispatch
+via per-call provider forks (shared provider state is never mutated per turn),
+and mandatory transparency (visible
 resolved model, decision audit, one-turn forced tier).
 
 ## 2. Background and why
@@ -35,8 +37,8 @@ Premortem failure modes this design explicitly counters:
    re-routes within family.
 3. Mid-conversation provider switch corrupting provider-affine history
    (Anthropic signed thinking, OpenAI encrypted reasoning) and killing prompt
-   cache. → provider affinity per conversation; tier shifts only within the
-   same provider family.
+   cache. → history-format affinity: switches allowed only when history is
+   portable; signed blocks pin the family.
 4. Users hating opacity. → auto→model status, /auto audit, /auto <tier>.
 5. OpenRouter flakiness becoming default behavior. → FAST transport priority
    Vercel AI Gateway first; FAST tier absent entirely when no transport
@@ -47,12 +49,14 @@ Premortem failure modes this design explicitly counters:
 ## 3. Non-goals
 
 - No LLM-based classification (no extra model calls to decide routing).
-- No cross-provider hopping mid-conversation (except hard failure escalation).
+- No cross-provider hopping when history is provider-signed (portable history
+  may switch; escalation may switch as last resort with a notice).
 - No new provider runtime (Vercel uses the existing openai-compatible profile).
 - No effort/latency-mode tricks for FAST: FAST means the model natively serves
   >100 output tps without special flags.
-- No auto-routing for subagent/swarm spawns in v1 (reject `auto` there with an
-  actionable error).
+- No auto-routing for subagent/swarm spawns in v1 (reject `jcode-auto` there
+  with an actionable error; `inherit` from an auto coordinator resolves to the
+  last concrete resolved model).
 
 ## 4. Core types and data model
 
@@ -239,51 +243,69 @@ Stickiness rule: if the new category equals `last_category`, reuse
 same provider family. `forced_next_tier` (from /auto <tier>) overrides exactly
 one turn and clears.
 
-## 7. Interception points (grounded in code)
+## 7. Interception points (grounded in code, v2.1)
 
-- `MultiProvider::set_model` (mod.rs:2060): accept `auto`, store
-  `auto_active=true`, do not switch sub-providers; reserve id.
-- `MultiProvider::model` (mod.rs:1866): return `auto` when active.
-- `MultiProvider::fork` (mod.rs:2940): carry `auto_active` + conversation state.
+- `MultiProvider::set_model` (mod.rs:2060): accept `jcode-auto` (bare or
+  prefixed), set `auto_active`; do not switch sub-providers.
+- `MultiProvider::model` (mod.rs:1866): return `jcode-auto` when active.
+- `model_switch_request_for_session_route` (tui_lifecycle_runtime.rs:344):
+  virtual-id special case BEFORE provider-key prefixing (review finding 2).
+- `MultiProvider::fork` (mod.rs:2940): carry `auto_active` + AutoRouteState.
+- NEW `complete_on_provider_with_model` seam: fork the family's provider per
+  completion call, apply the resolved `RouteSelection` to the fork, dispatch
+  the request. Shared template never mutated (review finding 4).
 - `MultiProvider::complete_with_failover` (mod.rs:612): when auto active,
-  resolve via auto_router FIRST, then dispatch to the resolved family's
-  provider with the concrete model (existing failover still applies within the
-  resolved provider). Record decision; escalate one tier on failure
-  (Fast→Implement→Frontier; cross-provider only if the family is dead).
-- `catalog_routes.rs` simplified + full route builders: pinned "Auto" entry;
-  available when ≥2 tiers have candidates; detail lists tier models.
-- `session.rs`: persist `auto` as the model id; restore re-resolves.
-- Guards: swarm spawn `model=auto` → actionable error; telemetry price lookup
-  maps virtual id to the resolved decision; `/model` display shows
-  `auto → <resolved>` (info_widget_model + model_context).
+  delegate to the auto seam instead of the normal active-provider dispatch;
+  image capability filtering moves after resolution (finding 5). Tier
+  escalation retries inside the seam; existing provider failover remains as
+  the outer backstop (finding 6).
+- `catalog_routes.rs` simplified + full route builders: pinned `jcode-auto`
+  entry with `ModelRouteApiMethod::Auto` (finding 8); available when ≥2 tiers
+  have candidates; detail lists tier models.
+- `session.rs`: persist `jcode-auto` as the model id; restore re-resolves.
+- Wire protocol: `set_auto_tier {tier?}` request + `auto_state` on state
+  events (finding 9); model status payload gains `resolved_model`
+  (finding 12).
+- Guards: swarm spawn model resolution rejects the virtual id (comm_session.rs
+  provider_key_for_spawn_model, finding 10); telemetry price lookup maps the
+  virtual id to the last resolved decision.
 
 ## 8. Error handling and edge cases
 
 - No tier candidates at all (no auth) → Auto route unavailable in picker; if
   selected anyway, fall back to normal default-model behavior with a notice.
-- Estimated request tokens (reuse estimate_request_input) exceed a candidate's
-  context window → drop candidate, take next in tier; log reason.
-- Failure escalation: retry once one tier up; cross-provider only as last
-  resort with a system notice (provider-affine history risk acknowledged).
+- Context-window filtering: only when candidate metadata exists; unknown
+  gateway candidates get a conservative 128k default; overflow errors in
+  flight escalate one tier (finding 11).
+- Failure escalation: retry once one tier up within the auto seam; provider
+  failover stays as the outer backstop. Any history-portability violation in
+  a candidate skips that candidate.
 - /rewind: rewind also clears `forced_next_tier`; conversation state survives.
-- Compaction: conversation_provider_family survives compaction (state lives in
-  provider, not messages).
-- Concurrency: AutoRouteState behind the same RwLock discipline as other
-  MultiProvider state.
+- Compaction: AutoRouteState lives in the provider, survives compaction;
+  history_is_portable is re-evaluated per turn from the live message vector
+  so post-compaction portability changes are honored.
+- Concurrency: per-call provider forks make per-turn dispatch race-free;
+  AutoRouteState mutations are short RwLock critical sections.
 
 ## 9. Roadmap (dependency-ordered)
 
-1. `auto_router.rs` core: tiers, seed table, classifier, state (no wiring).
-   Tests: classifier truth table incl. adversarial cases; seed matching;
-   tier fallback; context filtering; stickiness.
-2. MultiProvider wiring: set_model/model/fork/complete_with_failover,
-   virtual-id guards. Tests: dispatch to mock resolved provider, escalation,
-   fork/session round-trip.
-3. Config `[auto_router]` + route-builder Auto entries. Tests: route presence
-   and availability.
-4. TUI: picker entry, status `auto → model`, `/auto` + `/auto <tier>`,
-   notices. Tests: command handling, status rendering.
-5. Selfdev build, reload, manual mixed-transcript verification.
+1. `auto_router.rs` core: tiers, seed table, classifier, AutoRouteState,
+   history_is_portability scan (no wiring). Tests: classifier truth table incl.
+   adversarial cases; seed matching; tier fallback; stickiness; portability
+   scan (signed blocks pin family).
+2. Virtual-id plumbing: set_model/model/fork, restore special case,
+   ModelRouteApiMethod::Auto + RouteSelection round-trip, spawn guard.
+   Tests: id round-trip through set_model/fork/restore; prefixed-id restore;
+   spawn rejection.
+3. Completion seam: complete_on_provider_with_model with per-call forks,
+   escalation, decision recording. Tests: dispatch to mock resolved provider,
+   no shared-state mutation, escalation order, capability filter ordering.
+4. Config `[auto_router]` + route-builder entries + wire protocol
+   (set_auto_tier, auto_state, resolved_model). Tests: route presence,
+   availability, protocol round-trip.
+5. TUI: picker entry, `auto → model` status, `/auto` + `/auto <tier>`,
+   notices. Tests: command handling, status rendering, remote event handling.
+6. Selfdev build, reload, manual mixed-transcript verification.
 
 ## 10. Comparison table
 
