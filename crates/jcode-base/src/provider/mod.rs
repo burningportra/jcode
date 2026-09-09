@@ -328,6 +328,11 @@ pub use self::state::{ProviderModelSelectionSource, ProviderRuntimeState, Provid
 
 pub(crate) const GROK_BUILD_PROFILE_ID: &str = "grok-build";
 pub(crate) const XAI_OAUTH_PROFILE_ID: &str = external::XAI_OAUTH_RUNTIME;
+pub const AUTO_MODEL_ID: &str = auto_router::AUTO_MODEL_ID;
+
+pub fn is_virtual_auto_model_request(model: &str) -> bool {
+    auto_router::is_virtual_model_request(model)
+}
 
 /// MultiProvider wraps multiple providers and allows seamless model switching
 pub struct MultiProvider {
@@ -370,6 +375,8 @@ pub struct MultiProvider {
     openai_compatible_profiles: RwLock<HashMap<String, Arc<dyn Provider>>>,
     active_openai_compatible_profile: RwLock<Option<String>>,
     active: RwLock<ActiveProvider>,
+    auto_active: RwLock<bool>,
+    auto_route_state: RwLock<auto_router::AutoRouteState>,
     /// Use Claude CLI instead of direct API (legacy mode)
     use_claude_cli: bool,
     /// Notifications generated during provider/account auto-selection.
@@ -450,6 +457,33 @@ pub fn bump_catalog_generation() {
 }
 
 impl MultiProvider {
+    pub(crate) fn is_auto_active(&self) -> bool {
+        *self
+            .auto_active
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    fn set_auto_active(&self, active: bool) {
+        *self
+            .auto_active
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = active;
+        self.invalidate_routes_memo();
+    }
+
+    fn finish_concrete_model_switch(&self, provider: ActiveProvider) {
+        self.set_active_provider(provider);
+        self.set_auto_active(false);
+    }
+
+    pub(crate) fn auto_route_state_snapshot(&self) -> auto_router::AutoRouteState {
+        self.auto_route_state
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
+    }
+
     /// Drop this instance's route-catalog memo. Use for changes that are
     /// captured by [`Self::routes_memo_key`] (model/provider/profile switches):
     /// the shared memo stays valid because those instances key differently.
@@ -985,7 +1019,7 @@ impl MultiProvider {
                 .write()
                 .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(provider);
             self.clear_active_openai_compatible_profile();
-            self.set_active_provider(ActiveProvider::Claude);
+            self.finish_concrete_model_switch(ActiveProvider::Claude);
             return Ok(());
         }
 
@@ -1016,7 +1050,7 @@ impl MultiProvider {
         };
         provider.set_model(model)?;
         registry.set_active_compatible_profile(profile_name.to_string());
-        self.set_active_provider(ActiveProvider::OpenRouter);
+        self.finish_concrete_model_switch(ActiveProvider::OpenRouter);
         Ok(())
     }
 
@@ -1059,7 +1093,7 @@ impl MultiProvider {
             .write()
             .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(runtime);
         self.clear_active_openai_compatible_profile();
-        self.set_active_provider(ActiveProvider::OpenRouter);
+        self.finish_concrete_model_switch(ActiveProvider::OpenRouter);
         Ok(())
     }
 
@@ -1127,7 +1161,7 @@ impl MultiProvider {
                         "Claude credentials not available. Run `jcode login --provider claude` first."
                     );
                 }
-                self.set_active_provider(ActiveProvider::Claude);
+                self.finish_concrete_model_switch(ActiveProvider::Claude);
                 Ok(())
             }
             ActiveProvider::OpenAI => {
@@ -1152,7 +1186,7 @@ impl MultiProvider {
                     openai.set_credential_mode(mode)?;
                 }
                 openai.set_model(model)?;
-                self.set_active_provider(ActiveProvider::OpenAI);
+                self.finish_concrete_model_switch(ActiveProvider::OpenAI);
                 Ok(())
             }
             ActiveProvider::Copilot => {
@@ -1162,7 +1196,7 @@ impl MultiProvider {
                     );
                 };
                 copilot.set_model(model)?;
-                self.set_active_provider(ActiveProvider::Copilot);
+                self.finish_concrete_model_switch(ActiveProvider::Copilot);
                 Ok(())
             }
             ActiveProvider::Antigravity => {
@@ -1172,7 +1206,7 @@ impl MultiProvider {
                     );
                 };
                 antigravity.set_model(model)?;
-                self.set_active_provider(ActiveProvider::Antigravity);
+                self.finish_concrete_model_switch(ActiveProvider::Antigravity);
                 Ok(())
             }
             ActiveProvider::Gemini => {
@@ -1182,7 +1216,7 @@ impl MultiProvider {
                     );
                 };
                 gemini.set_model(model)?;
-                self.set_active_provider(ActiveProvider::Gemini);
+                self.finish_concrete_model_switch(ActiveProvider::Gemini);
                 Ok(())
             }
             ActiveProvider::Cursor => {
@@ -1192,7 +1226,7 @@ impl MultiProvider {
                     );
                 };
                 cursor.set_model(model)?;
-                self.set_active_provider(ActiveProvider::Cursor);
+                self.finish_concrete_model_switch(ActiveProvider::Cursor);
                 Ok(())
             }
             ActiveProvider::Bedrock => {
@@ -1202,7 +1236,7 @@ impl MultiProvider {
                     );
                 };
                 bedrock.set_model(model)?;
-                self.set_active_provider(ActiveProvider::Bedrock);
+                self.finish_concrete_model_switch(ActiveProvider::Bedrock);
                 Ok(())
             }
             ActiveProvider::OpenRouter => {
@@ -1210,7 +1244,7 @@ impl MultiProvider {
                     self.active_openai_compatible_profile_serving_model(model)
                 {
                     active_profile.set_model(model)?;
-                    self.set_active_provider(ActiveProvider::OpenRouter);
+                    self.finish_concrete_model_switch(ActiveProvider::OpenRouter);
                     return Ok(());
                 }
 
@@ -1271,7 +1305,7 @@ impl MultiProvider {
                         .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(openrouter);
                 }
                 self.clear_active_openai_compatible_profile();
-                self.set_active_provider(ActiveProvider::OpenRouter);
+                self.finish_concrete_model_switch(ActiveProvider::OpenRouter);
                 Ok(())
             }
             ActiveProvider::InferenceNet => {
@@ -1279,7 +1313,7 @@ impl MultiProvider {
                     anyhow::bail!("Inference.net credentials not available. Run  to log in.");
                 };
                 inference.set_model(model)?;
-                self.set_active_provider(ActiveProvider::InferenceNet);
+                self.finish_concrete_model_switch(ActiveProvider::InferenceNet);
                 Ok(())
             }
         }
@@ -1329,7 +1363,7 @@ impl MultiProvider {
         };
         provider.set_model(model)?;
         registry.set_active_compatible_profile(profile_id);
-        self.set_active_provider(ActiveProvider::OpenRouter);
+        self.finish_concrete_model_switch(ActiveProvider::OpenRouter);
         Ok(())
     }
 
@@ -1690,6 +1724,9 @@ impl MultiProvider {
     }
 
     fn fork_model_switch_request(&self, active: ActiveProvider, current_model: &str) -> String {
+        if auto_router::is_virtual_model(current_model) {
+            return auto_router::AUTO_MODEL_ID.to_string();
+        }
         let prefix = match active {
             ActiveProvider::Claude => {
                 if let Some(anthropic) = self.anthropic_provider() {
@@ -1865,6 +1902,9 @@ impl Provider for MultiProvider {
     }
 
     fn model(&self) -> String {
+        if self.is_auto_active() {
+            return auto_router::AUTO_MODEL_ID.to_string();
+        }
         match self.active_provider() {
             ActiveProvider::Claude => {
                 // Prefer anthropic if available
@@ -1909,6 +1949,12 @@ impl Provider for MultiProvider {
                 .map(|o| o.model())
                 .unwrap_or_else(|| "kimi-k3-fast".to_string()),
         }
+    }
+
+    fn auto_last_resolved_model(&self) -> Option<String> {
+        self.auto_route_state_snapshot()
+            .last_resolved
+            .map(|decision| decision.model_spec)
     }
 
     fn explicit_provider_pin_for_current_model(&self) -> Option<String> {
@@ -2070,6 +2116,11 @@ impl Provider for MultiProvider {
             anyhow::bail!("Model cannot be empty");
         }
 
+        if let Some(_virtual_model) = auto_router::virtual_model_request(requested_model) {
+            self.set_auto_active(true);
+            return Ok(());
+        }
+
         if let Some(target_model) = requested_model.strip_prefix("grok-build:") {
             let target_model = target_model.trim();
             if target_model.is_empty() {
@@ -2085,7 +2136,7 @@ impl Provider for MultiProvider {
             provider.set_model(target_model)?;
             registry.install_compatible_profile(GROK_BUILD_PROFILE_ID, provider);
             registry.set_active_compatible_profile(GROK_BUILD_PROFILE_ID);
-            self.set_active_provider(ActiveProvider::OpenRouter);
+            self.finish_concrete_model_switch(ActiveProvider::OpenRouter);
             return Ok(());
         }
 
@@ -2109,7 +2160,7 @@ impl Provider for MultiProvider {
             provider.set_model(target_model)?;
             registry.install_compatible_profile(XAI_OAUTH_PROFILE_ID, provider);
             registry.set_active_compatible_profile(XAI_OAUTH_PROFILE_ID);
-            self.set_active_provider(ActiveProvider::OpenRouter);
+            self.finish_concrete_model_switch(ActiveProvider::OpenRouter);
             return Ok(());
         }
 
@@ -2226,6 +2277,10 @@ impl Provider for MultiProvider {
     fn set_route_selection(&self, selection: &RouteSelection) -> Result<()> {
         if selection.model.trim().is_empty() {
             anyhow::bail!("Model cannot be empty");
+        }
+
+        if selection.runtime_key == RuntimeKey::Auto {
+            return self.set_model(&selection.routed_model_spec());
         }
 
         // The subscription is a distinct endpoint/auth runtime, not a model
@@ -3013,6 +3068,8 @@ impl Provider for MultiProvider {
             openai_compatible_profiles: RwLock::new(HashMap::new()),
             active_openai_compatible_profile: RwLock::new(None),
             active: RwLock::new(active),
+            auto_active: RwLock::new(self.is_auto_active()),
+            auto_route_state: RwLock::new(self.auto_route_state_snapshot()),
             use_claude_cli: self.use_claude_cli,
             startup_notices: RwLock::new(Vec::new()),
             initial_provider: self.initial_provider,
@@ -3084,7 +3141,7 @@ impl Provider for MultiProvider {
                 Self::provider_key(target)
             );
         }
-        self.set_active_provider(target);
+        self.finish_concrete_model_switch(target);
         self.auto_select_multi_account_for_provider(target);
         Ok(())
     }

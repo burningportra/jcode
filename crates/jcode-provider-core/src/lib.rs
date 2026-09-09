@@ -129,6 +129,12 @@ pub trait Provider: Send + Sync {
         "unknown".to_string()
     }
 
+    /// Concrete model most recently selected behind a virtual auto router, when
+    /// this provider is currently exposing a virtual model id.
+    fn auto_last_resolved_model(&self) -> Option<String> {
+        None
+    }
+
     /// Human-readable description of the auth method the active provider will
     /// actually use for the next request (e.g. "OAuth" or "API key"), or `None`
     /// when there is no meaningful OAuth-vs-API-key distinction. UI surfaces use
@@ -699,6 +705,7 @@ pub struct ModelRoute {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum RuntimeKey {
+    Auto,
     JcodeSubscription,
     ClaudeOAuth,
     AnthropicApiKey,
@@ -723,6 +730,7 @@ pub enum RuntimeKey {
 impl RuntimeKey {
     pub fn from_api_method(api_method: &ModelRouteApiMethod, _provider_label: &str) -> Self {
         match api_method {
+            ModelRouteApiMethod::Auto => Self::Auto,
             ModelRouteApiMethod::JcodeSubscription => Self::JcodeSubscription,
             ModelRouteApiMethod::ClaudeOAuth => Self::ClaudeOAuth,
             ModelRouteApiMethod::AnthropicApiKey => Self::AnthropicApiKey,
@@ -745,6 +753,7 @@ impl RuntimeKey {
 
     pub fn stable_id(&self) -> String {
         match self {
+            Self::Auto => "auto".to_string(),
             Self::JcodeSubscription => "jcode-subscription".to_string(),
             Self::ClaudeOAuth => "claude-oauth".to_string(),
             Self::AnthropicApiKey => "anthropic-api-key".to_string(),
@@ -807,6 +816,7 @@ impl RouteSelection {
     pub fn routed_model_spec(&self) -> String {
         let model = self.model.trim();
         match &self.runtime_key {
+            RuntimeKey::Auto => model.to_string(),
             RuntimeKey::JcodeSubscription => model.to_string(),
             RuntimeKey::ClaudeOAuth => format!("claude-oauth:{model}"),
             RuntimeKey::AnthropicApiKey => format!("claude-api:{model}"),
@@ -861,6 +871,7 @@ fn openrouter_catalog_model_id(model: &str) -> String {
 /// module boundaries instead of scattering string comparisons everywhere.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ModelRouteApiMethod {
+    Auto,
     JcodeSubscription,
     ClaudeOAuth,
     AnthropicApiKey,
@@ -900,6 +911,7 @@ impl ModelRouteApiMethod {
             return Self::from_auth_route(route);
         }
         match lower.as_str() {
+            "auto" => Self::Auto,
             "jcode-subscription" => Self::JcodeSubscription,
             "openrouter" => Self::OpenRouter,
             "openai-compatible" => Self::OpenAiCompatible { profile_id: None },
@@ -967,6 +979,7 @@ impl ModelRouteApiMethod {
 
     pub fn display_label(&self) -> String {
         match self {
+            Self::Auto => "auto".to_string(),
             Self::JcodeSubscription => "subscription".to_string(),
             Self::ClaudeOAuth | Self::OpenAIOAuth | Self::CodeAssistOAuth => "oauth".to_string(),
             Self::AnthropicApiKey | Self::OpenAIApiKey | Self::OpenAiCompatible { .. } => {
@@ -1601,6 +1614,10 @@ mod tests {
     #[test]
     fn runtime_key_distinguishes_openrouter_from_direct_compatible_profile() {
         assert_eq!(
+            RuntimeKey::from_api_method(&ModelRouteApiMethod::parse("auto"), "jcode"),
+            RuntimeKey::Auto
+        );
+        assert_eq!(
             RuntimeKey::from_api_method(&ModelRouteApiMethod::parse("openrouter"), "auto"),
             RuntimeKey::OpenRouter
         );
@@ -1617,6 +1634,18 @@ mod tests {
 
     #[test]
     fn route_selection_preserves_runtime_identity_from_model_route() {
+        let selection = RouteSelection::from_model_route(&ModelRoute {
+            model: "jcode-auto".to_string(),
+            provider: "jcode".to_string(),
+            api_method: "auto".to_string(),
+            available: true,
+            detail: "Automatic routing".to_string(),
+            cheapness: None,
+        });
+        assert_eq!(selection.runtime_key, RuntimeKey::Auto);
+        assert_eq!(selection.routed_model_spec(), "jcode-auto");
+        assert_eq!(selection.runtime_key.stable_id(), "auto");
+
         let selection = RouteSelection::from_model_route(&ModelRoute {
             model: "openrouter/owl-alpha".to_string(),
             provider: "OpenRouter".to_string(),

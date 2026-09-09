@@ -340,6 +340,8 @@ impl MultiProvider {
             openai_compatible_profiles: RwLock::new(HashMap::new()),
             active_openai_compatible_profile: RwLock::new(None),
             active: RwLock::new(active),
+            auto_active: RwLock::new(false),
+            auto_route_state: RwLock::new(super::auto_router::AutoRouteState::new()),
             use_claude_cli,
             startup_notices: RwLock::new(Vec::new()),
             initial_provider,

@@ -60,6 +60,8 @@ input = ["text"]
             openai_compatible_profiles: RwLock::new(std::collections::HashMap::new()),
             active_openai_compatible_profile: RwLock::new(None),
             active: RwLock::new(ActiveProvider::Claude),
+        auto_active: RwLock::new(false),
+        auto_route_state: RwLock::new(auto_router::AutoRouteState::new()),
             use_claude_cli: false,
             startup_notices: RwLock::new(Vec::new()),
             initial_provider: None,

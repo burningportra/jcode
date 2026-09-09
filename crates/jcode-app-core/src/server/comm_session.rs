@@ -179,17 +179,27 @@ fn spawn_visible_session_window_with_context(
 fn provider_key_for_spawn_model(
     model: Option<&str>,
     provider_key_override: Option<&str>,
-) -> Option<String> {
+) -> anyhow::Result<Option<String>> {
     if let Some(provider_key) = provider_key_override
         .map(str::trim)
         .filter(|provider_key| !provider_key.is_empty())
     {
-        return Some(provider_key.to_string());
+        return Ok(Some(provider_key.to_string()));
     }
 
-    let model = model?.trim();
+    let Some(model) = model else {
+        return Ok(None);
+    };
+    let model = model.trim();
     if model.is_empty() {
-        return None;
+        return Ok(None);
+    }
+
+    if crate::provider::is_virtual_auto_model_request(model) {
+        anyhow::bail!(
+            "Cannot spawn an agent with model '{}': jcode-auto is a virtual router, not a concrete model. Use model='inherit' so the child inherits the coordinator's last resolved concrete model, or choose a concrete model.",
+            model
+        );
     }
 
     if let Some((prefix, _rest)) = model.split_once(':') {
@@ -199,11 +209,11 @@ fn provider_key_for_spawn_model(
                 .is_some()
             || crate::config::config().providers.contains_key(prefix)
         {
-            return Some(prefix.to_string());
+            return Ok(Some(prefix.to_string()));
         }
     }
 
-    crate::provider::provider_for_model(model).map(str::to_string)
+    Ok(crate::provider::provider_for_model(model).map(str::to_string))
 }
 
 /// The model/auth identity a spawned swarm agent should inherit from its
@@ -213,6 +223,7 @@ fn provider_key_for_spawn_model(
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(super) struct CoordinatorSpawnIdentity {
     pub model: Option<String>,
+    pub auto_last_resolved_model: Option<String>,
     pub provider_key: Option<String>,
     pub route_api_method: Option<String>,
     pub is_canary: bool,
@@ -245,6 +256,7 @@ async fn resolve_coordinator_spawn_identity(
     {
         return CoordinatorSpawnIdentity {
             model: Some(agent_guard.provider_model()),
+            auto_last_resolved_model: agent_guard.provider_auto_last_resolved_model(),
             provider_key: agent_guard.session_provider_key(),
             route_api_method: agent_guard.session_route_api_method(),
             is_canary: agent_guard.is_canary(),
@@ -257,6 +269,7 @@ async fn resolve_coordinator_spawn_identity(
         Ok(session) => {
             let identity = CoordinatorSpawnIdentity {
                 model: session.model.clone(),
+                auto_last_resolved_model: None,
                 provider_key: session.provider_key.clone(),
                 route_api_method: session.route_api_method.clone(),
                 is_canary: session.is_canary,
@@ -321,15 +334,36 @@ fn is_inherit_sentinel(model: &str) -> bool {
 }
 
 /// Selection that inherits the coordinator's model, provider key, and route.
-fn inherit_coordinator_selection(coordinator: &CoordinatorSpawnIdentity) -> SwarmSpawnSelection {
-    SwarmSpawnSelection {
-        model: coordinator.model.clone(),
-        provider_key: coordinator
-            .provider_key
-            .clone()
-            .or_else(|| provider_key_for_spawn_model(coordinator.model.as_deref(), None)),
-        route_api_method: coordinator.route_api_method.clone(),
-    }
+fn inherit_coordinator_selection(
+    coordinator: &CoordinatorSpawnIdentity,
+) -> anyhow::Result<SwarmSpawnSelection> {
+    let coordinator_model = coordinator.model.as_deref();
+    let inherits_from_auto =
+        coordinator_model.is_some_and(crate::provider::is_virtual_auto_model_request);
+    let inherited_model = if inherits_from_auto {
+        coordinator.auto_last_resolved_model.clone().ok_or_else(|| {
+            anyhow::anyhow!(
+                "Cannot inherit jcode-auto yet: the coordinator has not resolved a concrete auto-routed model in this session. Choose a concrete spawn model or run a turn after enabling auto."
+            )
+        })?
+    } else {
+        coordinator.model.clone().unwrap_or_default()
+    };
+    let model = (!inherited_model.trim().is_empty()).then_some(inherited_model);
+    let inferred_provider_key = provider_key_for_spawn_model(model.as_deref(), None)?;
+    Ok(SwarmSpawnSelection {
+        provider_key: if inherits_from_auto {
+            inferred_provider_key
+        } else {
+            coordinator.provider_key.clone().or(inferred_provider_key)
+        },
+        model,
+        route_api_method: if inherits_from_auto {
+            None
+        } else {
+            coordinator.route_api_method.clone()
+        },
+    })
 }
 
 /// Selection for a concrete model string (optionally route-prefixed like
@@ -337,33 +371,41 @@ fn inherit_coordinator_selection(coordinator: &CoordinatorSpawnIdentity) -> Swar
 fn selection_for_concrete_model(
     model: String,
     coordinator: &CoordinatorSpawnIdentity,
-) -> SwarmSpawnSelection {
+) -> anyhow::Result<SwarmSpawnSelection> {
+    if crate::provider::is_virtual_auto_model_request(&model) {
+        anyhow::bail!(
+            "Cannot spawn an agent with model '{}': jcode-auto is a virtual router, not a concrete model. Use model='inherit' so the child inherits the coordinator's last resolved concrete model, or choose a concrete model.",
+            model
+        );
+    }
+
     // A model may pin an explicit provider + auth route via a prefix
     // (e.g. "openai-api:gpt-5.5"). Honor it directly so spawned agents do
     // NOT inherit the coordinator's model/auth and instead use the
     // requested model on the requested API route.
     if let Some(selection) = explicit_route_for_configured_model(&model) {
-        return selection;
+        return Ok(selection);
     }
 
     // A concrete model only inherits the coordinator's provider_key/route
     // when it targets the same model; otherwise the route would point at
     // the wrong provider/auth mode.
     if coordinator.model.as_deref() == Some(model.as_str()) {
-        SwarmSpawnSelection {
+        Ok(SwarmSpawnSelection {
             model: Some(model.clone()),
-            provider_key: coordinator
-                .provider_key
-                .clone()
-                .or_else(|| provider_key_for_spawn_model(Some(&model), None)),
+            provider_key: coordinator.provider_key.clone().or_else(|| {
+                provider_key_for_spawn_model(Some(&model), None)
+                    .ok()
+                    .flatten()
+            }),
             route_api_method: coordinator.route_api_method.clone(),
-        }
+        })
     } else {
-        SwarmSpawnSelection {
-            provider_key: provider_key_for_spawn_model(Some(&model), None),
+        Ok(SwarmSpawnSelection {
+            provider_key: provider_key_for_spawn_model(Some(&model), None)?,
             model: Some(model),
             route_api_method: None,
-        }
+        })
     }
 }
 
@@ -371,7 +413,7 @@ fn resolve_swarm_spawn_selection(
     requested_model: Option<String>,
     configured_swarm_model: Option<String>,
     coordinator: &CoordinatorSpawnIdentity,
-) -> SwarmSpawnSelection {
+) -> anyhow::Result<SwarmSpawnSelection> {
     // An explicit per-worker choice overrides the configured default. The
     // inheritance sentinels bypass even a concrete configured model.
     if let Some(model) = requested_model
@@ -442,7 +484,7 @@ fn prepare_visible_spawn_session<F>(
 where
     F: FnOnce(&str, &std::path::Path, bool, Option<&str>) -> anyhow::Result<bool>,
 {
-    let provider_key = provider_key_for_spawn_model(model_override, provider_key_override);
+    let provider_key = provider_key_for_spawn_model(model_override, provider_key_override)?;
     let (new_session_id, cwd) = create_visible_spawn_session(
         working_dir,
         model_override,
@@ -614,7 +656,7 @@ pub(super) async fn spawn_swarm_agent(
         requested_model.clone(),
         configured_swarm_model.clone(),
         &coordinator,
-    );
+    )?;
     let spawn_model = selection.model.clone();
     let spawn_provider_key = selection.provider_key.clone();
     let spawn_route_api_method = selection.route_api_method.clone();

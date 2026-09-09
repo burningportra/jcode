@@ -148,6 +148,7 @@ impl MultiProvider {
             _ => None,
         };
         let model_spec = match &api_method_kind {
+            ModelRouteApiMethod::Auto => auto_router::AUTO_MODEL_ID.to_string(),
             ModelRouteApiMethod::Copilot => format!("copilot:{}", bare_name),
             ModelRouteApiMethod::ClaudeOAuth => format!("claude-oauth:{}", bare_name),
             ModelRouteApiMethod::AnthropicApiKey if provider_display == "Anthropic" => {
@@ -168,6 +169,7 @@ impl MultiProvider {
         };
 
         let provider_key = match &api_method_kind {
+            ModelRouteApiMethod::Auto => Some("auto".to_string()),
             ModelRouteApiMethod::JcodeSubscription => Some("jcode".to_string()),
             ModelRouteApiMethod::AnthropicApiKey
                 if provider_display == "Anthropic"
@@ -235,6 +237,9 @@ impl MultiProvider {
 
     fn explicit_session_provider_key_for_model_request(model_request: &str) -> Option<String> {
         let model_request = model_request.trim();
+        if auto_router::is_virtual_model_request(model_request) {
+            return Some("auto".to_string());
+        }
         if let Some((prefix, rest)) = model_request.split_once(':') {
             let prefix = prefix.trim();
             if !prefix.is_empty() && !rest.trim().is_empty() {
@@ -360,6 +365,10 @@ impl MultiProvider {
             return String::new();
         }
 
+        if let Some(virtual_model) = auto_router::virtual_model_request(model) {
+            return virtual_model.to_string();
+        }
+
         if crate::provider::explicit_model_provider_prefix(model).is_some() {
             return model.to_string();
         }
@@ -452,6 +461,9 @@ impl MultiProvider {
         if model.is_empty() {
             return String::new();
         }
+        if let Some(virtual_model) = auto_router::virtual_model_request(model) {
+            return virtual_model.to_string();
+        }
         // The model itself carries explicit OpenRouter route identity. Honor it
         // before persisted route metadata, which may come from an older buggy
         // session and contradict the pin.
@@ -463,6 +475,7 @@ impl MultiProvider {
             .filter(|api_method| !api_method.is_empty())
         {
             match ModelRouteApiMethod::parse(api_method) {
+                ModelRouteApiMethod::Auto => return auto_router::AUTO_MODEL_ID.to_string(),
                 ModelRouteApiMethod::JcodeSubscription => return model.to_string(),
                 ModelRouteApiMethod::ClaudeOAuth => return format!("claude-oauth:{model}"),
                 ModelRouteApiMethod::AnthropicApiKey => return format!("claude-api:{model}"),
@@ -571,6 +584,7 @@ mod tests {
     #[test]
     fn default_model_selection_preserves_route_identity_state_space() {
         for (bare, api_method, provider, expected_spec, expected_provider_key) in [
+            ("jcode-auto", "auto", "jcode", "jcode-auto", Some("auto")),
             (
                 "gpt-5.5",
                 "openai-oauth",
@@ -715,6 +729,45 @@ mod tests {
                 Some("openai-compatible:nvidia-nim"),
             ),
             "nvidia-nim:nvidia/example"
+        );
+    }
+
+    #[test]
+    fn virtual_auto_model_restore_bypasses_provider_prefixing() {
+        for model in ["jcode-auto", "claude:jcode-auto", "openai:jcode-auto"] {
+            assert_eq!(
+                MultiProvider::session_provider_key_after_model_switch(
+                    model,
+                    "OpenAI",
+                    Some("openai-api")
+                )
+                .as_deref(),
+                Some("auto"),
+                "virtual auto provider key must not inherit concrete prefixes for {model}"
+            );
+            assert_eq!(
+                MultiProvider::model_switch_request_for_session_model(model, Some("openai-api")),
+                "jcode-auto",
+                "session model restore must re-enter auto for {model}"
+            );
+            assert_eq!(
+                MultiProvider::model_switch_request_for_session_route(
+                    model,
+                    Some("claude-oauth"),
+                    Some("openai-api"),
+                ),
+                "jcode-auto",
+                "session route restore must re-enter auto for {model}"
+            );
+        }
+
+        assert_eq!(
+            MultiProvider::model_switch_request_for_session_route(
+                "jcode-auto",
+                Some("openai-api"),
+                Some("auto"),
+            ),
+            "jcode-auto"
         );
     }
 

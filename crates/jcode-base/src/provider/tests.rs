@@ -220,6 +220,8 @@ fn test_multi_provider_with_openai() -> MultiProvider {
         openai_compatible_profiles: RwLock::new(std::collections::HashMap::new()),
         active_openai_compatible_profile: RwLock::new(None),
         active: RwLock::new(ActiveProvider::OpenAI),
+        auto_active: RwLock::new(false),
+        auto_route_state: RwLock::new(auto_router::AutoRouteState::new()),
         use_claude_cli: false,
         startup_notices: RwLock::new(Vec::new()),
         initial_provider: None,
@@ -227,6 +229,76 @@ fn test_multi_provider_with_openai() -> MultiProvider {
         post_auth_refreshes_pending: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         inference: RwLock::new(None),
     }
+}
+
+#[test]
+fn multi_provider_set_model_round_trips_virtual_auto_without_switching_provider() {
+    with_clean_provider_test_env(|| {
+        let rt = enter_test_runtime();
+        let _runtime_guard = rt.enter();
+        let provider = test_multi_provider_with_openai();
+        let concrete = provider.model();
+        assert_eq!(provider.active_provider(), ActiveProvider::OpenAI);
+
+        provider.set_model("jcode-auto").expect("select auto");
+        assert_eq!(provider.model(), auto_router::AUTO_MODEL_ID);
+        assert_eq!(provider.active_provider(), ActiveProvider::OpenAI);
+        assert_eq!(
+            provider.openai_provider().expect("OpenAI provider").model(),
+            concrete,
+            "selecting the virtual id must not push jcode-auto into a concrete runtime"
+        );
+
+        provider
+            .set_model("openai:jcode-auto")
+            .expect("prefixed auto re-enters auto");
+        assert_eq!(provider.model(), auto_router::AUTO_MODEL_ID);
+        assert_eq!(provider.active_provider(), ActiveProvider::OpenAI);
+
+        provider
+            .set_route_selection(&RouteSelection {
+                model: auto_router::AUTO_MODEL_ID.to_string(),
+                runtime_key: RuntimeKey::Auto,
+                api_method: "auto".to_string(),
+                provider_label: "jcode".to_string(),
+                detail: String::new(),
+            })
+            .expect("structured auto selection re-enters auto");
+        assert_eq!(provider.model(), auto_router::AUTO_MODEL_ID);
+    });
+}
+
+#[test]
+fn multi_provider_fork_preserves_virtual_auto_state_and_last_resolved_decision() {
+    with_clean_provider_test_env(|| {
+        let rt = enter_test_runtime();
+        let _runtime_guard = rt.enter();
+        let provider = test_multi_provider_with_openai();
+        {
+            let mut state = provider
+                .auto_route_state
+                .write()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            state.record_decision(
+                auto_router::TurnCategory::Implementation,
+                auto_router::AutoDecision {
+                    tier: auto_router::AutoTier::Implement,
+                    model_spec: "openai:gpt-5.5".to_string(),
+                    provider_family: "openai".to_string(),
+                    reason: "test decision".to_string(),
+                    at: std::time::Instant::now(),
+                },
+            );
+        }
+        provider.set_model("jcode-auto").expect("select auto");
+
+        let fork = provider.fork();
+        assert_eq!(fork.model(), auto_router::AUTO_MODEL_ID);
+        assert_eq!(
+            fork.auto_last_resolved_model().as_deref(),
+            Some("openai:gpt-5.5")
+        );
+    });
 }
 
 #[test]
@@ -1026,6 +1098,8 @@ fn test_multi_provider_with_cursor() -> MultiProvider {
         openai_compatible_profiles: RwLock::new(std::collections::HashMap::new()),
         active_openai_compatible_profile: RwLock::new(None),
         active: RwLock::new(ActiveProvider::Cursor),
+        auto_active: RwLock::new(false),
+        auto_route_state: RwLock::new(auto_router::AutoRouteState::new()),
         use_claude_cli: false,
         startup_notices: RwLock::new(Vec::new()),
         initial_provider: None,

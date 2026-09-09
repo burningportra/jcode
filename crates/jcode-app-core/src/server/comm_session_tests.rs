@@ -1,9 +1,10 @@
 #![cfg_attr(test, allow(clippy::await_holding_lock))]
 
 use super::{
-    CoordinatorSpawnIdentity, ensure_spawn_coordinator_swarm, prepare_visible_spawn_session,
-    register_visible_spawned_member, resolve_coordinator_spawn_identity, resolve_spawn_working_dir,
-    resolve_stop_target_session, resolve_swarm_spawn_selection, spawn_admission_lock,
+    CoordinatorSpawnIdentity, SwarmSpawnSelection, ensure_spawn_coordinator_swarm,
+    prepare_visible_spawn_session, register_visible_spawned_member,
+    resolve_coordinator_spawn_identity, resolve_spawn_working_dir, resolve_stop_target_session,
+    resolve_swarm_spawn_selection as resolve_swarm_spawn_selection_result, spawn_admission_lock,
     swarm_stop_allowed_by_owner,
 };
 use crate::agent::Agent;
@@ -474,10 +475,35 @@ fn coordinator_identity(
 ) -> CoordinatorSpawnIdentity {
     CoordinatorSpawnIdentity {
         model: model.map(str::to_string),
+        auto_last_resolved_model: None,
         provider_key: provider_key.map(str::to_string),
         route_api_method: route_api_method.map(str::to_string),
         is_canary: false,
     }
+}
+
+fn coordinator_identity_with_auto_last_resolved(
+    model: Option<&str>,
+    last_resolved_model: Option<&str>,
+    provider_key: Option<&str>,
+    route_api_method: Option<&str>,
+) -> CoordinatorSpawnIdentity {
+    CoordinatorSpawnIdentity {
+        model: model.map(str::to_string),
+        auto_last_resolved_model: last_resolved_model.map(str::to_string),
+        provider_key: provider_key.map(str::to_string),
+        route_api_method: route_api_method.map(str::to_string),
+        is_canary: false,
+    }
+}
+
+fn resolve_swarm_spawn_selection(
+    requested_model: Option<String>,
+    configured_swarm_model: Option<String>,
+    coordinator: &CoordinatorSpawnIdentity,
+) -> SwarmSpawnSelection {
+    resolve_swarm_spawn_selection_result(requested_model, configured_swarm_model, coordinator)
+        .expect("resolve swarm spawn selection")
 }
 
 #[test]
@@ -715,6 +741,44 @@ fn resolve_swarm_spawn_model_requested_matching_coordinator_model_keeps_route() 
     assert_eq!(selection.model.as_deref(), Some("custom-model"));
     assert_eq!(selection.provider_key.as_deref(), Some("custom-provider"));
     assert_eq!(selection.route_api_method.as_deref(), Some("custom-route"));
+}
+
+#[test]
+fn resolve_swarm_spawn_model_rejects_virtual_auto_as_explicit_model() {
+    for model in ["jcode-auto", "openai:jcode-auto"] {
+        let error = resolve_swarm_spawn_selection_result(
+            Some(model.to_string()),
+            None,
+            &coordinator_identity(Some("gpt-5.5"), Some("openai"), Some("openai")),
+        )
+        .expect_err("virtual auto model must be rejected for explicit spawns");
+        let message = error.to_string();
+        assert!(message.contains("virtual router"), "{message}");
+        assert!(message.contains("inherit"), "{message}");
+        assert!(message.contains("concrete model"), "{message}");
+    }
+}
+
+#[test]
+fn resolve_swarm_spawn_model_inherit_from_auto_uses_last_concrete_model() {
+    let selection = resolve_swarm_spawn_selection_result(
+        Some("inherit".to_string()),
+        Some("openai-api:gpt-5.5".to_string()),
+        &coordinator_identity_with_auto_last_resolved(
+            Some("jcode-auto"),
+            Some("openrouter:openrouter/fast-model"),
+            Some("auto"),
+            Some("auto"),
+        ),
+    )
+    .expect("inherit from auto with a last concrete decision should resolve");
+
+    assert_eq!(
+        selection.model.as_deref(),
+        Some("openrouter:openrouter/fast-model")
+    );
+    assert_eq!(selection.provider_key.as_deref(), Some("openrouter"));
+    assert_eq!(selection.route_api_method, None);
 }
 
 #[test]

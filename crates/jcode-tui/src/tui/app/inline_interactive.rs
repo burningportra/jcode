@@ -3977,7 +3977,7 @@ mod tests {
         REMOTE_MODEL_CATALOG_MAX_DETAIL_BYTES, RemoteModelCatalogCache,
         filter_routes_by_provider_allowlist, key_char_eq_ignore_ascii_case,
         model_picker_effort_matches_default, model_picker_route_is_current,
-        model_picker_route_is_default, model_picker_route_is_recommended,
+        model_picker_route_is_default, model_picker_route_is_recommended, model_picker_usage_key,
         next_model_favorite_after_current, picker_is_runtime_model_picker,
         remote_model_catalog_cache_is_fresh, remote_model_catalog_cache_origin,
         remote_model_catalog_snapshot_is_safe, route_supports_reasoning_effort,
@@ -4053,6 +4053,17 @@ mod tests {
 
         assert!(picker_is_runtime_model_picker(&runtime));
         assert!(!picker_is_runtime_model_picker(&agent));
+    }
+
+    #[test]
+    fn model_picker_identity_keeps_virtual_auto_distinct_from_real_auto_model() {
+        let virtual_auto = picker_option_with_method("jcode", "auto");
+        let belvedir_auto = picker_option_with_method("Belvedir", "openrouter");
+
+        assert_ne!(
+            model_picker_usage_key("jcode-auto", &virtual_auto, None),
+            model_picker_usage_key("auto", &belvedir_auto, None)
+        );
     }
 
     #[test]

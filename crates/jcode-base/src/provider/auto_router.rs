@@ -12,6 +12,20 @@ pub(crate) fn is_virtual_model(model: &str) -> bool {
     model.trim() == AUTO_MODEL_ID
 }
 
+pub(crate) fn virtual_model_request(model: &str) -> Option<&'static str> {
+    let trimmed = model.trim();
+    if is_virtual_model(trimmed) {
+        return Some(AUTO_MODEL_ID);
+    }
+    trimmed
+        .rsplit_once(':')
+        .and_then(|(_prefix, rest)| is_virtual_model(rest).then_some(AUTO_MODEL_ID))
+}
+
+pub(crate) fn is_virtual_model_request(model: &str) -> bool {
+    virtual_model_request(model).is_some()
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum AutoTier {
     Frontier,

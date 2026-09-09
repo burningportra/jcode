@@ -175,6 +175,10 @@ impl Agent {
             .unwrap_or(model)
     }
 
+    pub(crate) fn provider_auto_last_resolved_model(&self) -> Option<String> {
+        self.provider.auto_last_resolved_model()
+    }
+
     pub(super) fn provider_key_for_new_session(&self) -> Option<String> {
         if self
             .provider
