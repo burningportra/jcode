@@ -409,6 +409,59 @@ pub(super) fn auto_candidates_for_routes(
             jcode_provider_core::ModelRouteApiMethod::CodeAssistOAuth => {
                 catalog.subscription_flash_models.push(route.model.clone());
             }
+            // Every other logged-in OAuth/subscription transport feeds the
+            // subscription pool: copilot, antigravity (https), cursor,
+            // bedrock, and the jcode subscription router. The model_spec is
+            // prefixed so dispatch can route back to the right provider.
+            jcode_provider_core::ModelRouteApiMethod::Copilot => {
+                catalog.oauth_subscription_models.push((
+                    format!("copilot:{}", route.model.trim()),
+                    "copilot".to_string(),
+                ));
+            }
+            jcode_provider_core::ModelRouteApiMethod::AntigravityHttps => {
+                catalog.oauth_subscription_models.push((
+                    format!("antigravity:{}", route.model.trim()),
+                    "antigravity".to_string(),
+                ));
+            }
+            jcode_provider_core::ModelRouteApiMethod::Cursor => {
+                catalog.oauth_subscription_models.push((
+                    format!("cursor:{}", route.model.trim()),
+                    "cursor".to_string(),
+                ));
+            }
+            jcode_provider_core::ModelRouteApiMethod::Bedrock => {
+                catalog.oauth_subscription_models.push((
+                    format!("bedrock:{}", route.model.trim()),
+                    "bedrock".to_string(),
+                ));
+            }
+            jcode_provider_core::ModelRouteApiMethod::JcodeSubscription => {
+                catalog.oauth_subscription_models.push((
+                    format!("jcode-subscription:{}", route.model.trim()),
+                    "jcode-subscription".to_string(),
+                ));
+            }
+            // OpenAI-compatible API-key profiles (vercel handled above,
+            // opencode and friends here) carry cheap open-weight models used
+            // as the fast-tier fallback behind subscriptions.
+            jcode_provider_core::ModelRouteApiMethod::OpenAiCompatible {
+                profile_id: Some(profile_id),
+            } => {
+                catalog.openweight_api_models.push((
+                    format!("{}:{}", profile_id.trim(), route.model.trim()),
+                    profile_id.trim().to_string(),
+                ));
+            }
+            jcode_provider_core::ModelRouteApiMethod::OpenAiCompatible {
+                profile_id: None,
+            } => {
+                catalog.openweight_api_models.push((
+                    route.model.clone(),
+                    "openai-compatible".to_string(),
+                ));
+            }
             _ => {}
         }
     }

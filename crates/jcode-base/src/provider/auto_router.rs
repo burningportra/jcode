@@ -125,8 +125,15 @@ pub(crate) struct AutoRouterOverrides {
 pub(crate) struct AutoTierCatalog {
     pub anthropic_oauth_models: Vec<String>,
     pub openai_oauth_models: Vec<String>,
+    /// Other OAuth/subscription transports, as (model_spec, provider_family)
+    /// pairs: copilot, gemini (code-assist-oauth), antigravity, cursor,
+    /// bedrock, jcode-subscription. These are all "already logged in" routes.
+    pub oauth_subscription_models: Vec<(String, String)>,
     pub vercel_ai_gateway_models: Vec<String>,
     pub openrouter_models: Vec<String>,
+    /// Open-weight API-key transports beyond vercel/openrouter
+    /// (openai-compatible profiles like opencode): (model_spec, family) pairs.
+    pub openweight_api_models: Vec<(String, String)>,
     pub subscription_flash_models: Vec<String>,
 }
 
@@ -352,6 +359,18 @@ fn append_frontier_candidates(
             ));
         }
     }
+    // Other logged-in OAuth/subscription transports join the frontier pool so a
+    // planning turn can use whichever subscription is enabled (copilot, gemini,
+    // antigravity, cursor, bedrock, jcode-subscription). They sort after the
+    // Anthropic/OpenAI flagships by insertion order.
+    for (spec, family) in &catalog.oauth_subscription_models {
+        candidates.push(AutoModelCandidate::new(
+            AutoTier::Frontier,
+            spec.clone(),
+            family.clone(),
+            format!("{family} subscription frontier model"),
+        ));
+    }
 }
 
 fn append_implement_candidates(
@@ -389,6 +408,16 @@ fn append_implement_candidates(
             ));
         }
     }
+    // Logged-in OAuth/subscription transports also serve implementation turns,
+    // so work stays on subscriptions instead of paid API-key routers.
+    for (spec, family) in &catalog.oauth_subscription_models {
+        candidates.push(AutoModelCandidate::new(
+            AutoTier::Implement,
+            spec.clone(),
+            family.clone(),
+            format!("{family} subscription implementation model"),
+        ));
+    }
 }
 
 fn append_fast_candidates(
@@ -410,22 +439,16 @@ fn append_fast_candidates(
         return;
     }
 
-    // When the user has not pinned a fast transport, prefer native subscription
-    // providers (gemini family) over external routers. An explicit Vercel or
-    // OpenRouter choice is honored below.
+    // Fast tier order: (1) subscription flash models, (2) cheap open-weight
+    // models on API-key transports (vercel, openrouter, opencode profiles).
+    // In Auto mode every available transport contributes candidates; the
+    // ordered candidate list lets quota failover walk providers in turn.
     if fast_provider == FastProviderPreference::Auto
         && !catalog.subscription_flash_models.is_empty()
     {
         append_seeded_fast_models(candidates, &catalog.subscription_flash_models, "gemini");
-        if candidates.iter().any(|c| c.tier == AutoTier::Fast) {
-            // A subscription fast model is available, so external routers are
-            // not needed as a fallback.
-            return;
-        }
     }
 
-    // Fallback to external router transports (vercel, openrouter) only if no
-    // subscription fast model was found.
     let transports: &[(FastProviderPreference, &str, &[String])] = &[
         (
             FastProviderPreference::Vercel,
@@ -444,10 +467,17 @@ fn append_fast_candidates(
             continue;
         }
         append_seeded_fast_models(candidates, models, family);
-        if candidates.iter().any(|candidate| {
-            candidate.tier == AutoTier::Fast && candidate.provider_family.as_str() == *family
-        }) {
-            return;
+    }
+    if fast_provider == FastProviderPreference::Auto {
+        for (spec, family) in &catalog.openweight_api_models {
+            if fast_seed_rank(spec).is_some() {
+                candidates.push(AutoModelCandidate::new(
+                    AutoTier::Fast,
+                    spec.clone(),
+                    family.clone(),
+                    format!("{family} open-weight fast seed match"),
+                ));
+            }
         }
     }
 }
@@ -721,6 +751,11 @@ fn provider_family_for_model_spec(model_spec: &str) -> Option<&'static str> {
         "vercel" | "vercel-ai-gateway" => Some("vercel-ai-gateway"),
         "openrouter" => Some("openrouter"),
         "gemini" => Some("gemini"),
+        "copilot" => Some("copilot"),
+        "antigravity" => Some("antigravity"),
+        "cursor" => Some("cursor"),
+        "bedrock" => Some("bedrock"),
+        "jcode-subscription" | "jcode" => Some("jcode-subscription"),
         _ => None,
     }
 }
@@ -866,8 +901,13 @@ mod tests {
         let catalog = AutoTierCatalog {
             anthropic_oauth_models: vec!["claude-opus-4-8".into(), "claude-sonnet-4-6".into()],
             openai_oauth_models: vec!["gpt-5.5-codex".into(), "gpt-5.4".into()],
+            oauth_subscription_models: vec![(
+                "copilot:gpt-5.5".to_string(),
+                "copilot".to_string(),
+            )],
             vercel_ai_gateway_models: vec!["glm-5.3".into(), "zai/glm-5.3-flash".into()],
             openrouter_models: vec!["deepseek/deepseek-v4.1-flash".into()],
+            openweight_api_models: vec![],
             subscription_flash_models: vec!["gemini-3.8-flash".into()],
         };
 
@@ -891,12 +931,12 @@ mod tests {
                 .iter()
                 .any(|candidate| candidate.model_spec == "gemini:gemini-3.8-flash")
         );
-        // With a subscription flash model available, Auto mode prefers the native
-        // subscription transport over external routers.
+        // With a subscription flash model available, Auto mode still collects
+        // the API-key transports behind it so quota failover can walk providers.
         assert!(
-            !candidates
+            candidates
                 .iter()
-                .any(|candidate| candidate.provider_family == "vercel-ai-gateway")
+                .any(|candidate| candidate.model_spec == "vercel-ai-gateway:zai/glm-5.3-flash")
         );
         assert!(
             !candidates
@@ -1147,6 +1187,45 @@ mod tests {
         assert!(specs.contains(&"local:unknown"));
         assert!(!specs.contains(&"small"));
         assert!(specs.contains(&"large"));
+    }
+
+    #[test]
+    fn oauth_subscription_models_join_frontier_and_implement_pools() {
+        let catalog = AutoTierCatalog {
+            anthropic_oauth_models: vec!["claude-opus-4-8".into()],
+            openai_oauth_models: vec![],
+            oauth_subscription_models: vec![
+                ("copilot:gpt-5.5".to_string(), "copilot".to_string()),
+                ("cursor:gpt-5.5".to_string(), "cursor".to_string()),
+            ],
+            ..AutoTierCatalog::default()
+        };
+        let candidates = resolve_tier_candidates(
+            &catalog,
+            FastProviderPreference::None,
+            &AutoRouterOverrides::default(),
+        );
+        // Anthropic flagship leads, subscription transports follow in order.
+        let frontier: Vec<&str> = candidates
+            .iter()
+            .filter(|c| c.tier == AutoTier::Frontier)
+            .map(|c| c.model_spec.as_str())
+            .collect();
+        assert_eq!(
+            frontier,
+            vec![
+                "claude-oauth:claude-opus-4-8",
+                "copilot:gpt-5.5",
+                "cursor:gpt-5.5"
+            ]
+        );
+        let implement: Vec<&str> = candidates
+            .iter()
+            .filter(|c| c.tier == AutoTier::Implement)
+            .map(|c| c.model_spec.as_str())
+            .collect();
+        assert!(implement.contains(&"copilot:gpt-5.5"));
+        assert!(implement.contains(&"cursor:gpt-5.5"));
     }
 
     #[test]
