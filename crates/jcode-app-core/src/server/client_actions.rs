@@ -500,7 +500,12 @@ pub(super) async fn handle_set_feature(
 
             if enabled {
                 let _ = working_dir;
-                let new_swarm_id = swarm_id_for_session(client_session_id);
+                // When a session enables swarm for the first time it will not
+                // have a swarm_id yet. Generate a fresh UUID in that case.
+                let new_swarm_id = match swarm_id_for_session(client_session_id) {
+                    Some(id) => Some(id),
+                    None => Some(uuid::Uuid::new_v4().to_string()),
+                };
                 if let Some(ref id) = new_swarm_id {
                     {
                         let mut swarms = swarms_by_id.write().await;

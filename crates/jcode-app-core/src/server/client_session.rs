@@ -351,8 +351,13 @@ async fn ensure_client_swarm_member(
                     .unwrap_or((None, None))
             }
         };
+        // If the session is newly joining a swarm there will be no existing
+        // entry, so create one using a UUID.
         let derived_swarm_id = if swarm_enabled {
-            swarm_id_for_session(client_session_id)
+            match swarm_id_for_session(client_session_id) {
+                Some(id) => Some(id),
+                None => Some(uuid::Uuid::new_v4().to_string()),
+            }
         } else {
             None
         };
