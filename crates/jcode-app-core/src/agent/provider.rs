@@ -37,9 +37,11 @@ impl Agent {
         jcode_provider_core::ModelCatalogSnapshot::new(
             Some(self.provider_name()),
             Some(self.provider_model()),
+            self.provider.auto_last_resolved_model(),
             self.available_models_display(),
             self.model_routes(),
         )
+        .with_auto_state(self.provider.auto_state_snapshot())
     }
 
     pub fn registry(&self) -> Registry {

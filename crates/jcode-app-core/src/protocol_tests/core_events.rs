@@ -212,6 +212,8 @@ fn test_history_event_roundtrip_preserves_side_panel_snapshot() -> Result<()> {
         images: Vec::new(),
         provider_name: Some("openai".to_string()),
         provider_model: Some("gpt-5.4".to_string()),
+        resolved_model: None,
+        auto_state: None,
         available_models: vec!["gpt-5.4".to_string()],
         available_model_routes: Vec::new(),
         mcp_servers: Vec::new(),

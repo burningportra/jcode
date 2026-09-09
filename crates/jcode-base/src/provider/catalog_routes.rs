@@ -1,4 +1,5 @@
 use crate::auth::{AuthState, AuthStatus};
+use std::collections::BTreeMap;
 
 use super::pricing::cheapness_for_route;
 use super::{
@@ -14,6 +15,8 @@ use super::{
     model_availability_for_account, openrouter, openrouter_catalog_model_id, provider_for_model,
     standard_openrouter_profile_configured,
 };
+
+const AUTO_ROUTE_PROVIDER_LABEL: &str = "Jcode Auto";
 
 /// Build the fast local route snapshot used by the TUI model picker while the
 /// full provider catalog is hydrating.
@@ -158,6 +161,8 @@ pub fn simplified_model_routes_for_picker(
             cheapness: None,
         });
     }
+
+    append_auto_model_route_from_config(&mut routes, &crate::config::config().auto_router);
 
     routes
 }
@@ -331,7 +336,109 @@ pub(super) fn multiprovider_model_routes(provider: &MultiProvider) -> Vec<ModelR
             }
         }
     }
+    append_auto_model_route_from_config(&mut routes, &crate::config::config().auto_router);
     routes
+}
+
+fn append_auto_model_route_from_config(
+    routes: &mut Vec<ModelRoute>,
+    config: &jcode_config_types::AutoRouterConfig,
+) {
+    if routes.iter().any(|route| {
+        route.model == super::AUTO_MODEL_ID
+            && route.api_method_kind() == jcode_provider_core::ModelRouteApiMethod::Auto
+    }) {
+        return;
+    }
+
+    let candidates = if config.enabled {
+        auto_candidates_for_routes(routes, config)
+    } else {
+        Vec::new()
+    };
+    let tiers = tier_models(&candidates);
+    let available = config.enabled && tiers.len() >= 2;
+    let detail = if !config.enabled {
+        "disabled in config".to_string()
+    } else if tiers.is_empty() {
+        "needs at least two auto-router tiers; no authenticated tier candidates".to_string()
+    } else {
+        let detail = tiers
+            .iter()
+            .map(|(tier, models)| format!("{tier}: {}", models.join(", ")))
+            .collect::<Vec<_>>()
+            .join("; ");
+        if available {
+            detail
+        } else {
+            format!("needs at least two auto-router tiers; {detail}")
+        }
+    };
+
+    routes.push(ModelRoute {
+        model: super::AUTO_MODEL_ID.to_string(),
+        provider: AUTO_ROUTE_PROVIDER_LABEL.to_string(),
+        api_method: "auto".to_string(),
+        available,
+        detail,
+        cheapness: None,
+    });
+}
+
+fn auto_candidates_for_routes(
+    routes: &[ModelRoute],
+    config: &jcode_config_types::AutoRouterConfig,
+) -> Vec<super::auto_router::AutoModelCandidate> {
+    let mut catalog = super::auto_router::AutoTierCatalog::default();
+    for route in routes.iter().filter(|route| route.available) {
+        match route.api_method_kind() {
+            jcode_provider_core::ModelRouteApiMethod::ClaudeOAuth => {
+                catalog.anthropic_oauth_models.push(route.model.clone());
+            }
+            jcode_provider_core::ModelRouteApiMethod::OpenAIOAuth => {
+                catalog.openai_oauth_models.push(route.model.clone());
+            }
+            jcode_provider_core::ModelRouteApiMethod::OpenAiCompatible {
+                profile_id: Some(profile_id),
+            } if profile_id.eq_ignore_ascii_case("vercel-ai-gateway") => {
+                catalog.vercel_ai_gateway_models.push(route.model.clone());
+            }
+            jcode_provider_core::ModelRouteApiMethod::OpenRouter => {
+                catalog.openrouter_models.push(route.model.clone());
+            }
+            jcode_provider_core::ModelRouteApiMethod::CodeAssistOAuth => {
+                catalog.subscription_flash_models.push(route.model.clone());
+            }
+            _ => {}
+        }
+    }
+
+    super::auto_router::resolve_tier_candidates(
+        &catalog,
+        super::auto_router::FastProviderPreference::from_config(config.fast_provider),
+        &super::auto_router::AutoRouterOverrides {
+            frontier: config.frontier.clone(),
+            implement: config.implement.clone(),
+            fast: config.fast.clone(),
+        },
+    )
+}
+
+fn tier_models(
+    candidates: &[super::auto_router::AutoModelCandidate],
+) -> BTreeMap<&'static str, Vec<String>> {
+    let mut tiers: BTreeMap<&'static str, Vec<String>> = BTreeMap::new();
+    for candidate in candidates {
+        tiers
+            .entry(super::auto_router::tier_label(candidate.tier))
+            .or_default()
+            .push(candidate.model_spec.clone());
+    }
+    for models in tiers.values_mut() {
+        models.sort();
+        models.dedup();
+    }
+    tiers
 }
 
 /// Anthropic models via OAuth and/or API key.
@@ -1313,9 +1420,34 @@ mod tests {
             let vars = vec![
                 ("JCODE_HOME", std::env::var_os("JCODE_HOME")),
                 ("OPENCODE_API_KEY", std::env::var_os("OPENCODE_API_KEY")),
+                ("ANTHROPIC_API_KEY", std::env::var_os("ANTHROPIC_API_KEY")),
+                ("OPENAI_API_KEY", std::env::var_os("OPENAI_API_KEY")),
+                ("OPENROUTER_API_KEY", std::env::var_os("OPENROUTER_API_KEY")),
+                (
+                    "JCODE_ANTHROPIC_API_KEY",
+                    std::env::var_os("JCODE_ANTHROPIC_API_KEY"),
+                ),
+                (
+                    "JCODE_OPENAI_API_KEY",
+                    std::env::var_os("JCODE_OPENAI_API_KEY"),
+                ),
+                (
+                    "JCODE_OPENROUTER_API_KEY",
+                    std::env::var_os("JCODE_OPENROUTER_API_KEY"),
+                ),
             ];
             crate::env::set_var("JCODE_HOME", temp.path());
             crate::env::set_var("OPENCODE_API_KEY", "sk-test-opencode");
+            for key in [
+                "ANTHROPIC_API_KEY",
+                "OPENAI_API_KEY",
+                "OPENROUTER_API_KEY",
+                "JCODE_ANTHROPIC_API_KEY",
+                "JCODE_OPENAI_API_KEY",
+                "JCODE_OPENROUTER_API_KEY",
+            ] {
+                crate::env::remove_var(key);
+            }
             Self {
                 vars,
                 _temp: temp,
@@ -1700,5 +1832,137 @@ mod tests {
                 .any(|r| r.model == "gpt-5.3-codex" && r.api_method == "openrouter"),
             "catalog-listed model keeps its OpenRouter fallback route"
         );
+    }
+
+    fn route(model: &str, provider: &str, api_method: &str, available: bool) -> ModelRoute {
+        ModelRoute {
+            model: model.to_string(),
+            provider: provider.to_string(),
+            api_method: api_method.to_string(),
+            available,
+            detail: String::new(),
+            cheapness: None,
+        }
+    }
+
+    fn append_auto_for_test(
+        mut routes: Vec<ModelRoute>,
+        config: jcode_config_types::AutoRouterConfig,
+    ) -> ModelRoute {
+        append_auto_model_route_from_config(&mut routes, &config);
+        routes
+            .into_iter()
+            .find(|route| route.model == super::super::AUTO_MODEL_ID)
+            .expect("auto route present")
+    }
+
+    #[test]
+    fn auto_route_available_with_at_least_two_authenticated_tiers() {
+        let auto = append_auto_for_test(
+            vec![
+                route("claude-opus-4-8", "Anthropic", "claude-oauth", true),
+                route("claude-sonnet-4-5", "Anthropic", "claude-oauth", true),
+                route(
+                    "zai/glm-5.3-flash",
+                    "Vercel AI Gateway",
+                    "openai-compatible:vercel-ai-gateway",
+                    true,
+                ),
+            ],
+            Default::default(),
+        );
+
+        assert_eq!(auto.api_method, "auto");
+        assert_eq!(auto.provider, "Jcode Auto");
+        assert!(auto.available, "auto route should be selectable: {auto:?}");
+        assert!(
+            auto.detail
+                .contains("frontier: claude-oauth:claude-opus-4-8")
+        );
+        assert!(
+            auto.detail
+                .contains("implement: claude-oauth:claude-sonnet-4-5")
+        );
+        assert!(
+            auto.detail
+                .contains("fast: vercel-ai-gateway:zai/glm-5.3-flash")
+        );
+    }
+
+    #[test]
+    fn auto_route_present_but_unavailable_without_authenticated_tiers() {
+        let auto = append_auto_for_test(
+            vec![
+                route("claude-opus-4-8", "Anthropic", "claude-oauth", false),
+                route("claude-sonnet-4-5", "Anthropic", "claude-oauth", false),
+            ],
+            Default::default(),
+        );
+
+        assert_eq!(auto.model, super::super::AUTO_MODEL_ID);
+        assert!(!auto.available);
+        assert!(auto.detail.contains("needs at least two auto-router tiers"));
+    }
+
+    #[test]
+    fn auto_route_fast_provider_none_removes_fast_tier_even_with_fast_override() {
+        let auto = append_auto_for_test(
+            vec![
+                route("claude-opus-4-8", "Anthropic", "claude-oauth", true),
+                route("claude-sonnet-4-5", "Anthropic", "claude-oauth", true),
+            ],
+            jcode_config_types::AutoRouterConfig {
+                fast_provider: jcode_config_types::AutoRouterFastProvider::None,
+                fast: Some("vercel-ai-gateway:zai/glm-5.3-flash".to_string()),
+                ..Default::default()
+            },
+        );
+
+        assert!(
+            auto.available,
+            "frontier and implement keep auto selectable"
+        );
+        assert!(
+            !auto.detail.contains("fast:"),
+            "FAST tier should be removed: {}",
+            auto.detail
+        );
+    }
+
+    #[test]
+    fn simplified_builder_includes_unavailable_auto_route_without_credentials() {
+        let _guard = EnvGuard::new();
+        crate::auth::AuthStatus::invalidate_cache();
+        let routes = simplified_model_routes_for_picker(
+            "OpenAI",
+            "gpt-5.5",
+            vec![
+                "claude-opus-4-8".to_string(),
+                "claude-sonnet-4-5".to_string(),
+            ],
+        );
+        let auto = routes
+            .iter()
+            .find(|route| route.model == super::super::AUTO_MODEL_ID)
+            .expect("simplified picker includes auto route");
+        assert!(!auto.available);
+    }
+
+    #[test]
+    fn multiprovider_builder_includes_unavailable_auto_route_without_credentials() {
+        let _guard = EnvGuard::new();
+        crate::auth::AuthStatus::invalidate_cache();
+        let provider = MultiProvider::new_with_auth_status(AuthStatus::default());
+        let routes = multiprovider_model_routes(&provider);
+
+        let auto = routes
+            .iter()
+            .find(|route| route.model == super::super::AUTO_MODEL_ID)
+            .expect("multiprovider picker includes auto route");
+        assert_eq!(
+            auto.api_method_kind(),
+            jcode_provider_core::ModelRouteApiMethod::Auto
+        );
+        assert!(!auto.available);
     }
 }

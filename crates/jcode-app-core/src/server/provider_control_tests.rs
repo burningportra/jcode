@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::RwLock as StdRwLock;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Mutex as StdMutex, MutexGuard as StdMutexGuard, OnceLock};
+use std::sync::{Mutex as StdMutex, MutexGuard as StdMutexGuard};
 
 async fn recv_final_catalog_notification(rx: &mut mpsc::UnboundedReceiver<ServerEvent>) -> String {
     tokio::time::timeout(std::time::Duration::from_secs(2), async {
@@ -85,6 +85,7 @@ struct AuthChangeMockState {
     auth_refresh_pending: AtomicUsize,
     complete_calls: AtomicUsize,
     complete_models: StdMutex<Vec<String>>,
+    auto_tier: StdMutex<Option<Option<String>>>,
 }
 
 struct AuthChangeMockProvider {
@@ -179,6 +180,11 @@ impl Provider for AuthChangeMockProvider {
         }
 
         *self.state.selected_model.write().unwrap() = Some(model.to_string());
+        Ok(())
+    }
+
+    fn set_auto_tier(&self, tier: Option<&str>) -> anyhow::Result<()> {
+        *self.state.auto_tier.lock().unwrap() = Some(tier.map(str::to_string));
         Ok(())
     }
 
@@ -333,6 +339,7 @@ async fn notify_auth_changed_emits_available_models_updated_after_provider_updat
                 provider_model,
                 available_models,
                 available_model_routes,
+                ..
             } => {
                 saw_models = Some((
                     provider_name,
@@ -541,6 +548,35 @@ async fn notify_auth_changed_defers_busy_session_refresh_until_idle() {
     }
 
     panic!("busy session provider was not refreshed after it became idle");
+}
+
+#[tokio::test]
+async fn set_auto_tier_delegates_to_provider_when_agent_is_busy() {
+    let _guard = EnvGuard::save(&[]);
+    let provider = Arc::new(AuthChangeMockProvider::new());
+    let state = Arc::clone(&provider.state);
+    let provider: Arc<dyn Provider> = provider;
+    let agent = Arc::new(Mutex::new(Agent::new(provider, Registry::empty())));
+    let busy_guard = agent.lock().await;
+    let (client_event_tx, mut client_event_rx) = mpsc::unbounded_channel();
+
+    handle_set_auto_tier(77, Some("fast".to_string()), &agent, &client_event_tx).await;
+
+    assert!(
+        client_event_rx.try_recv().is_err(),
+        "busy agent should defer provider mutation instead of blocking the caller"
+    );
+    drop(busy_guard);
+
+    let event = tokio::time::timeout(std::time::Duration::from_secs(2), client_event_rx.recv())
+        .await
+        .expect("deferred auto-tier update should complete")
+        .expect("client event channel should remain open");
+    assert!(matches!(event, ServerEvent::Ack { id: 77 }));
+    assert_eq!(
+        *state.auto_tier.lock().unwrap(),
+        Some(Some("fast".to_string()))
+    );
 }
 
 #[tokio::test]
@@ -1366,6 +1402,7 @@ async fn refresh_models_emits_available_models_updated_after_prefetch() {
                 provider_model,
                 available_models,
                 available_model_routes,
+                ..
             } => {
                 saw_models = Some((
                     provider_name,

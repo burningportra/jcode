@@ -89,6 +89,10 @@ impl AutoRouteState {
             .then(|| self.last_resolved.clone())
             .flatten()
     }
+
+    pub fn clear_forced_next_tier(&mut self) {
+        self.forced_next_tier = None;
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -97,6 +101,17 @@ pub(crate) enum FastProviderPreference {
     Vercel,
     OpenRouter,
     None,
+}
+
+impl FastProviderPreference {
+    pub fn from_config(value: jcode_config_types::AutoRouterFastProvider) -> Self {
+        match value {
+            jcode_config_types::AutoRouterFastProvider::Auto => Self::Auto,
+            jcode_config_types::AutoRouterFastProvider::Vercel => Self::Vercel,
+            jcode_config_types::AutoRouterFastProvider::OpenRouter => Self::OpenRouter,
+            jcode_config_types::AutoRouterFastProvider::None => Self::None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -382,6 +397,9 @@ fn append_fast_candidates(
     fast_provider: FastProviderPreference,
     override_model: Option<&str>,
 ) {
+    if fast_provider == FastProviderPreference::None {
+        return;
+    }
     if let Some(model) = non_empty(override_model) {
         candidates.push(AutoModelCandidate::new(
             AutoTier::Fast,
@@ -389,9 +407,6 @@ fn append_fast_candidates(
             provider_family_for_model_spec(model).unwrap_or("override"),
             "fast override",
         ));
-        return;
-    }
-    if fast_provider == FastProviderPreference::None {
         return;
     }
 
@@ -427,6 +442,45 @@ fn append_fast_candidates(
             | FastProviderPreference::OpenRouter
     ) {
         append_seeded_fast_models(candidates, &catalog.subscription_flash_models, "gemini");
+    }
+}
+
+pub(crate) fn parse_tier(value: &str) -> Option<AutoTier> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "frontier" | "plan" | "planning" => Some(AutoTier::Frontier),
+        "implement" | "implementation" | "impl" => Some(AutoTier::Implement),
+        "fast" | "mechanical" => Some(AutoTier::Fast),
+        _ => None,
+    }
+}
+
+pub(crate) fn tier_label(tier: AutoTier) -> &'static str {
+    match tier {
+        AutoTier::Frontier => "frontier",
+        AutoTier::Implement => "implement",
+        AutoTier::Fast => "fast",
+    }
+}
+
+pub(crate) fn decision_snapshot(
+    decision: &AutoDecision,
+) -> jcode_provider_core::AutoRouterDecisionSnapshot {
+    jcode_provider_core::AutoRouterDecisionSnapshot {
+        tier: tier_label(decision.tier).to_string(),
+        model_spec: decision.model_spec.clone(),
+        provider_family: decision.provider_family.clone(),
+        reason: decision.reason.clone(),
+    }
+}
+
+pub(crate) fn state_snapshot(
+    active: bool,
+    state: &AutoRouteState,
+) -> jcode_provider_core::AutoRouterStateSnapshot {
+    jcode_provider_core::AutoRouterStateSnapshot {
+        active,
+        last_resolved: state.last_resolved.as_ref().map(decision_snapshot),
+        decisions_tail: state.decisions.iter().map(decision_snapshot).collect(),
     }
 }
 

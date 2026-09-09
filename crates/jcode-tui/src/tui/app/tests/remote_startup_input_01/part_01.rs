@@ -753,6 +753,8 @@ fn test_available_models_updated_event_surfaces_authed_provider_in_remote_model_
         crate::protocol::ServerEvent::AvailableModelsUpdated {
             provider_name: Some("Copilot".to_string()),
             provider_model: Some("claude-opus-4.6".to_string()),
+            resolved_model: None,
+            auto_state: None,
             available_models: vec![
                 "claude-opus-4.6".to_string(),
                 "grok-code-fast-1".to_string(),
@@ -818,6 +820,8 @@ fn test_duplicate_available_models_updated_event_is_a_no_op() {
         let event = || crate::protocol::ServerEvent::AvailableModelsUpdated {
             provider_name: Some("Copilot".to_string()),
             provider_model: Some("claude-opus-4.6".to_string()),
+            resolved_model: None,
+            auto_state: None,
             available_models: vec!["claude-opus-4.6".to_string()],
             available_model_routes: vec![crate::provider::ModelRoute {
                 model: "claude-opus-4.6".to_string(),
@@ -881,6 +885,8 @@ fn test_remote_final_catalog_replaces_post_login_loading_state_in_place() {
         crate::protocol::ServerEvent::AvailableModelsUpdated {
             provider_name: Some("Anthropic".to_string()),
             provider_model: Some("claude-opus-4.6".to_string()),
+            resolved_model: None,
+            auto_state: None,
             available_models: vec!["claude-opus-4.6".to_string()],
             available_model_routes: vec![crate::provider::ModelRoute {
                 model: "claude-opus-4.6".to_string(),
@@ -1124,6 +1130,8 @@ fn test_detailed_catalog_replaces_placeholder_routes_after_names_only_update() {
             crate::protocol::ServerEvent::AvailableModelsUpdated {
                 provider_name: Some("Copilot".to_string()),
                 provider_model: Some("claude-opus-4.6".to_string()),
+                resolved_model: None,
+                auto_state: None,
                 available_models: vec!["claude-opus-4.6".to_string()],
                 available_model_routes: Vec::new(),
             },
@@ -1135,6 +1143,8 @@ fn test_detailed_catalog_replaces_placeholder_routes_after_names_only_update() {
             crate::protocol::ServerEvent::AvailableModelsUpdated {
                 provider_name: Some("Copilot".to_string()),
                 provider_model: Some("claude-opus-4.6".to_string()),
+                resolved_model: None,
+                auto_state: None,
                 available_models: vec!["claude-opus-4.6".to_string()],
                 available_model_routes: vec![crate::provider::ModelRoute {
                     model: "claude-opus-4.6".to_string(),

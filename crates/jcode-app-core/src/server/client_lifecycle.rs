@@ -39,7 +39,7 @@ use super::comm_sync::{
     handle_comm_resync_plan, handle_comm_status, handle_comm_summary,
 };
 use super::provider_control::{
-    handle_cycle_model, handle_notify_auth_changed, handle_refresh_models,
+    handle_cycle_model, handle_notify_auth_changed, handle_refresh_models, handle_set_auto_tier,
     handle_set_compaction_mode, handle_set_model, handle_set_premium_mode,
     handle_set_reasoning_effort, handle_set_route, handle_set_service_tier, handle_set_transport,
     handle_switch_anthropic_account, handle_switch_openai_account,
@@ -1604,6 +1604,7 @@ pub(super) async fn handle_client(
                     id,
                     &client_session_id,
                     client_is_processing,
+                    &provider,
                     &sessions,
                     &writer,
                 )
@@ -1995,6 +1996,10 @@ pub(super) async fn handle_client(
 
             Request::SetModel { id, model } => {
                 handle_set_model(id, model, &agent, &client_event_tx).await;
+            }
+
+            Request::SetAutoTier { id, tier } => {
+                handle_set_auto_tier(id, tier, &agent, &client_event_tx).await;
             }
 
             Request::SetRoute { id, selection } => {
@@ -3571,6 +3576,8 @@ fn names_only_available_models_event(event: &ServerEvent) -> Option<ServerEvent>
     let ServerEvent::AvailableModelsUpdated {
         provider_name,
         provider_model,
+        resolved_model,
+        auto_state,
         available_models,
         ..
     } = event
@@ -3580,6 +3587,8 @@ fn names_only_available_models_event(event: &ServerEvent) -> Option<ServerEvent>
     Some(ServerEvent::AvailableModelsUpdated {
         provider_name: provider_name.clone(),
         provider_model: provider_model.clone(),
+        resolved_model: resolved_model.clone(),
+        auto_state: auto_state.clone(),
         available_models: available_models.clone(),
         available_model_routes: Vec::new(),
     })

@@ -1957,6 +1957,30 @@ impl Provider for MultiProvider {
             .map(|decision| decision.model_spec)
     }
 
+    fn auto_state_snapshot(&self) -> Option<jcode_provider_core::AutoRouterStateSnapshot> {
+        let active = self.is_auto_active();
+        let state = self.auto_route_state_snapshot();
+        (active || state.last_resolved.is_some() || !state.decisions.is_empty())
+            .then(|| auto_router::state_snapshot(active, &state))
+    }
+
+    fn set_auto_tier(&self, tier: Option<&str>) -> Result<()> {
+        self.set_auto_active(true);
+        let mut state = self
+            .auto_route_state
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        match tier.map(str::trim).filter(|tier| !tier.is_empty()) {
+            Some(tier) => {
+                let tier = auto_router::parse_tier(tier)
+                    .ok_or_else(|| anyhow!("Unknown auto-router tier '{tier}'"))?;
+                state.force_next_tier(tier);
+            }
+            None => state.clear_forced_next_tier(),
+        }
+        Ok(())
+    }
+
     fn explicit_provider_pin_for_current_model(&self) -> Option<String> {
         matches!(self.active_provider(), ActiveProvider::OpenRouter)
             .then(|| self.active_openrouter_execution_provider())

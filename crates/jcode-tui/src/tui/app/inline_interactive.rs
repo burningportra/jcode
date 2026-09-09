@@ -641,6 +641,7 @@ impl App {
         jcode_provider_core::ModelCatalogSnapshot::new(
             self.remote_provider_name.clone(),
             self.remote_provider_model.clone(),
+            None,
             self.remote_available_entries.clone(),
             self.remote_model_options.clone(),
         )
@@ -4509,6 +4510,7 @@ mod tests {
         let snapshot = jcode_provider_core::ModelCatalogSnapshot::new(
             Some("OpenAI".to_string()),
             Some("gpt-5.5".to_string()),
+            None,
             vec!["gpt-5.5".to_string()],
             vec![model_route("gpt-5.5", "OpenAI", "openai-oauth")],
         );
@@ -4532,6 +4534,7 @@ mod tests {
         let safe_snapshot = jcode_provider_core::ModelCatalogSnapshot::new(
             Some("AWS Bedrock".to_string()),
             Some("us.anthropic.claude-sonnet-4-6".to_string()),
+            None,
             vec!["us.anthropic.claude-sonnet-4-6".to_string()],
             vec![model_route(
                 "us.anthropic.claude-sonnet-4-6",

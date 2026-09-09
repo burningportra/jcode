@@ -414,6 +414,17 @@ cross_provider_failover = "countdown"
 # max_retries = 8
 # retry_backoff_cap_secs = 30
 
+[auto_router]
+# Enable the virtual `jcode-auto` model in /model and remote clients.
+enabled = true
+# FAST tier provider: "auto", "vercel", "openrouter", or "none".
+# "none" disables the FAST tier entirely.
+fast_provider = "auto"
+# Optional routed model overrides. Leave unset to use authenticated catalog tiers.
+# frontier = "claude-oauth:claude-opus-4-8"
+# implement = "claude-oauth:claude-sonnet-4-5"
+# fast = "vercel-ai-gateway:zai/glm-5.3-flash"
+
 [server]
 # Who executes autonomous wake requests from background completion/stall,
 # swarm await completion, and communication delivery.
@@ -742,6 +753,11 @@ mod tests {
         assert_eq!(config.tools.mcp_tools, McpToolsMode::Auto);
         assert_eq!(config.tools.mcp_tools_token_threshold, 8_000);
         assert_eq!(config.search.fff_backend, FffBackendMode::Prefer);
+        assert!(config.auto_router.enabled);
+        assert_eq!(
+            config.auto_router.fast_provider,
+            AutoRouterFastProvider::Auto
+        );
         assert!(
             config.display.show_thinking,
             "the shipped user config must request model reasoning"

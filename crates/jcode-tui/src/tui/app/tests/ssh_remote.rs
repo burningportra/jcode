@@ -164,6 +164,8 @@ fn ssh_remote_history_is_authoritative_even_when_empty_or_server_version_differs
             images: vec![],
             provider_name: Some("remote-provider".into()),
             provider_model: Some("remote-model".into()),
+            resolved_model: None,
+            auto_state: None,
             subagent_model: None,
             autoreview_enabled: Some(false),
             autojudge_enabled: Some(false),

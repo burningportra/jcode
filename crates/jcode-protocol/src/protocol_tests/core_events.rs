@@ -15,6 +15,96 @@ fn test_request_roundtrip() -> Result<()> {
 }
 
 #[test]
+fn test_set_auto_tier_request_roundtrip() -> Result<()> {
+    let req = Request::SetAutoTier {
+        id: 42,
+        tier: Some("fast".to_string()),
+    };
+    let json = serde_json::to_string(&req)?;
+    assert!(json.contains("\"type\":\"set_auto_tier\""));
+    let decoded = parse_request_json(&json)?;
+    let Request::SetAutoTier { id, tier } = decoded else {
+        return Err(anyhow!("wrong request type"));
+    };
+    assert_eq!(id, 42);
+    assert_eq!(tier.as_deref(), Some("fast"));
+
+    let decoded = parse_request_json(r#"{"type":"set_auto_tier","id":43}"#)?;
+    let Request::SetAutoTier { id, tier } = decoded else {
+        return Err(anyhow!("wrong request type"));
+    };
+    assert_eq!(id, 43);
+    assert_eq!(tier, None);
+    Ok(())
+}
+
+#[test]
+fn test_auto_state_and_resolved_model_roundtrip() -> Result<()> {
+    let auto_state = jcode_provider_core::AutoRouterStateSnapshot {
+        active: true,
+        last_resolved: Some(jcode_provider_core::AutoRouterDecisionSnapshot {
+            tier: "implement".to_string(),
+            model_spec: "claude-oauth:claude-sonnet-4-5".to_string(),
+            provider_family: "anthropic".to_string(),
+            reason: "implementation turn".to_string(),
+        }),
+        decisions_tail: vec![jcode_provider_core::AutoRouterDecisionSnapshot {
+            tier: "fast".to_string(),
+            model_spec: "vercel-ai-gateway:zai/glm-5.3-flash".to_string(),
+            provider_family: "vercel-ai-gateway".to_string(),
+            reason: "mechanical turn".to_string(),
+        }],
+    };
+
+    let event = ServerEvent::State {
+        id: 7,
+        session_id: "ses_auto".to_string(),
+        message_count: 2,
+        is_processing: false,
+        auto_state: Some(auto_state.clone()),
+        resolved_model: Some("claude-oauth:claude-sonnet-4-5".to_string()),
+    };
+    let decoded = parse_event_json(&serde_json::to_string(&event)?)?;
+    let ServerEvent::State {
+        auto_state: decoded_state,
+        resolved_model,
+        ..
+    } = decoded
+    else {
+        return Err(anyhow!("wrong event type"));
+    };
+    assert_eq!(decoded_state, Some(auto_state.clone()));
+    assert_eq!(
+        resolved_model.as_deref(),
+        Some("claude-oauth:claude-sonnet-4-5")
+    );
+
+    let event = ServerEvent::AvailableModelsUpdated {
+        provider_name: Some("Jcode Auto".to_string()),
+        provider_model: Some("jcode-auto".to_string()),
+        resolved_model: Some("vercel-ai-gateway:zai/glm-5.3-flash".to_string()),
+        auto_state: Some(auto_state),
+        available_models: vec!["jcode-auto".to_string()],
+        available_model_routes: Vec::new(),
+    };
+    let decoded = parse_event_json(&serde_json::to_string(&event)?)?;
+    let ServerEvent::AvailableModelsUpdated {
+        resolved_model,
+        auto_state,
+        ..
+    } = decoded
+    else {
+        return Err(anyhow!("wrong event type"));
+    };
+    assert_eq!(
+        resolved_model.as_deref(),
+        Some("vercel-ai-gateway:zai/glm-5.3-flash")
+    );
+    assert!(auto_state.is_some_and(|state| state.active));
+    Ok(())
+}
+
+#[test]
 fn test_soft_interrupt_images_roundtrip_and_legacy_default() -> Result<()> {
     let req = Request::SoftInterrupt {
         id: 2,
@@ -449,6 +539,8 @@ fn test_history_event_roundtrip_preserves_side_panel_snapshot() -> Result<()> {
         images: Vec::new(),
         provider_name: Some("openai".to_string()),
         provider_model: Some("gpt-5.4".to_string()),
+        resolved_model: None,
+        auto_state: None,
         available_models: vec!["gpt-5.4".to_string()],
         available_model_routes: Vec::new(),
         mcp_servers: Vec::new(),

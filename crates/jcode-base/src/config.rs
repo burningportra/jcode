@@ -4,17 +4,18 @@
 //! Environment variables override config file settings.
 
 pub use jcode_config_types::{
-    AgentsConfig, AmbientConfig, AuthConfig, AutoJudgeConfig, AutoReviewConfig, CompactionConfig,
-    CompactionMode, CrossProviderFailoverMode, DiagramDisplayMode, DiagramPanePosition,
-    DiffDisplayMode, DisplayConfig, FeatureConfig, FffBackendMode, GatewayConfig, HookCommands,
-    HooksConfig, KeybindingsConfig, LatexRenderingMode, LaunchHotkeyEntry, LaunchHotkeysConfig,
-    MarkdownSpacingMode, NamedProviderAuth, NamedProviderConfig, NamedProviderModelConfig,
-    NamedProviderType, NativeScrollbarConfig, NotificationsConfig, OverscrollStatusMode,
-    PowerConfig, PromptSuggestionAcceptanceKey, PromptSuggestionsConfig,
-    PromptSuggestionsResolvedConfig, PromptSuggestionsWorkspaceOverride, ProviderConfig,
-    QualityConfig, ReasoningDisplayMode, SafetyConfig, SearchConfig, SessionPickerResumeAction,
-    SponsorsConfig, SwarmSpawnMode, SwarmStripLayout, TerminalConfig, UpdateChannel,
-    WebSearchConfig, WebSearchEngine, normalize_prompt_suggestion_workspace,
+    AgentsConfig, AmbientConfig, AuthConfig, AutoJudgeConfig, AutoReviewConfig, AutoRouterConfig,
+    AutoRouterFastProvider, CompactionConfig, CompactionMode, CrossProviderFailoverMode,
+    DiagramDisplayMode, DiagramPanePosition, DiffDisplayMode, DisplayConfig, FeatureConfig,
+    FffBackendMode, GatewayConfig, HookCommands, HooksConfig, KeybindingsConfig,
+    LatexRenderingMode, LaunchHotkeyEntry, LaunchHotkeysConfig, MarkdownSpacingMode,
+    NamedProviderAuth, NamedProviderConfig, NamedProviderModelConfig, NamedProviderType,
+    NativeScrollbarConfig, NotificationsConfig, OverscrollStatusMode, PowerConfig,
+    PromptSuggestionAcceptanceKey, PromptSuggestionsConfig, PromptSuggestionsResolvedConfig,
+    PromptSuggestionsWorkspaceOverride, ProviderConfig, QualityConfig, ReasoningDisplayMode,
+    SafetyConfig, SearchConfig, SessionPickerResumeAction, SponsorsConfig, SwarmSpawnMode,
+    SwarmStripLayout, TerminalConfig, UpdateChannel, WebSearchConfig, WebSearchEngine,
+    normalize_prompt_suggestion_workspace,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
@@ -507,6 +508,9 @@ pub struct Config {
 
     /// Provider configuration
     pub provider: ProviderConfig,
+
+    /// Virtual `jcode-auto` model routing configuration.
+    pub auto_router: AutoRouterConfig,
 
     /// Named provider profiles, keyed by profile name.
     ///

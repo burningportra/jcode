@@ -1524,6 +1524,8 @@ pub(in crate::tui::app) fn handle_server_event(
             session_id,
             provider_name,
             provider_model,
+            resolved_model,
+            auto_state,
             subagent_model,
             autoreview_enabled,
             autojudge_enabled,
@@ -1696,9 +1698,11 @@ pub(in crate::tui::app) fn handle_server_event(
             let model_catalog_snapshot = jcode_provider_core::ModelCatalogSnapshot::new(
                 provider_name,
                 provider_model,
+                resolved_model,
                 available_models,
                 available_model_routes,
-            );
+            )
+            .with_auto_state(auto_state);
             let catalog_outcome = app.replace_remote_model_catalog_snapshot(model_catalog_snapshot);
             app.clear_remote_startup_phase();
             app.session.subagent_model = subagent_model;
@@ -2305,15 +2309,19 @@ pub(in crate::tui::app) fn handle_server_event(
         ServerEvent::AvailableModelsUpdated {
             provider_name,
             provider_model,
+            resolved_model,
+            auto_state,
             available_models,
             available_model_routes,
         } => {
             let model_catalog_snapshot = jcode_provider_core::ModelCatalogSnapshot::new(
                 provider_name,
                 provider_model,
+                resolved_model,
                 available_models,
                 available_model_routes,
-            );
+            )
+            .with_auto_state(auto_state);
             let mut explicit_refresh_summary_shown = false;
             if let Some((before_models, before_routes)) =
                 app.pending_remote_model_refresh_snapshot.take()

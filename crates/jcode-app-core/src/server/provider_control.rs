@@ -53,6 +53,8 @@ fn available_models_snapshot_into_event(snapshot: ModelCatalogSnapshot) -> Serve
     ServerEvent::AvailableModelsUpdated {
         provider_name: snapshot.provider_name,
         provider_model: snapshot.provider_model,
+        resolved_model: snapshot.resolved_model,
+        auto_state: snapshot.auto_state,
         available_models: snapshot.available_models,
         available_model_routes: snapshot.model_routes,
     }
@@ -422,6 +424,42 @@ fn send_model_changed_result(
     }
 }
 
+fn send_set_auto_tier_result(
+    id: u64,
+    result: anyhow::Result<()>,
+    client_event_tx: &mpsc::UnboundedSender<ServerEvent>,
+) {
+    match result {
+        Ok(()) => {
+            let _ = client_event_tx.send(ServerEvent::Ack { id });
+        }
+        Err(error) => {
+            let _ = client_event_tx.send(ServerEvent::Error {
+                id,
+                message: error.to_string(),
+                retry_after_secs: None,
+            });
+        }
+    }
+}
+
+fn apply_set_auto_tier(
+    id: u64,
+    tier: Option<String>,
+    provider: Arc<dyn Provider>,
+    client_event_tx: &mpsc::UnboundedSender<ServerEvent>,
+) {
+    crate::logging::event_info(
+        "server_set_auto_tier_request",
+        vec![
+            ("id", id.to_string()),
+            ("tier", tier.clone().unwrap_or_else(|| "auto".to_string())),
+            ("provider", provider.name().to_string()),
+        ],
+    );
+    send_set_auto_tier_result(id, provider.set_auto_tier(tier.as_deref()), client_event_tx);
+}
+
 fn apply_cycle_model(
     id: u64,
     direction: i8,
@@ -651,6 +689,27 @@ pub(super) async fn handle_set_model(
             client_event_tx.clone(),
             move |agent_guard, client_event_tx| {
                 apply_set_model(id, model, agent_guard, client_event_tx);
+            },
+        );
+    }
+}
+
+pub(super) async fn handle_set_auto_tier(
+    id: u64,
+    tier: Option<String>,
+    agent: &Arc<Mutex<Agent>>,
+    client_event_tx: &mpsc::UnboundedSender<ServerEvent>,
+) {
+    if let Ok(agent_guard) = agent.try_lock() {
+        apply_set_auto_tier(id, tier, agent_guard.provider_handle(), client_event_tx);
+    } else {
+        spawn_deferred_provider_operation(
+            "set_auto_tier",
+            id,
+            Arc::clone(agent),
+            client_event_tx.clone(),
+            move |provider, client_event_tx| {
+                apply_set_auto_tier(id, tier, provider, client_event_tx);
             },
         );
     }

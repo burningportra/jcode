@@ -135,6 +135,18 @@ pub trait Provider: Send + Sync {
         None
     }
 
+    /// Serializable auto-router state when this provider exposes a virtual model id.
+    fn auto_state_snapshot(&self) -> Option<AutoRouterStateSnapshot> {
+        None
+    }
+
+    /// Force the next auto-router turn to a tier, or clear the force when `None`.
+    fn set_auto_tier(&self, _tier: Option<&str>) -> Result<()> {
+        Err(anyhow::anyhow!(
+            "This provider does not support auto-router tier selection"
+        ))
+    }
+
     /// Human-readable description of the auth method the active provider will
     /// actually use for the next request (e.g. "OAuth" or "API key"), or `None`
     /// when there is no meaningful OAuth-vs-API-key distinction. UI surfaces use
@@ -1140,6 +1152,10 @@ pub struct ModelCatalogSnapshot {
     pub provider_name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider_model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resolved_model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_state: Option<AutoRouterStateSnapshot>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub available_models: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1150,12 +1166,15 @@ impl ModelCatalogSnapshot {
     pub fn new(
         provider_name: Option<String>,
         provider_model: Option<String>,
+        resolved_model: Option<String>,
         available_models: Vec<String>,
         model_routes: Vec<ModelRoute>,
     ) -> Self {
         Self {
             provider_name,
             provider_model,
+            resolved_model,
+            auto_state: None,
             available_models,
             model_routes,
         }
@@ -1168,14 +1187,38 @@ impl ModelCatalogSnapshot {
         Self::new(
             Some(provider.display_name()),
             Some(provider.model()),
+            provider.auto_last_resolved_model(),
             provider.available_models_display(),
             provider.model_routes(),
         )
+        .with_auto_state(provider.auto_state_snapshot())
+    }
+
+    pub fn with_auto_state(mut self, auto_state: Option<AutoRouterStateSnapshot>) -> Self {
+        self.auto_state = auto_state;
+        self
     }
 
     pub fn has_routes(&self) -> bool {
         !self.model_routes.is_empty()
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AutoRouterDecisionSnapshot {
+    pub tier: String,
+    pub model_spec: String,
+    pub provider_family: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AutoRouterStateSnapshot {
+    pub active: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_resolved: Option<AutoRouterDecisionSnapshot>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub decisions_tail: Vec<AutoRouterDecisionSnapshot>,
 }
 
 pub const CHEAPNESS_REFERENCE_INPUT_TOKENS: u64 = 25_000;

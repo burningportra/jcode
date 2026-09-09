@@ -1271,6 +1271,64 @@ impl Default for WebSearchConfig {
     }
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum AutoRouterFastProvider {
+    #[default]
+    Auto,
+    Vercel,
+    OpenRouter,
+    None,
+}
+
+impl AutoRouterFastProvider {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Vercel => "vercel",
+            Self::OpenRouter => "openrouter",
+            Self::None => "none",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "auto" => Some(Self::Auto),
+            "vercel" | "vercel-ai-gateway" => Some(Self::Vercel),
+            "openrouter" | "open-router" => Some(Self::OpenRouter),
+            "none" | "off" | "disabled" => Some(Self::None),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct AutoRouterConfig {
+    /// Enable the virtual `jcode-auto` model route.
+    pub enabled: bool,
+    /// FAST tier transport preference: auto, vercel, openrouter, or none.
+    pub fast_provider: AutoRouterFastProvider,
+    /// Optional routed model spec override for planning/frontier turns.
+    pub frontier: Option<String>,
+    /// Optional routed model spec override for implementation turns.
+    pub implement: Option<String>,
+    /// Optional routed model spec override for mechanical/fast turns.
+    pub fast: Option<String>,
+}
+
+impl Default for AutoRouterConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            fast_provider: AutoRouterFastProvider::Auto,
+            frontier: None,
+            implement: None,
+            fast: None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ProviderConfig {
@@ -1619,6 +1677,48 @@ pub struct LaunchHotkeysConfig {
     /// Set true once auto-import has populated `entries`, so we only bake the
     /// per-repo mapping a single time and never clobber later user edits.
     pub imported: bool,
+}
+
+#[cfg(test)]
+mod auto_router_config_tests {
+    use super::*;
+
+    #[test]
+    fn auto_router_defaults_enable_auto_and_leave_overrides_empty() {
+        let config = AutoRouterConfig::default();
+        assert!(config.enabled);
+        assert_eq!(config.fast_provider, AutoRouterFastProvider::Auto);
+        assert_eq!(config.frontier, None);
+        assert_eq!(config.implement, None);
+        assert_eq!(config.fast, None);
+    }
+
+    #[test]
+    fn auto_router_section_parses_fast_provider_and_overrides() {
+        let config: AutoRouterConfig = serde_json::from_value(serde_json::json!({
+            "enabled": false,
+            "fast_provider": "openrouter",
+            "frontier": "claude-oauth:claude-opus-4-8",
+            "implement": "openai-oauth:gpt-5.5-codex",
+            "fast": "vercel-ai-gateway:zai/glm-5.3-flash"
+        }))
+        .expect("auto_router config parses");
+
+        assert!(!config.enabled);
+        assert_eq!(config.fast_provider, AutoRouterFastProvider::OpenRouter);
+        assert_eq!(
+            config.frontier.as_deref(),
+            Some("claude-oauth:claude-opus-4-8")
+        );
+        assert_eq!(
+            config.implement.as_deref(),
+            Some("openai-oauth:gpt-5.5-codex")
+        );
+        assert_eq!(
+            config.fast.as_deref(),
+            Some("vercel-ai-gateway:zai/glm-5.3-flash")
+        );
+    }
 }
 
 #[cfg(test)]

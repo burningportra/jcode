@@ -78,6 +78,7 @@ pub(super) async fn handle_get_state(
     id: u64,
     client_session_id: &str,
     client_is_processing: bool,
+    provider: &Arc<dyn Provider>,
     sessions: &SessionAgents,
     writer: &Arc<Mutex<WriteHalf>>,
 ) -> Result<()> {
@@ -94,6 +95,8 @@ pub(super) async fn handle_get_state(
             message_count: session_count,
             is_processing: client_is_processing
                 || crate::turn_cancel_registry::has_active_turn(client_session_id),
+            auto_state: provider.auto_state_snapshot(),
+            resolved_model: provider.auto_last_resolved_model(),
         },
     )
     .await
@@ -189,6 +192,8 @@ pub(super) async fn handle_get_model_catalog(
     let (
         provider_name,
         provider_model,
+        resolved_model,
+        auto_state,
         available_models,
         available_model_routes,
         resolved_credential,
@@ -200,6 +205,8 @@ pub(super) async fn handle_get_model_catalog(
             Ok(agent_guard) => (
                 Some(agent_guard.provider_name()),
                 Some(agent_guard.provider_model()),
+                agent_guard.provider_handle().auto_last_resolved_model(),
+                agent_guard.provider_handle().auto_state_snapshot(),
                 agent_guard.available_models_display(),
                 agent_guard.model_routes(),
                 agent_guard.active_resolved_credential(),
@@ -219,6 +226,8 @@ pub(super) async fn handle_get_model_catalog(
                 (
                     Some(provider.name().to_string()),
                     persisted_model.or_else(|| Some(provider.model())),
+                    provider.auto_last_resolved_model(),
+                    provider.auto_state_snapshot(),
                     provider.available_models_display(),
                     provider.model_routes(),
                     provider.active_resolved_credential(),
@@ -239,6 +248,8 @@ pub(super) async fn handle_get_model_catalog(
         images: Vec::new(),
         provider_name,
         provider_model,
+        resolved_model,
+        auto_state,
         available_models,
         available_model_routes,
         mcp_servers: Vec::new(),
@@ -499,6 +510,8 @@ async fn send_history_from_persisted_session(
     let provider_name =
         history_provider_name_from_session(&session).or_else(|| Some(provider.name().to_string()));
     let provider_model = session.model.clone().or_else(|| Some(provider.model()));
+    let resolved_model = provider.auto_last_resolved_model();
+    let auto_state = provider.auto_state_snapshot();
     let subagent_model = session.subagent_model.clone();
     let autoreview_enabled = session.autoreview_enabled;
     let autojudge_enabled = session.autojudge_enabled;
@@ -530,6 +543,8 @@ async fn send_history_from_persisted_session(
         images,
         provider_name,
         provider_model,
+        resolved_model,
+        auto_state,
         subagent_model,
         autoreview_enabled,
         autojudge_enabled,
@@ -590,6 +605,8 @@ pub(super) async fn send_history(
         is_canary,
         provider_name,
         provider_model,
+        resolved_model,
+        auto_state,
         subagent_model,
         autoreview_enabled,
         autojudge_enabled,
@@ -665,6 +682,8 @@ pub(super) async fn send_history(
             agent_guard.is_canary(),
             agent_guard.provider_name(),
             agent_guard.provider_model(),
+            provider.auto_last_resolved_model(),
+            provider.auto_state_snapshot(),
             agent_guard.subagent_model(),
             agent_guard.autoreview_enabled(),
             agent_guard.autojudge_enabled(),
@@ -745,6 +764,8 @@ pub(super) async fn send_history(
         images,
         provider_name: Some(provider_name),
         provider_model: Some(provider_model),
+        resolved_model,
+        auto_state,
         subagent_model,
         autoreview_enabled,
         autojudge_enabled,

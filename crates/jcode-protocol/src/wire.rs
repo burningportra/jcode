@@ -279,6 +279,14 @@ pub enum Request {
     #[serde(rename = "set_model")]
     SetModel { id: u64, model: String },
 
+    /// Force the next auto-router turn to a tier, or clear the force when omitted.
+    #[serde(rename = "set_auto_tier")]
+    SetAutoTier {
+        id: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tier: Option<String>,
+    },
+
     /// Set the active model by structured route identity.
     #[serde(rename = "set_route")]
     SetRoute {
@@ -1111,6 +1119,10 @@ pub enum ServerEvent {
         session_id: String,
         message_count: usize,
         is_processing: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        auto_state: Option<jcode_provider_core::AutoRouterStateSnapshot>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        resolved_model: Option<String>,
     },
 
     /// Response for debug command
@@ -1159,6 +1171,12 @@ pub enum ServerEvent {
         /// Model name (e.g. "claude-sonnet-4-20250514")
         #[serde(skip_serializing_if = "Option::is_none")]
         provider_model: Option<String>,
+        /// Concrete model selected behind a virtual router model, when active.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        resolved_model: Option<String>,
+        /// Auto-router state for remote clients.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        auto_state: Option<jcode_provider_core::AutoRouterStateSnapshot>,
         /// Available models for this provider
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         available_models: Vec<String>,
@@ -1344,6 +1362,10 @@ pub enum ServerEvent {
         provider_name: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         provider_model: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        resolved_model: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        auto_state: Option<jcode_provider_core::AutoRouterStateSnapshot>,
         available_models: Vec<String>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         available_model_routes: Vec<jcode_provider_core::ModelRoute>,

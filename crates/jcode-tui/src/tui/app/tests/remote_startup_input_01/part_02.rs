@@ -20,6 +20,8 @@ fn test_handle_server_event_available_models_updated_replaces_remote_model_catal
         crate::protocol::ServerEvent::AvailableModelsUpdated {
             provider_name: Some("OpenAI".to_string()),
             provider_model: Some("new-model".to_string()),
+            resolved_model: None,
+            auto_state: None,
             available_models: vec!["new-model".to_string(), "second-model".to_string()],
             available_model_routes: vec![crate::provider::ModelRoute {
                 model: "new-model".to_string(),
@@ -137,6 +139,8 @@ fn test_remote_available_models_updated_after_refresh_shows_summary_and_updates_
         crate::protocol::ServerEvent::AvailableModelsUpdated {
             provider_name: None,
             provider_model: None,
+            resolved_model: None,
+            auto_state: None,
             available_models: vec!["old-model".to_string(), "new-model".to_string()],
             available_model_routes: vec![
                 crate::provider::ModelRoute {

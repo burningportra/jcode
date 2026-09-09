@@ -537,6 +537,8 @@ fn history_event_for_session(session_id: &str) -> crate::protocol::ServerEvent {
         images: vec![],
         provider_name: Some("claude".to_string()),
         provider_model: Some("claude-sonnet-4-20250514".to_string()),
+        resolved_model: None,
+        auto_state: None,
         subagent_model: None,
         autoreview_enabled: None,
         autojudge_enabled: None,
