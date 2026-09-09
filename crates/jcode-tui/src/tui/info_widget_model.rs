@@ -555,7 +555,7 @@ fn home_relative_dir(path: &str) -> String {
         let independent = first_line_text(render_model_widget(&data, rect));
         let overview = first_line_text(render_model_info(&data, rect));
 
-        assert!(independent.contains("auto -> Sonnet 4"), "{independent}");
-        assert!(overview.contains("auto -> Sonnet 4"), "{overview}");
+        assert!(independent.contains("auto -> claude-sonnet-4-20250514"), "{independent}");
+        assert!(overview.contains("auto -> claude-sonnet-4-20250514"), "{overview}");
     }
 }
