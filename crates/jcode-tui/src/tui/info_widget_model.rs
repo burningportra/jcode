@@ -13,10 +13,17 @@ pub(super) fn render_model_widget(data: &InfoWidgetData, inner: Rect) -> Vec<Lin
     let short_name = model_status_label(model, data.resolved_model.as_deref());
     let max_len = inner.width.saturating_sub(2) as usize;
 
+    // Prefix the model line with a clear label. The virtual selector ("auto" when the
+    // model is `jcode-auto`) and the concrete resolved model are both displayed by
+    // `model_status_label`. We prepend a static "Model:" label so users can instantly
+    // recognise the widget’s purpose, even when the widget is narrow.
+    let label = "Model:";
     let mut spans = vec![
         Span::styled("⚡ ", Style::default().fg(rgb(140, 180, 255))),
+        Span::styled(label, Style::default().fg(rgb(180, 180, 180))),
+        Span::styled(" ", Style::default()),
         Span::styled(
-            truncate_smart(&short_name, max_len.saturating_sub(2)),
+            truncate_smart(&short_name, max_len.saturating_sub(label.len() + 3)),
             Style::default().fg(rgb(255, 150, 200)).bold(),
         ),
     ];
@@ -176,17 +183,23 @@ pub(super) fn render_model_info(data: &InfoWidgetData, inner: Rect) -> Vec<Line<
     let short_name = model_status_label(model, data.resolved_model.as_deref());
     let max_len = inner.width.saturating_sub(2) as usize;
 
-    let mut spans = vec![Span::styled(
-        if short_name.chars().count() > max_len {
-            format!(
-                "{}...",
-                truncate_chars(&short_name, max_len.saturating_sub(3))
-            )
-        } else {
-            short_name
-        },
-        Style::default().fg(rgb(180, 180, 190)).bold(),
-    )];
+    // Prefix with "Model:" for consistency with the compact widget.
+    let label = "Model:";
+    let mut spans = vec![
+        Span::styled(label, Style::default().fg(rgb(180, 180, 180))),
+        Span::styled(" ", Style::default()),
+        Span::styled(
+            if short_name.chars().count() > max_len {
+                format!(
+                    "{}...",
+                    truncate_chars(&short_name, max_len.saturating_sub(label.len() + 3))
+                )
+            } else {
+                short_name
+            },
+            Style::default().fg(rgb(180, 180, 190)).bold(),
+        ),
+    ];
 
     append_model_runtime_metadata(&mut spans, data);
 
@@ -361,10 +374,13 @@ fn model_status_label(model: &str, resolved_model: Option<&str>) -> String {
     } else {
         short_name
     };
+    // Use the raw resolved model identifier for clarity – the UI already shows the
+    // virtual selector (`auto`).  Downstream callers can still apply their own
+    // pretty‑printing if they need a shorter label.
     format!(
         "{} -> {}",
         virtual_label,
-        crate::tui::session_facts::pretty_model(resolved)
+        resolved
     )
 }
 
@@ -404,7 +420,7 @@ fn home_relative_dir(path: &str) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+  mod tests {
     use super::*;
     use crate::tui::info_widget::InfoWidgetData;
 
@@ -447,6 +463,30 @@ mod tests {
             is_compacting: false,
             git_info: None,
         }
+    }
+
+    #[test]
+    fn renders_auto_router_label() {
+        // Simulate a session where the virtual model `jcode-auto` is selected and the
+        // router resolved a concrete model.
+        let mut d = data();
+        d.model = Some("jcode-auto".to_string());
+        d.resolved_model = Some("claude-sonnet-4".to_string());
+        // Use a generous width so truncation does not interfere.
+        let inner = ratatui::layout::Rect::new(0, 0, 80, 1);
+        let lines = render_model_widget(&d, inner);
+        assert_eq!(lines.len(), 1);
+        // Concatenate all span contents to get the rendered line text.
+        let text = lines[0]
+            .spans
+            .iter()
+            .map(|s| s.content.as_ref())
+            .collect::<String>();
+        // The line should contain the explicit "Model:" prefix and the arrow.
+        assert!(text.contains("Model:"), "missing prefix: {}", text);
+        // `pretty_model` abbreviates "claude-sonnet-4" to "Sonnet 4" (with tier info).
+        // The widget should now show the full concrete model identifier.
+        assert!(text.contains("auto -> claude-sonnet"), "missing routing info: {}", text);
     }
 
     fn first_line_text(lines: Vec<Line<'static>>) -> String {
