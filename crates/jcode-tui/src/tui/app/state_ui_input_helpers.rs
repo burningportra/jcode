@@ -42,7 +42,7 @@ const REGISTERED_COMMANDS: &[RegisteredCommand] = &[
     RegisteredCommand::public("/commands", "Alias for /help"),
     RegisteredCommand::public("/model", "List or switch models"),
     RegisteredCommand::public("/models", "Alias for /model"),
-    RegisteredCommand::public("/auto", "Show auto-router audit or force one tier"),
+      RegisteredCommand::public("/auto-jcode", "Show auto-router audit or force one tier"),
     RegisteredCommand::public(
         "/provider-test-coverage",
         "Show live-test evidence for the current provider/model",
@@ -775,7 +775,7 @@ impl App {
             );
         }
 
-        if prefix.starts_with("/auto ") {
+        if prefix.starts_with("/auto-jcode ") {
             let tiers = [
                 ("frontier", "Force the next turn to the frontier tier"),
                 ("implement", "Force the next turn to the implement tier"),
@@ -785,17 +785,17 @@ impl App {
                 input,
                 tiers
                     .iter()
-                    .map(|(tier, help)| (format!("/auto {}", tier), *help))
+                    .map(|(tier, help)| (format!("/auto-jcode {}", tier), *help))
                     .collect(),
             );
         }
 
-        if prefix_trimmed == "/auto" {
+        if prefix_trimmed == "/auto-jcode" {
             return vec![
-                ("/auto".into(), "Show auto-router decision audit"),
-                ("/auto frontier".into(), "Force the next turn to frontier"),
-                ("/auto implement".into(), "Force the next turn to implement"),
-                ("/auto fast".into(), "Force the next turn to fast"),
+                ("/auto-jcode".into(), "Show auto-router decision audit"),
+                ("/auto-jcode frontier".into(), "Force the next turn to frontier"),
+                ("/auto-jcode implement".into(), "Force the next turn to implement"),
+                ("/auto-jcode fast".into(), "Force the next turn to fast"),
             ];
         }
 

@@ -410,6 +410,22 @@ fn append_fast_candidates(
         return;
     }
 
+    // When the user has not pinned a fast transport, prefer native subscription
+    // providers (gemini family) over external routers. An explicit Vercel or
+    // OpenRouter choice is honored below.
+    if fast_provider == FastProviderPreference::Auto
+        && !catalog.subscription_flash_models.is_empty()
+    {
+        append_seeded_fast_models(candidates, &catalog.subscription_flash_models, "gemini");
+        if candidates.iter().any(|c| c.tier == AutoTier::Fast) {
+            // A subscription fast model is available, so external routers are
+            // not needed as a fallback.
+            return;
+        }
+    }
+
+    // Fallback to external router transports (vercel, openrouter) only if no
+    // subscription fast model was found.
     let transports: &[(FastProviderPreference, &str, &[String])] = &[
         (
             FastProviderPreference::Vercel,
@@ -433,15 +449,6 @@ fn append_fast_candidates(
         }) {
             return;
         }
-    }
-
-    if matches!(
-        fast_provider,
-        FastProviderPreference::Auto
-            | FastProviderPreference::Vercel
-            | FastProviderPreference::OpenRouter
-    ) {
-        append_seeded_fast_models(candidates, &catalog.subscription_flash_models, "gemini");
     }
 }
 
@@ -882,7 +889,14 @@ mod tests {
         assert!(
             candidates
                 .iter()
-                .any(|candidate| candidate.model_spec == "vercel-ai-gateway:zai/glm-5.3-flash")
+                .any(|candidate| candidate.model_spec == "gemini:gemini-3.8-flash")
+        );
+        // With a subscription flash model available, Auto mode prefers the native
+        // subscription transport over external routers.
+        assert!(
+            !candidates
+                .iter()
+                .any(|candidate| candidate.provider_family == "vercel-ai-gateway")
         );
         assert!(
             !candidates

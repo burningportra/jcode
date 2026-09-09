@@ -1221,7 +1221,7 @@ async fn handle_remote_key_internal(
                     return Ok(());
                 }
 
-                if trimmed == "/auto" || trimmed == "/auto status" || trimmed == "/auto audit" {
+        if trimmed == "/auto-jcode" || trimmed == "/auto-jcode status" || trimmed == "/auto-jcode audit" {
                     app.push_display_message(DisplayMessage::system(
                         app_mod::model_context::format_auto_router_audit(
                             app.remote_auto_state.as_ref(),
@@ -1230,7 +1230,7 @@ async fn handle_remote_key_internal(
                     return Ok(());
                 }
 
-                if let Some(tier) = trimmed.strip_prefix("/auto ") {
+        if let Some(tier) = trimmed.strip_prefix("/auto-jcode ") {
                     let Some(tier) = app_mod::model_context::normalize_auto_tier(tier) else {
                         app.push_display_message(DisplayMessage::error(
                             app_mod::model_context::auto_tier_usage(),

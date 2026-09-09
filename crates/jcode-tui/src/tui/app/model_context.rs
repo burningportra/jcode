@@ -1461,7 +1461,7 @@ pub(super) fn format_auto_router_audit(
     }
 
     lines.push(
-        "Use /auto frontier, /auto implement, or /auto fast to force exactly one next turn."
+        "Use /auto-jcode frontier, /auto-jcode implement, or /auto-jcode fast to force exactly one next turn."
             .to_string(),
     );
     lines.join("\n")
@@ -1477,7 +1477,7 @@ pub(super) fn normalize_auto_tier(input: &str) -> Option<&'static str> {
 }
 
 pub(super) fn auto_tier_usage() -> &'static str {
-    "Usage: /auto [frontier|implement|fast]"
+        "Usage: /auto-jcode [frontier|implement|fast]"
 }
 
 pub(super) fn auto_tier_success_message(tier: &str) -> String {
@@ -1485,14 +1485,14 @@ pub(super) fn auto_tier_success_message(tier: &str) -> String {
 }
 
 pub(super) fn handle_auto_command(app: &mut App, trimmed: &str) -> bool {
-    if trimmed == "/auto" || trimmed == "/auto status" || trimmed == "/auto audit" {
+        if trimmed == "/auto-jcode" || trimmed == "/auto-jcode status" || trimmed == "/auto-jcode audit" {
         app.push_display_message(DisplayMessage::system(format_auto_router_audit(
             app.provider.auto_state_snapshot().as_ref(),
         )));
         return true;
     }
 
-    let Some(rest) = trimmed.strip_prefix("/auto ") else {
+        let Some(rest) = trimmed.strip_prefix("/auto-jcode ") else {
         return false;
     };
     let rest = rest.trim();

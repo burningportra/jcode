@@ -147,10 +147,10 @@ fn create_auto_router_test_app(
 fn auto_command_registered_and_suggests_tiers() {
     let app = create_test_app();
     let registered = app.get_suggestions_for("/au");
-    assert!(registered.iter().any(|(cmd, _)| cmd == "/auto"));
+        assert!(registered.iter().any(|(cmd, _)| cmd == "/auto-jcode"));
 
-    let exact = app.get_suggestions_for("/auto");
-    assert!(exact.iter().any(|(cmd, _)| cmd == "/auto"));
+        let exact = app.get_suggestions_for("/auto-jcode");
+        assert!(exact.iter().any(|(cmd, _)| cmd == "/auto-jcode"));
     assert!(exact.iter().any(|(cmd, _)| cmd == "/auto frontier"));
     assert!(exact.iter().any(|(cmd, _)| cmd == "/auto implement"));
     assert!(exact.iter().any(|(cmd, _)| cmd == "/auto fast"));
@@ -163,7 +163,7 @@ fn auto_command_registered_and_suggests_tiers() {
 fn auto_command_audit_renders_last_decision() {
     let (mut app, _, _) = create_auto_router_test_app("jcode-auto", Some("claude-sonnet-4"));
 
-    assert!(crate::tui::app::model_context::handle_auto_command(&mut app, "/auto"));
+        assert!(crate::tui::app::model_context::handle_auto_command(&mut app, "/auto-jcode"));
 
     let message = app.display_messages.last().expect("audit message");
     assert_eq!(message.role, "system");
