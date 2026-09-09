@@ -128,7 +128,17 @@ impl MultiProvider {
                         &candidates,
                         history_portable,
                         &attempted_specs,
-                    ) else {
+                    ).or_else(|| {
+                        // No untried provider left in this tier or above: walk
+                        // every remaining untried candidate tier-down so a dead
+                        // transport (e.g. Vercel 402) falls through to the next
+                        // provider instead of failing the turn.
+                        self.select_auto_fallback_decision(
+                            &candidates,
+                            history_portable,
+                            &attempted_specs,
+                        )
+                    }) else {
                         return Err(err.context(format!(
                             "Auto router exhausted tier escalation ({})",
                             notes.join("; ")
@@ -209,6 +219,69 @@ impl MultiProvider {
             at: std::time::Instant::now(),
         };
         state.record_decision(category, decision.clone());
+        Some(decision)
+    }
+
+    /// Last-resort failover: walk every untried candidate ordered
+    /// subscription-first then tier-down (frontier, implement, fast), ignoring
+    /// the conversation provider pin since the pinned transport just failed.
+    fn select_auto_fallback_decision(
+        &self,
+        candidates: &[auto_router::AutoModelCandidate],
+        history_portable: bool,
+        attempted_specs: &[String],
+    ) -> Option<auto_router::AutoDecision> {
+        let tier_rank = |tier: auto_router::AutoTier| match tier {
+            auto_router::AutoTier::Frontier => 0,
+            auto_router::AutoTier::Implement => 1,
+            auto_router::AutoTier::Fast => 2,
+        };
+        let mut ordered: Vec<&auto_router::AutoModelCandidate> = candidates
+            .iter()
+            .filter(|candidate| {
+                !attempted_specs
+                    .iter()
+                    .any(|spec| spec == &candidate.model_spec)
+            })
+            .collect();
+        // Subscription families first, metered API transports last.
+        let family_rank = |family: &str| match family {
+            "anthropic" | "openai" => 0,
+            "copilot" | "gemini" | "antigravity" | "cursor" | "bedrock"
+            | "jcode-subscription" => 1,
+            _ => 2,
+        };
+        ordered.sort_by(|a, b| {
+            (family_rank(a.provider_family.as_str()), tier_rank(a.tier))
+                .cmp(&(family_rank(b.provider_family.as_str()), tier_rank(b.tier)))
+        });
+        let candidate = ordered.into_iter().next()?;
+        // History portability still applies: a pinned-family failure must not
+        // jump to an incompatible history transport.
+        if !history_portable {
+            let pinned = self
+                .auto_route_state
+                .read()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .conversation_provider_family
+                .clone();
+            if let Some(pinned) = pinned
+                && pinned != candidate.provider_family
+            {
+                return None;
+            }
+        }
+        let decision = auto_router::AutoDecision {
+            tier: candidate.tier,
+            model_spec: candidate.model_spec.clone(),
+            provider_family: candidate.provider_family.clone(),
+            reason: format!("{}; failover to next provider", candidate.reason),
+            at: std::time::Instant::now(),
+        };
+        self.auto_route_state
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .record_decision(auto_router::TurnCategory::Unknown, decision.clone());
         Some(decision)
     }
 
