@@ -1003,3 +1003,16 @@ async fn resume_all_skips_session_with_completed_turn() {
         crate::env::remove_var("JCODE_HOME");
     }
 }
+
+#[test]
+fn swarm_id_for_session_returns_none_for_empty_id_so_caller_mints_uuid() {
+    // Regression test for the swarm-id fix: `swarm_id_for_session("")` must
+    // return None so both `handle_set_feature` (client_actions.rs) and
+    // `ensure_client_swarm_member` (client_session.rs) fall through to the
+    // fresh-UUID branch instead of deriving a bogus id.
+    assert_eq!(super::swarm_id_for_session(""), None);
+    assert_eq!(
+        super::swarm_id_for_session("session_abc").as_deref(),
+        Some("session:session_abc")
+    );
+}
