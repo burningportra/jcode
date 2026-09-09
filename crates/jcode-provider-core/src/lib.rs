@@ -147,6 +147,11 @@ pub trait Provider: Send + Sync {
         ))
     }
 
+    /// Clear a pending one-turn auto-router tier override without changing
+    /// whether auto routing is active. Used by transcript rewind, where a stale
+    /// `/auto <tier>` force should not survive the history rollback.
+    fn clear_forced_auto_tier(&self) {}
+
     /// Human-readable description of the auth method the active provider will
     /// actually use for the next request (e.g. "OAuth" or "API key"), or `None`
     /// when there is no meaningful OAuth-vs-API-key distinction. UI surfaces use

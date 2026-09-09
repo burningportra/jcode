@@ -132,7 +132,10 @@ fn log_agent_provider_stream_lifecycle(
     let mut owned = vec![
         ("phase".to_string(), phase.to_string()),
         ("provider".to_string(), agent.provider.name().to_string()),
-        ("model".to_string(), agent.provider.model()),
+        (
+            "model".to_string(),
+            telemetry_model_for_provider(agent.provider.as_ref()),
+        ),
         ("session_id".to_string(), agent.session.id.clone()),
         (
             "provider_session_id".to_string(),
@@ -159,6 +162,17 @@ fn log_agent_provider_stream_lifecycle(
             .map(|(key, value)| (key.to_string(), value)),
     );
     logging::event(level, "AGENT_PROVIDER_STREAM_LIFECYCLE", owned);
+}
+
+fn telemetry_model_for_provider(provider: &dyn Provider) -> String {
+    let model = provider.model();
+    if model.trim() == "jcode-auto" {
+        return provider
+            .auto_last_resolved_model()
+            .filter(|resolved| resolved.trim() != "jcode-auto")
+            .unwrap_or_else(|| "auto-unresolved".to_string());
+    }
+    model
 }
 
 /// Token usage from the last API request
@@ -445,7 +459,7 @@ impl Agent {
         let telemetry_start = Instant::now();
         crate::telemetry::begin_session_with_parent(
             agent.provider.name(),
-            &agent.provider.model(),
+            &telemetry_model_for_provider(agent.provider.as_ref()),
             agent.session.parent_id.clone(),
             false,
         );
@@ -513,7 +527,7 @@ impl Agent {
         agent.begin_concurrency_tracking();
         crate::telemetry::begin_session_with_parent(
             agent.provider.name(),
-            &agent.provider.model(),
+            &telemetry_model_for_provider(agent.provider.as_ref()),
             agent.session.parent_id.clone(),
             false,
         );
@@ -1003,7 +1017,7 @@ impl Agent {
         self.upload_transcript_telemetry(crate::telemetry::SessionEndReason::NormalExit);
         crate::telemetry::end_session_with_reason(
             self.provider.name(),
-            &self.provider.model(),
+            &telemetry_model_for_provider(self.provider.as_ref()),
             crate::telemetry::SessionEndReason::NormalExit,
         );
         self.fire_session_lifecycle_hook("session_end", "close");
@@ -1035,7 +1049,7 @@ impl Agent {
         self.upload_transcript_telemetry(crate::telemetry::SessionEndReason::Unknown);
         crate::telemetry::record_crash(
             self.provider.name(),
-            &self.provider.model(),
+            &telemetry_model_for_provider(self.provider.as_ref()),
             crate::telemetry::SessionEndReason::Unknown,
         );
     }
@@ -1084,7 +1098,7 @@ impl Agent {
         };
         if crate::telemetry::record_transcript(
             self.provider.name(),
-            &self.provider.model(),
+            &telemetry_model_for_provider(self.provider.as_ref()),
             end_reason,
             messages,
         ) {

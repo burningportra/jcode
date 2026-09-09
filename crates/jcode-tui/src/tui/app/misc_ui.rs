@@ -4,7 +4,7 @@ use super::*;
 /// single API call's token usage into a dollar cost. Shared by the local
 /// (`update_cost_impl`) and remote (`accrue_remote_call_cost`) billing paths so
 /// they cannot drift apart.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct ResolvedTokenPricing {
     /// Fresh (uncached) input price in $/1M tokens.
     pub prompt_price: f32,
@@ -15,6 +15,16 @@ pub(crate) struct ResolvedTokenPricing {
     /// Whether the active model is Anthropic/Claude (drives split-accounting and
     /// the cache-write premium).
     pub is_anthropic: bool,
+    /// Ledger source key override when the display provider/model is virtual.
+    pub spend_source_key: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PricingIdentity {
+    model: String,
+    source_key: String,
+    is_anthropic: bool,
+    is_openai: bool,
 }
 
 impl ResolvedTokenPricing {
@@ -89,6 +99,67 @@ fn remote_provider_is_inherently_billed(provider_name: &str) -> bool {
         || crate::provider_catalog::openai_compatible_profile_id_for_display_name(provider_name)
             .and_then(crate::provider_catalog::openai_compatible_profile_by_id)
             .is_some_and(|profile| profile.requires_api_key)
+}
+
+fn auto_pricing_identity(
+    provider_model: &str,
+    resolved_model: Option<&str>,
+    auto_state: Option<&jcode_provider_core::AutoRouterStateSnapshot>,
+) -> Option<PricingIdentity> {
+    if provider_model.trim() != "jcode-auto" {
+        return None;
+    }
+
+    let state_decision = auto_state.and_then(|state| state.last_resolved.as_ref());
+    let model_spec = resolved_model
+        .map(str::trim)
+        .filter(|model| !model.is_empty() && *model != "jcode-auto")
+        .or_else(|| state_decision.map(|decision| decision.model_spec.trim()))?;
+    let family = state_decision.map(|decision| decision.provider_family.as_str());
+    concrete_pricing_identity(model_spec, family)
+}
+
+fn concrete_pricing_identity(
+    model_spec: &str,
+    provider_family: Option<&str>,
+) -> Option<PricingIdentity> {
+    let model_spec = model_spec.trim();
+    let build = |model: &str, source_key: &str, is_anthropic: bool, is_openai: bool| {
+        let model = model.trim();
+        (!model.is_empty()).then(|| PricingIdentity {
+            model: model.to_string(),
+            source_key: source_key.to_string(),
+            is_anthropic,
+            is_openai,
+        })
+    };
+
+    if let Some(model) = model_spec
+        .strip_prefix("claude-api:")
+        .or_else(|| model_spec.strip_prefix("anthropic:"))
+    {
+        return build(model, "claude:api-key", true, false);
+    }
+    if let Some(model) = model_spec.strip_prefix("openai-api:") {
+        return build(model, "openai:api-key", false, true);
+    }
+    if let Some(model) = model_spec.strip_prefix("vercel-ai-gateway:") {
+        return build(model, "openai-compatible:vercel-ai-gateway", false, false);
+    }
+    if let Some(model) = model_spec.strip_prefix("openrouter:") {
+        return build(model, "openrouter", false, false);
+    }
+
+    match provider_family.map(str::trim) {
+        Some("openrouter") => build(model_spec, "openrouter", false, false),
+        Some("vercel-ai-gateway") => build(
+            model_spec,
+            "openai-compatible:vercel-ai-gateway",
+            false,
+            false,
+        ),
+        _ => None,
+    }
 }
 
 /// Update cost calculation based on token usage (for API-key providers)
@@ -193,8 +264,20 @@ impl App {
         let is_anthropic = provider_name.contains("anthropic") || provider_name.contains("claude");
         let is_openai = provider_name.contains("openai");
 
+        let provider_model = self.provider.model().to_string();
+        let auto_state = self.provider.auto_state_snapshot();
+        let auto_identity = auto_pricing_identity(
+            &provider_model,
+            self.provider.auto_last_resolved_model().as_deref(),
+            auto_state.as_ref(),
+        );
+
         // Whether the user is billed per token for this turn (direct API key).
-        let billed_per_token = if provider_name.contains("openrouter") {
+        let billed_per_token = if auto_identity.is_some() {
+            true
+        } else if provider_model.trim() == "jcode-auto" {
+            false
+        } else if provider_name.contains("openrouter") {
             crate::provider::openrouter::OpenRouterTransportState::from_current_env(
                 runtime_provider.as_deref(),
             )
@@ -223,8 +306,17 @@ impl App {
             return;
         }
 
-        let model = self.provider.model().to_string();
-        self.refresh_cached_pricing(&model, is_anthropic, is_openai);
+        let (model, source_key, is_anthropic, is_openai) = if let Some(identity) = auto_identity {
+            (
+                identity.model,
+                Some(identity.source_key),
+                identity.is_anthropic,
+                identity.is_openai,
+            )
+        } else {
+            (provider_model, None, is_anthropic, is_openai)
+        };
+        self.refresh_cached_pricing(&model, is_anthropic, is_openai, source_key.as_deref());
 
         // Pricing in $/1M tokens. Anthropic resolves real per-model pricing in
         // refresh_cached_pricing; other providers fall back to the generic
@@ -238,6 +330,7 @@ impl App {
             completion_price,
             cache_read_price,
             is_anthropic,
+            spend_source_key: source_key,
         };
 
         let call_cost = pricing.cost_for_usage(
@@ -247,7 +340,7 @@ impl App {
             self.streaming.streaming_cache_creation_tokens.unwrap_or(0),
         );
         self.cost.total_cost += call_cost;
-        self.record_api_key_spend(call_cost);
+        self.record_api_key_spend(call_cost, pricing.spend_source_key.as_deref());
     }
 
     /// Accrue the dollar cost of a single completed remote API call.
@@ -285,7 +378,7 @@ impl App {
             cache_creation_delta,
         );
         self.cost.total_cost += call_cost;
-        self.record_api_key_spend(call_cost);
+        self.record_api_key_spend(call_cost, pricing.spend_source_key.as_deref());
     }
 
     /// Seed `cost.total_cost` from token totals restored when resuming a
@@ -324,15 +417,16 @@ impl App {
     /// `/usage` can show per-login spend (today / month / all-time). Only ever
     /// called from the billed-per-token paths, so every dollar recorded here
     /// is real API-key spend rather than subscription usage.
-    fn record_api_key_spend(&self, call_cost: f32) {
+    fn record_api_key_spend(&self, call_cost: f32, source_key_override: Option<&str>) {
         if !call_cost.is_finite() || call_cost <= 0.0 {
             return;
         }
         use crate::tui::TuiState;
-        let label = <Self as TuiState>::provider_name(self);
-        let runtime = active_runtime_provider_key();
-        let source_key =
-            crate::provider_activity::source_key_for_provider_label(&label, runtime.as_deref());
+        let source_key = source_key_override.map(str::to_string).unwrap_or_else(|| {
+            let label = <Self as TuiState>::provider_name(self);
+            let runtime = active_runtime_provider_key();
+            crate::provider_activity::source_key_for_provider_label(&label, runtime.as_deref())
+        });
         let cost = call_cost as f64;
         // Ledger writes hit the filesystem; never block the render/input loop.
         std::thread::spawn(move || {
@@ -350,10 +444,23 @@ impl App {
             return None;
         }
 
-        let model = <Self as TuiState>::provider_model(self);
+        let provider_model = <Self as TuiState>::provider_model(self);
+        let auto_identity = auto_pricing_identity(
+            &provider_model,
+            self.remote_resolved_model.as_deref(),
+            self.remote_auto_state.as_ref(),
+        );
         let provider_name = <Self as TuiState>::provider_name(self).to_lowercase();
-        let is_anthropic = provider_name.contains("anthropic") || provider_name.contains("claude");
-        let is_openai = provider_name.contains("openai");
+        let is_anthropic = auto_identity
+            .as_ref()
+            .map(|identity| identity.is_anthropic)
+            .unwrap_or_else(|| {
+                provider_name.contains("anthropic") || provider_name.contains("claude")
+            });
+        let is_openai = auto_identity
+            .as_ref()
+            .map(|identity| identity.is_openai)
+            .unwrap_or_else(|| provider_name.contains("openai"));
 
         // The server resolves the active credential authoritatively; only bill
         // when it is an API key (OAuth subscriptions are not metered per token).
@@ -365,7 +472,11 @@ impl App {
         // For dual-auth providers (Anthropic/OpenAI) we require an API-key
         // credential. Other cost-based providers (OpenCode, OpenRouter direct,
         // bedrock-style API-key profiles) always meter per token when remote.
-        let billed = if is_anthropic || is_openai {
+        let billed = if auto_identity.is_some() {
+            true
+        } else if provider_model.trim() == "jcode-auto" {
+            false
+        } else if is_anthropic || is_openai {
             api_key_billed
         } else {
             // Providers that are inherently cost-based when proxied remotely.
@@ -375,12 +486,16 @@ impl App {
             return None;
         }
 
-        self.refresh_cached_pricing(&model, is_anthropic, is_openai);
+        let (model, source_key) = auto_identity
+            .map(|identity| (identity.model, Some(identity.source_key)))
+            .unwrap_or((provider_model, None));
+        self.refresh_cached_pricing(&model, is_anthropic, is_openai, source_key.as_deref());
         Some(ResolvedTokenPricing {
             prompt_price: *self.cost.cached_prompt_price.get_or_insert(15.0),
             completion_price: *self.cost.cached_completion_price.get_or_insert(60.0),
             cache_read_price: self.cost.cached_cache_read_price,
             is_anthropic,
+            spend_source_key: source_key,
         })
     }
 
@@ -391,19 +506,17 @@ impl App {
     /// service tier (`/fast on` priority, OpenAI flex), which changes
     /// per-token rates on premium models. Re-resolves when the model or tier
     /// changes.
-    fn refresh_cached_pricing(&mut self, model: &str, is_anthropic: bool, is_openai: bool) {
+    fn refresh_cached_pricing(
+        &mut self,
+        model: &str,
+        is_anthropic: bool,
+        is_openai: bool,
+        source_key_override: Option<&str>,
+    ) {
         let service_tier = self.active_service_tier_for_pricing();
-        // Tier is part of the memo key so toggling `/fast on` re-prices.
-        let price_key = match service_tier.as_deref() {
-            Some(tier) => format!("{model}|{tier}"),
-            None => model.to_string(),
-        };
-        if self.cost.cached_price_model.as_deref() == Some(price_key.as_str()) {
-            return;
-        }
-
-        let per_mtok = |micros: Option<u64>| micros.map(|m| m as f32 / 1_000_000.0);
-        let source_key = if is_anthropic {
+        let source_key = if let Some(source_key) = source_key_override {
+            source_key.to_string()
+        } else if is_anthropic {
             "claude:api-key".to_string()
         } else if is_openai {
             "openai:api-key".to_string()
@@ -413,6 +526,16 @@ impl App {
             let runtime = active_runtime_provider_key();
             crate::provider_activity::source_key_for_provider_label(&label, runtime.as_deref())
         };
+        // Tier is part of the memo key so toggling `/fast on` re-prices.
+        let price_key = match service_tier.as_deref() {
+            Some(tier) => format!("{source_key}|{model}|{tier}"),
+            None => format!("{source_key}|{model}"),
+        };
+        if self.cost.cached_price_model.as_deref() == Some(price_key.as_str()) {
+            return;
+        }
+
+        let per_mtok = |micros: Option<u64>| micros.map(|m| m as f32 / 1_000_000.0);
         let estimate = crate::provider::pricing::metered_pricing_for_source_with_tier(
             &source_key,
             model,
@@ -565,7 +688,7 @@ impl App {
 
 #[cfg(test)]
 mod tests {
-    use super::remote_provider_is_inherently_billed;
+    use super::{auto_pricing_identity, remote_provider_is_inherently_billed};
 
     #[test]
     fn remote_billing_recognizes_deepseek_display_name() {
@@ -580,5 +703,31 @@ mod tests {
                 "{provider_name} should not be billed per token"
             );
         }
+    }
+
+    #[test]
+    fn auto_pricing_identity_uses_resolved_concrete_gateway_model() {
+        let state = jcode_provider_core::AutoRouterStateSnapshot {
+            active: true,
+            last_resolved: Some(jcode_provider_core::AutoRouterDecisionSnapshot {
+                tier: "fast".to_string(),
+                model_spec: "vercel-ai-gateway:zai/glm-5.3-flash".to_string(),
+                provider_family: "vercel-ai-gateway".to_string(),
+                reason: "mechanical".to_string(),
+            }),
+            decisions_tail: Vec::new(),
+        };
+
+        let identity = auto_pricing_identity("jcode-auto", None, Some(&state))
+            .expect("resolved auto pricing identity");
+
+        assert_eq!(identity.model, "zai/glm-5.3-flash");
+        assert_eq!(identity.source_key, "openai-compatible:vercel-ai-gateway");
+    }
+
+    #[test]
+    fn auto_pricing_identity_never_prices_the_virtual_id() {
+        assert!(auto_pricing_identity("jcode-auto", Some("jcode-auto"), None).is_none());
+        assert!(auto_pricing_identity("jcode-auto", None, None).is_none());
     }
 }

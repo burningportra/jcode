@@ -2139,6 +2139,14 @@ impl Provider for MultiProvider {
         Ok(())
     }
 
+    fn clear_forced_auto_tier(&self) {
+        let mut state = self
+            .auto_route_state
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        state.clear_forced_next_tier();
+    }
+
     fn explicit_provider_pin_for_current_model(&self) -> Option<String> {
         matches!(self.active_provider(), ActiveProvider::OpenRouter)
             .then(|| self.active_openrouter_execution_provider())

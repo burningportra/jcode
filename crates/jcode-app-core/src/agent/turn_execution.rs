@@ -293,6 +293,7 @@ impl Agent {
         self.session.updated_at = chrono::Utc::now();
         self.provider_session_id = None;
         self.session.provider_session_id = None;
+        self.provider.clear_forced_auto_tier();
         self.cache_tracker.reset();
         self.locked_tools = None;
         self.reset_tool_output_tracking();

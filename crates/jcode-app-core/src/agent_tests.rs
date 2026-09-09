@@ -23,6 +23,50 @@ struct NativeAutoCompactionProvider;
 
 struct NativeCompactionStreamProvider;
 
+#[derive(Clone, Default)]
+struct RewindAutoTierProvider {
+    cleared: Arc<std::sync::atomic::AtomicUsize>,
+    last_resolved: Option<&'static str>,
+}
+
+#[async_trait]
+impl Provider for RewindAutoTierProvider {
+    async fn complete(
+        &self,
+        _messages: &[Message],
+        _tools: &[ToolDefinition],
+        _system: &str,
+        _resume_session_id: Option<&str>,
+    ) -> Result<EventStream> {
+        unreachable!("RewindAutoTierProvider does not complete requests")
+    }
+
+    fn name(&self) -> &str {
+        "openrouter"
+    }
+
+    fn model(&self) -> String {
+        "jcode-auto".to_string()
+    }
+
+    fn auto_last_resolved_model(&self) -> Option<String> {
+        self.last_resolved.map(str::to_string)
+    }
+
+    fn set_model(&self, _model: &str) -> Result<()> {
+        Ok(())
+    }
+
+    fn clear_forced_auto_tier(&self) {
+        self.cleared
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    fn fork(&self) -> Arc<dyn Provider> {
+        Arc::new(self.clone())
+    }
+}
+
 #[derive(Clone)]
 struct ExplicitPinProvider {
     model: Arc<std::sync::Mutex<String>>,
@@ -155,6 +199,87 @@ fn stale_agent_drop_preserves_successor_session_tool_policy() {
     assert_eq!(
         crate::tool::session_tool_policy_allows_tool_for_test(&session_id, "read"),
         None
+    );
+}
+
+#[test]
+fn rewind_clears_provider_forced_auto_tier_without_resetting_auto_state() {
+    let provider = Arc::new(RewindAutoTierProvider::default());
+    let cleared = provider.cleared.clone();
+    let mut session = Session::create(None, None);
+    session.model = Some("jcode-auto".to_string());
+    session.add_message(
+        Role::User,
+        vec![ContentBlock::Text {
+            text: "first".to_string(),
+            cache_control: None,
+        }],
+    );
+    session.add_message(
+        Role::Assistant,
+        vec![ContentBlock::Text {
+            text: "second".to_string(),
+            cache_control: None,
+        }],
+    );
+
+    let mut agent = Agent::new_with_session(provider, Registry::empty(), session, None);
+
+    assert_eq!(agent.rewind_to_message(1), Ok(1));
+    assert_eq!(
+        cleared.load(std::sync::atomic::Ordering::SeqCst),
+        1,
+        "rewind must clear a stale one-turn /auto tier override on provider state"
+    );
+    assert_eq!(agent.provider_model(), "jcode-auto");
+}
+
+#[test]
+fn telemetry_model_for_provider_never_reports_virtual_auto_model() {
+    let unresolved = RewindAutoTierProvider::default();
+    assert_eq!(telemetry_model_for_provider(&unresolved), "auto-unresolved");
+
+    let resolved = RewindAutoTierProvider {
+        cleared: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+        last_resolved: Some("vercel-ai-gateway:zai/glm-5.3-flash"),
+    };
+    assert_eq!(
+        telemetry_model_for_provider(&resolved),
+        "vercel-ai-gateway:zai/glm-5.3-flash"
+    );
+}
+
+#[tokio::test]
+async fn provider_auto_route_state_survives_session_compaction() {
+    let provider = Arc::new(RewindAutoTierProvider {
+        cleared: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+        last_resolved: Some("openai-api:gpt-5.5"),
+    });
+    let registry = Registry::new(provider.clone()).await;
+    let mut agent = Agent::new(provider.clone(), registry);
+    agent.add_message(
+        Role::User,
+        vec![ContentBlock::Text {
+            text: "first".to_string(),
+            cache_control: None,
+        }],
+    );
+    agent.add_message(
+        Role::Assistant,
+        vec![ContentBlock::Text {
+            text: "second".to_string(),
+            cache_control: None,
+        }],
+    );
+
+    agent
+        .apply_openai_native_compaction("enc_auto_state".to_string(), 1)
+        .expect("apply native compaction");
+
+    assert_eq!(
+        provider.auto_last_resolved_model().as_deref(),
+        Some("openai-api:gpt-5.5"),
+        "provider-side AutoRouteState must survive session compaction"
     );
 }
 

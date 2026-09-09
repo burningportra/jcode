@@ -864,6 +864,41 @@ fn multi_provider_fork_preserves_virtual_auto_state_and_last_resolved_decision()
 }
 
 #[test]
+fn multi_provider_clear_forced_auto_tier_preserves_resolved_auto_state() {
+    with_clean_provider_test_env(|| {
+        let rt = enter_test_runtime();
+        let _runtime_guard = rt.enter();
+        let provider = test_multi_provider_with_openai();
+        {
+            let mut state = provider
+                .auto_route_state
+                .write()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            state.force_next_tier(auto_router::AutoTier::Fast);
+            state.record_decision(
+                auto_router::TurnCategory::Implementation,
+                auto_router::AutoDecision {
+                    tier: auto_router::AutoTier::Implement,
+                    model_spec: "openai:gpt-5.5".to_string(),
+                    provider_family: "openai".to_string(),
+                    reason: "test decision".to_string(),
+                    at: std::time::Instant::now(),
+                },
+            );
+        }
+
+        provider.clear_forced_auto_tier();
+        let state = provider.auto_route_state_snapshot();
+        assert_eq!(state.forced_next_tier, None);
+        assert_eq!(
+            state.last_resolved.map(|decision| decision.model_spec),
+            Some("openai:gpt-5.5".to_string()),
+            "rewind must clear only the one-turn tier force, not auto routing history"
+        );
+    });
+}
+
+#[test]
 fn openai_model_switch_prefixes_preserve_oauth_vs_api_state_space() {
     with_clean_provider_test_env(|| {
         let rt = enter_test_runtime();
