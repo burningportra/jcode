@@ -85,6 +85,7 @@ pub fn create_goal(input: GoalCreateInput, working_dir: Option<&Path>) -> Result
     goal.why = input.why.unwrap_or_default().trim().to_string();
     goal.success_criteria = trim_vec(input.success_criteria);
     goal.milestones = input.milestones;
+    jcode_task_types::normalize_milestones(&mut goal.milestones);
     goal.next_steps = trim_vec(input.next_steps);
     goal.blockers = trim_vec(input.blockers);
     goal.current_milestone_id = input.current_milestone_id;
@@ -127,6 +128,7 @@ pub fn update_goal(
     }
     if let Some(milestones) = update.milestones {
         goal.milestones = milestones;
+        jcode_task_types::normalize_milestones(&mut goal.milestones);
     }
     if let Some(next_steps) = update.next_steps {
         goal.next_steps = trim_vec(next_steps);

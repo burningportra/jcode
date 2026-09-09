@@ -640,3 +640,19 @@ async fn initiative_list_invalid_format_errors() {
         crate::env::remove_var("JCODE_HOME");
     }
 }
+
+#[test]
+fn initiative_accepts_milestones_without_ids() {
+    let milestones: Vec<jcode_task_types::GoalMilestone> = serde_json::from_value(serde_json::json!([
+        {"title": "Design", "steps": [{"content": "sketch types"}]},
+        {"content": "Ship", "steps": [{"description": "release"}]}
+    ]))
+    .expect("lenient milestone parse");
+    let mut milestones = milestones;
+    jcode_task_types::normalize_milestones(&mut milestones);
+    assert_eq!(milestones[0].id, "design");
+    assert_eq!(milestones[0].steps[0].id, "sketch-types");
+    assert_eq!(milestones[1].title, "Ship");
+    assert_eq!(milestones[1].steps[0].content, "release");
+    assert_eq!(milestones[0].status, "pending");
+}

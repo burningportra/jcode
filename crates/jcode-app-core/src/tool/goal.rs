@@ -123,6 +123,12 @@ struct GoalInput {
 fn goal_step_schema() -> Value {
     json!({
         "type": "object",
+        "required": ["content"],
+        "properties": {
+            "id": {"type": "string", "description": "Optional slug; derived from content when omitted."},
+            "content": {"type": "string", "description": "What this step does."},
+            "status": {"type": "string", "description": "pending (default), in_progress, completed, cancelled."}
+        },
         "additionalProperties": true
     })
 }
@@ -130,7 +136,11 @@ fn goal_step_schema() -> Value {
 fn goal_milestone_schema() -> Value {
     json!({
         "type": "object",
+        "required": ["title"],
         "properties": {
+            "id": {"type": "string", "description": "Optional slug; derived from title when omitted."},
+            "title": {"type": "string", "description": "Milestone name."},
+            "status": {"type": "string", "description": "pending (default), in_progress, completed, cancelled."},
             "steps": {
                 "type": "array",
                 "items": goal_step_schema()
@@ -186,7 +196,13 @@ impl Tool for InitiativeTool {
     }
 
     async fn execute(&self, input: Value, ctx: ToolContext) -> Result<ToolOutput> {
-        let params: GoalInput = serde_json::from_value(input)?;
+        let params: GoalInput = serde_json::from_value(input).map_err(|e| {
+            anyhow::anyhow!(
+                "invalid initiative parameters: {e}. milestones take \
+                 [{{\"title\":\"...\",\"steps\":[{{\"content\":\"...\"}}]}}]; \
+                 ids and status are optional."
+            )
+        })?;
         let action_label = params.action.clone();
         let goal_id_label = params.id.clone().unwrap_or_else(|| "<none>".to_string());
         let working_dir = ctx.working_dir.as_deref();

@@ -84,7 +84,10 @@ impl GoalStatus {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct GoalStep {
+    /// Stable slug. Auto-derived from `content` when the caller omits it.
+    #[serde(default)]
     pub id: String,
+    #[serde(alias = "title", alias = "text", alias = "step", alias = "description")]
     pub content: String,
     #[serde(default = "default_pending_status")]
     pub status: String,
@@ -92,12 +95,40 @@ pub struct GoalStep {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct GoalMilestone {
+    /// Stable slug. Auto-derived from `title` when the caller omits it.
+    #[serde(default)]
     pub id: String,
+    #[serde(alias = "content", alias = "name", alias = "text", alias = "milestone")]
     pub title: String,
     #[serde(default = "default_pending_status")]
     pub status: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub steps: Vec<GoalStep>,
+}
+
+/// Fill in any ids the caller omitted, keeping them unique and stable so
+/// `current_milestone_id` and step lookups still work.
+pub fn normalize_milestones(milestones: &mut [GoalMilestone]) {
+    for (mi, milestone) in milestones.iter_mut().enumerate() {
+        if milestone.id.trim().is_empty() {
+            let slug = slugify(&milestone.title);
+            milestone.id = if slug.is_empty() {
+                format!("m{}", mi + 1)
+            } else {
+                slug
+            };
+        }
+        for (si, step) in milestone.steps.iter_mut().enumerate() {
+            if step.id.trim().is_empty() {
+                let slug = slugify(&step.content);
+                step.id = if slug.is_empty() {
+                    format!("{}-s{}", milestone.id, si + 1)
+                } else {
+                    slug
+                };
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
