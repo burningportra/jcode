@@ -132,6 +132,10 @@ what the refine loop and the reviewers work against. The initiative
 (`initiative create` with `title`, `why`, `description`, `success_criteria`,
 `milestones`) is the durable index that points at it and tracks convergence.
 
+`milestones` is an array of objects, each `{"title": "...", "steps":
+[{"content": "..."}]}`. `id` and `status` are optional (ids are slugged from the
+title/content; status defaults to `pending`).
+
 - Make each unit **self-documenting for "future self"**: include background,
   reasoning, and how it serves the over-arching goal. A stranger with no context
   should be able to act on it.
