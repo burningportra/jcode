@@ -9,7 +9,7 @@ use std::collections::{HashMap, HashSet};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[path = "inline_interactive/helpers.rs"]
-mod helpers;
+pub(super) mod helpers;
 #[path = "inline_interactive/openers.rs"]
 mod openers;
 #[path = "inline_interactive/preview.rs"]
@@ -1151,7 +1151,7 @@ impl App {
         )
     }
 
-    pub(super) fn open_model_picker(&mut self) {
+    pub(crate) fn open_model_picker(&mut self) {
         self.open_model_picker_inner(false);
     }
 
@@ -1461,7 +1461,7 @@ impl App {
         });
     }
 
-    pub(super) fn poll_model_picker_load(&mut self) -> bool {
+    pub(crate) fn poll_model_picker_load(&mut self) -> bool {
         let Some(pending) = self.pending_model_picker_load.as_ref() else {
             return false;
         };
@@ -3323,7 +3323,28 @@ impl App {
                     Self::apply_inline_interactive_filter(picker);
                     return Ok(());
                 }
-                self.inline_interactive_state = None;
+                let back_target = self.inline_interactive_state.as_ref().and_then(|picker| {
+                    if picker.is_routing_role_detail_picker() || picker.is_routing_model_picker() {
+                        picker
+                            .entries
+                            .first()
+                            .and_then(|entry| match &entry.action {
+                                PickerAction::RoutingRolePrimaryModel { role }
+                                | PickerAction::RoutingRoleFallbackToggle { role }
+                                | PickerAction::RoutingRoleFallbackClear { role }
+                                | PickerAction::RoutingModelChoice { role, .. } => {
+                                    Some(role.clone())
+                                }
+                                _ => None,
+                            })
+                    } else {
+                        None
+                    }
+                });
+                match back_target {
+                    Some(role) => self.open_routing_role_picker(&role),
+                    None => self.inline_interactive_state = None,
+                }
             }
             KeyCode::Up | KeyCode::Char('k') => {
                 let vim_nav = self
@@ -3560,7 +3581,10 @@ impl App {
                     return Ok(());
                 }
 
-                if matches!(entry.action, PickerAction::Model) {
+                if matches!(
+                    entry.action,
+                    PickerAction::Model | PickerAction::RoutingModelChoice { .. }
+                ) {
                     if picker.column == 0 && entry.options.len() > 1 {
                         picker.column = 1;
                         return Ok(());
@@ -3571,7 +3595,18 @@ impl App {
                     }
                 }
 
-                let route = &entry.options[entry.selected_option];
+                // Routing rows always carry exactly one option; keep Enter on the
+                // role/detail pickers as an immediate selection.
+                let route_owned = entry.options.get(entry.selected_option).cloned().unwrap_or(
+                    crate::tui::PickerOption {
+                        provider: String::new(),
+                        api_method: String::new(),
+                        available: true,
+                        detail: String::new(),
+                        estimated_reference_cost_micros: None,
+                    },
+                );
+                let route = &route_owned;
 
                 if !route.available {
                     let detail = if route.detail.is_empty() {
@@ -3635,10 +3670,104 @@ impl App {
                         self.inline_interactive_state = None;
                         match crate::config::Config::set_agents_default_role(role.as_deref()) {
                             Ok(()) => {
-                                self.push_display_message(DisplayMessage::system(super::commands::routing::summary()));
+                                self.push_display_message(DisplayMessage::system(
+                                    super::commands::routing::summary(),
+                                ));
                                 self.set_status_notice("Worker routing saved");
                             }
-                            Err(error) => self.push_display_message(DisplayMessage::error(format!("Failed to save worker routing: {error}"))),
+                            Err(error) => self.push_display_message(DisplayMessage::error(
+                                format!("Failed to save worker routing: {error}"),
+                            )),
+                        }
+                    }
+                    PickerAction::RoutingRole(role) => {
+                        self.open_routing_role_picker(&role);
+                    }
+                    PickerAction::RoutingRolePrimaryModel { role } => {
+                        self.open_routing_model_picker(&role, false);
+                    }
+                    PickerAction::RoutingRoleFallbackToggle { role } => {
+                        self.open_routing_model_picker(&role, true);
+                    }
+                    PickerAction::RoutingRoleFallbackClear { role } => {
+                        match crate::config::Config::set_agents_role_fallbacks(&role, &[]) {
+                            Ok(()) => {
+                                self.push_display_message(DisplayMessage::system(format!(
+                                    "Cleared fallbacks for worker role '{role}'."
+                                )));
+                                self.set_status_notice("Worker routing saved");
+                                self.open_routing_role_picker(&role);
+                            }
+                            Err(error) => self.push_display_message(DisplayMessage::error(
+                                format!("Failed to clear fallbacks for '{role}': {error}"),
+                            )),
+                        }
+                    }
+                    PickerAction::RoutingModelChoice { ref role, fallback } => {
+                        if !route.available {
+                            self.push_display_message(DisplayMessage::error(format!(
+                                "Route {} via {} is unavailable: {}",
+                                entry.name,
+                                route.provider,
+                                if route.detail.is_empty() {
+                                    "not available".to_string()
+                                } else {
+                                    route.detail.clone()
+                                },
+                            )));
+                            self.set_status_notice("Route unavailable");
+                            return Ok(());
+                        }
+                        let spec = model_entry_saved_spec(&entry);
+                        if fallback {
+                            let current = match crate::config::Config::load_strict() {
+                                Ok(config) => config
+                                    .agents
+                                    .roles
+                                    .get(role.as_str())
+                                    .map(|policy| policy.fallbacks.clone())
+                                    .unwrap_or_default(),
+                                Err(error) => {
+                                    self.push_display_message(DisplayMessage::error(format!(
+                                        "Worker routing configuration error: {error}"
+                                    )));
+                                    return Ok(());
+                                }
+                            };
+                            let mut next = current;
+                            if next.iter().any(|item| item == &spec) {
+                                next.retain(|item| item != &spec);
+                            } else {
+                                next.push(spec.clone());
+                            }
+                            match crate::config::Config::set_agents_role_fallbacks(&role, &next) {
+                                Ok(()) => {
+                                    let removed = !next.iter().any(|item| item == &spec);
+                                    self.push_display_message(DisplayMessage::system(format!(
+                                        "{} `{spec}` {} fallbacks for worker role '{role}'.",
+                                        if removed { "Removed" } else { "Added" },
+                                        if removed { "from" } else { "to" },
+                                    )));
+                                    self.set_status_notice("Worker routing saved");
+                                    self.open_routing_role_picker(&role);
+                                }
+                                Err(error) => self.push_display_message(DisplayMessage::error(
+                                    format!("Failed to save fallbacks for '{role}': {error}"),
+                                )),
+                            }
+                        } else {
+                            match crate::config::Config::set_agents_role_model(&role, &spec) {
+                                Ok(()) => {
+                                    self.push_display_message(DisplayMessage::system(format!(
+                                        "Saved primary model for worker role '{role}': `{spec}`."
+                                    )));
+                                    self.set_status_notice("Worker routing saved");
+                                    self.open_routing_role_picker(&role);
+                                }
+                                Err(error) => self.push_display_message(DisplayMessage::error(
+                                    format!("Failed to save primary model for '{role}': {error}"),
+                                )),
+                            }
                         }
                     }
                     PickerAction::AgentTarget(target) => {

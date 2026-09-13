@@ -73,3 +73,65 @@ fn routing_settings_reject_malformed_config_without_writing() {
         assert_eq!(std::fs::read_to_string(path).unwrap(), malformed);
     });
 }
+
+#[test]
+fn routing_settings_role_model_update_preserves_other_settings() {
+    with_config(CONFIG, |path| {
+        Config::set_agents_role_model("reviewer", "claude-api:claude-opus-4-6").unwrap();
+        let saved: Config = toml::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        assert_eq!(
+            saved.agents.roles["reviewer"].model,
+            "claude-api:claude-opus-4-6"
+        );
+        assert_eq!(
+            saved.agents.roles["implementer"].model,
+            "cerebras:qwen-3.8-27b"
+        );
+        assert_eq!(
+            saved.agents.roles["implementer"].fallbacks,
+            vec!["cerebras:gpt-oss-120b"]
+        );
+        assert_eq!(saved.provider.default_model.as_deref(), Some("gpt-6-astra"));
+    });
+}
+
+#[test]
+fn routing_settings_role_fallback_update_dedupes_and_keeps_primary() {
+    with_config(CONFIG, |path| {
+        Config::set_agents_role_fallbacks(
+            "reviewer",
+            &[
+                "cerebras:gpt-oss-120b".to_string(),
+                "  ".to_string(),
+                "openai-api:gpt-6-astra".to_string(),
+                "cerebras:gpt-oss-120b".to_string(),
+            ],
+        )
+        .unwrap();
+        let saved: Config = toml::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        // The primary model is dropped from fallbacks while order is preserved.
+        assert_eq!(
+            saved.agents.roles["reviewer"].fallbacks,
+            vec!["cerebras:gpt-oss-120b"]
+        );
+        Config::set_agents_role_fallbacks("reviewer", &[]).unwrap();
+        let cleared: Config = toml::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        assert!(cleared.agents.roles["reviewer"].fallbacks.is_empty());
+    });
+}
+
+#[test]
+fn routing_settings_role_updates_reject_unknown_or_invalid_models() {
+    with_config(CONFIG, |path| {
+        for result in [
+            Config::set_agents_role_model("missing", "openai-api:gpt-6-astra"),
+            Config::set_agents_role_model("reviewer", "inherit"),
+            Config::set_agents_role_model("reviewer", "  "),
+            Config::set_agents_role_fallbacks("missing", &["openai-api:gpt-6-astra".to_string()]),
+            Config::set_agents_role_fallbacks("reviewer", &["auto".to_string()]),
+        ] {
+            assert!(result.is_err());
+        }
+        assert_eq!(std::fs::read_to_string(path).unwrap(), CONFIG);
+    });
+}

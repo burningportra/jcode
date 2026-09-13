@@ -1477,7 +1477,7 @@ pub(super) fn normalize_auto_tier(input: &str) -> Option<&'static str> {
 }
 
 pub(super) fn auto_tier_usage() -> &'static str {
-        "Usage: /auto-jcode [frontier|implement|fast]"
+    "Usage: /auto-jcode [frontier|implement|fast]"
 }
 
 pub(super) fn auto_tier_success_message(tier: &str) -> String {
@@ -1485,14 +1485,15 @@ pub(super) fn auto_tier_success_message(tier: &str) -> String {
 }
 
 pub(super) fn handle_auto_command(app: &mut App, trimmed: &str) -> bool {
-        if trimmed == "/auto-jcode" || trimmed == "/auto-jcode status" || trimmed == "/auto-jcode audit" {
+    if trimmed == "/auto-jcode" || trimmed == "/auto-jcode status" || trimmed == "/auto-jcode audit"
+    {
         app.push_display_message(DisplayMessage::system(format_auto_router_audit(
             app.provider.auto_state_snapshot().as_ref(),
         )));
         return true;
     }
 
-        let Some(rest) = trimmed.strip_prefix("/auto-jcode ") else {
+    let Some(rest) = trimmed.strip_prefix("/auto-jcode ") else {
         return false;
     };
     let rest = rest.trim();
@@ -1979,7 +1980,7 @@ pub(super) fn format_model_name_list(models: &[String], limit: usize) -> String 
     }
 }
 
-pub(super) fn no_models_available_message(is_remote: bool) -> String {
+pub(crate) fn no_models_available_message(is_remote: bool) -> String {
     let mut lines = vec![
         "No models are available right now.".to_string(),
         String::new(),

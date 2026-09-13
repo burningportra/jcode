@@ -1369,6 +1369,20 @@ pub enum PickerAction {
     },
     AgentTarget(AgentModelTarget),
     RoutingDefaultRole(Option<String>),
+    RoutingRole(String),
+    RoutingRolePrimaryModel {
+        role: String,
+    },
+    RoutingRoleFallbackToggle {
+        role: String,
+    },
+    RoutingRoleFallbackClear {
+        role: String,
+    },
+    RoutingModelChoice {
+        role: String,
+        fallback: bool,
+    },
     AgentModelChoice {
         target: AgentModelTarget,
         clear_override: bool,
@@ -1416,6 +1430,11 @@ impl InlineInteractiveState {
 fn estimate_picker_action_bytes(action: &PickerAction) -> usize {
     match action {
         PickerAction::RoutingDefaultRole(role) => role.as_ref().map_or(0, String::capacity),
+        PickerAction::RoutingRole(role)
+        | PickerAction::RoutingRolePrimaryModel { role }
+        | PickerAction::RoutingRoleFallbackToggle { role }
+        | PickerAction::RoutingRoleFallbackClear { role } => role.capacity(),
+        PickerAction::RoutingModelChoice { role, .. } => role.capacity(),
         PickerAction::Model
         | PickerAction::RemoteLogin { .. }
         | PickerAction::RemoteImportDecision { .. }
@@ -1493,16 +1512,99 @@ fn estimate_picker_entry_bytes(entry: &PickerEntry) -> usize {
 
 impl InlineInteractiveState {
     pub fn is_routing_picker(&self) -> bool {
-        !self.entries.is_empty() && self.entries.iter().all(|entry| matches!(entry.action, PickerAction::RoutingDefaultRole(_)))
+        !self.entries.is_empty()
+            && self.entries.iter().all(|entry| {
+                matches!(
+                    entry.action,
+                    PickerAction::RoutingDefaultRole(_)
+                        | PickerAction::RoutingRole(_)
+                        | PickerAction::RoutingRolePrimaryModel { .. }
+                        | PickerAction::RoutingRoleFallbackToggle { .. }
+                        | PickerAction::RoutingRoleFallbackClear { .. }
+                        | PickerAction::RoutingModelChoice { .. }
+                )
+            })
+    }
+
+    pub fn is_routing_role_picker(&self) -> bool {
+        !self.entries.is_empty()
+            && self.entries.iter().all(|entry| {
+                matches!(
+                    entry.action,
+                    PickerAction::RoutingDefaultRole(_) | PickerAction::RoutingRole(_)
+                )
+            })
+            && self
+                .entries
+                .iter()
+                .any(|entry| matches!(entry.action, PickerAction::RoutingRole(_)))
+    }
+
+    pub fn is_routing_role_detail_picker(&self) -> bool {
+        !self.entries.is_empty()
+            && self.entries.iter().all(|entry| {
+                matches!(
+                    entry.action,
+                    PickerAction::RoutingDefaultRole(_)
+                        | PickerAction::RoutingRolePrimaryModel { .. }
+                        | PickerAction::RoutingRoleFallbackToggle { .. }
+                        | PickerAction::RoutingRoleFallbackClear { .. }
+                )
+            })
+            && self.entries.iter().any(|entry| {
+                matches!(
+                    entry.action,
+                    PickerAction::RoutingRolePrimaryModel { .. }
+                        | PickerAction::RoutingRoleFallbackToggle { .. }
+                        | PickerAction::RoutingRoleFallbackClear { .. }
+                )
+            })
+    }
+
+    pub fn is_routing_model_picker(&self) -> bool {
+        !self.entries.is_empty()
+            && self
+                .entries
+                .iter()
+                .all(|entry| matches!(entry.action, PickerAction::RoutingModelChoice { .. }))
     }
 
     pub fn schema(&self) -> InlineInteractiveSchema {
-        if self.is_routing_picker() {
+        if self.is_routing_role_detail_picker() {
             InlineInteractiveSchema {
-                layout: InlineInteractiveLayout::ThreeColumn, primary_label: "ROLE",
-                secondary_label: "PRIMARY ROUTE", secondary_preview_label: "PRIMARY ROUTE", tertiary_label: "POLICY",
-                preview_submit_hint: "  ↵ select role", active_submit_hint: "  ↑↓ ↵ select · Esc cancel",
-                shows_default_shortcut_hint: false, preview_activation_column: 0,
+                layout: InlineInteractiveLayout::ThreeColumn,
+                primary_label: "SETTING",
+                secondary_label: "VALUE",
+                secondary_preview_label: "VALUE",
+                tertiary_label: "ACTION",
+                preview_submit_hint: "  ↵ open",
+                active_submit_hint: "  ↑↓ ↵ select · Esc back",
+                shows_default_shortcut_hint: false,
+                preview_activation_column: 0,
+            }
+        } else if self.is_routing_model_picker() {
+            InlineInteractiveSchema {
+                layout: InlineInteractiveLayout::ThreeColumn,
+                primary_label: "MODEL",
+                secondary_label: "ROUTE",
+                secondary_preview_label: "ROUTE",
+                tertiary_label: "DETAIL",
+                preview_submit_hint: "  ↵ save",
+                active_submit_hint: "  ↑↓ ←→ ↵ save · Esc back",
+                shows_default_shortcut_hint: false,
+                preview_activation_column: 0,
+            }
+        } else if self.is_routing_picker() {
+            InlineInteractiveSchema {
+                layout: InlineInteractiveLayout::ThreeColumn,
+                primary_label: "ROLE",
+                secondary_label: "PRIMARY ROUTE",
+                secondary_preview_label: "PRIMARY ROUTE",
+                tertiary_label: "POLICY",
+                preview_submit_hint: "  ↵ open role",
+                active_submit_hint: "  ↑↓ ↵ open · Esc cancel",
+                shows_default_shortcut_hint: false,
+                preview_activation_column: 0,
             }
         } else if self.is_agent_target_picker() {
             InlineInteractiveSchema {

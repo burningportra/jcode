@@ -103,7 +103,7 @@ pub(super) fn save_agent_model_override(
     cfg.save()
 }
 
-pub(super) fn model_entry_base_name(entry: &PickerEntry) -> String {
+pub(crate) fn model_entry_base_name(entry: &PickerEntry) -> String {
     if entry.effort.is_some() {
         entry
             .name
@@ -181,7 +181,7 @@ pub(super) fn openai_compatible_profile_id_for_route(route: &PickerOption) -> Op
     }
 }
 
-pub(super) fn model_entry_saved_spec(entry: &PickerEntry) -> String {
+pub(crate) fn model_entry_saved_spec(entry: &PickerEntry) -> String {
     let bare_name = model_entry_base_name(entry);
     let route = entry.options.get(entry.selected_option);
     if let Some(route) = route {

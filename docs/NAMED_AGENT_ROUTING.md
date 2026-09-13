@@ -116,9 +116,15 @@ shared daemon. Build with `selfdev build target=tui` before running that smoke.
 ## TUI settings
 
 Run `/routing` to see the active default worker role, primary route and ordered
-fallbacks, and choose a different configured default role. Select **No default
+fallbacks, then press Enter on a role to open it. The role view sets that role
+as the default, picks its primary model from the live model catalog, toggles
+catalog models in or out of its ordered fallbacks, or clears all fallbacks.
+Picking a routing model only rewrites that role's `model`/`fallbacks` config;
+it never switches the main conversation model. Esc steps back from a model
+list to the role, and again to the role list. Select **No default
 role** to restore unnamed-worker routing. Explicit named roles remain available.
-Use `/routing show` for the summary without the picker, or `/routing edit` to edit
+Use `/routing <role>` to jump straight to one role, `/routing show` for the
+summary without the picker, or `/routing edit` to edit
 role models and fallbacks in `$VISUAL` or `$EDITOR`. Invalid configuration is
 reported instead of overwritten. `/config` and `/agents` also show the active
 worker-routing summary and link to this menu.

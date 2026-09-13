@@ -132,6 +132,57 @@ impl Config {
         config.save()
     }
 
+    /// Persist the primary model for a configured named worker role.
+    ///
+    /// Trims the model spec, validates it against the same concrete-model
+    /// rule as full config validation, refuses unknown roles, and performs a
+    /// read-modify-write so unrelated config is preserved.
+    pub fn set_agents_role_model(role: &str, model: &str) -> anyhow::Result<()> {
+        let role = role.trim();
+        let model = model.trim();
+        if role.is_empty() {
+            anyhow::bail!("Role name cannot be empty");
+        }
+        if model.is_empty() {
+            anyhow::bail!("Model cannot be empty");
+        }
+        let mut config = Self::load_for_update()?;
+        let Some(policy) = config.agents.roles.get_mut(role) else {
+            anyhow::bail!("Unknown worker role '{role}'");
+        };
+        policy.model = model.to_string();
+        config.agents.validate_roles().map_err(anyhow::Error::msg)?;
+        config.save()
+    }
+
+    /// Persist the ordered fallback list for a configured named worker role.
+    ///
+    /// Empty entries are dropped, duplicates are removed in order, the
+    /// primary model is never stored as its own fallback, and each remaining
+    /// spec must pass the concrete-model validation rule.
+    pub fn set_agents_role_fallbacks(role: &str, fallbacks: &[String]) -> anyhow::Result<()> {
+        let role = role.trim();
+        if role.is_empty() {
+            anyhow::bail!("Role name cannot be empty");
+        }
+        let mut config = Self::load_for_update()?;
+        let Some(policy) = config.agents.roles.get_mut(role) else {
+            anyhow::bail!("Unknown worker role '{role}'");
+        };
+        let primary = policy.model.clone();
+        let mut deduped = Vec::new();
+        for fallback in fallbacks {
+            let spec = fallback.trim();
+            if spec.is_empty() || spec == primary || deduped.iter().any(|item| item == spec) {
+                continue;
+            }
+            deduped.push(spec.to_string());
+        }
+        policy.fallbacks = deduped;
+        config.agents.validate_roles().map_err(anyhow::Error::msg)?;
+        config.save()
+    }
+
     /// Update the copilot premium mode in the config file.
     /// Reloads, patches, and saves so it doesn't clobber other fields.
     pub fn set_copilot_premium(mode: Option<&str>) -> anyhow::Result<()> {

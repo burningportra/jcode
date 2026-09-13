@@ -42,7 +42,7 @@ const REGISTERED_COMMANDS: &[RegisteredCommand] = &[
     RegisteredCommand::public("/commands", "Alias for /help"),
     RegisteredCommand::public("/model", "List or switch models"),
     RegisteredCommand::public("/models", "Alias for /model"),
-      RegisteredCommand::public("/auto-jcode", "Show auto-router audit or force one tier"),
+    RegisteredCommand::public("/auto-jcode", "Show auto-router audit or force one tier"),
     RegisteredCommand::public(
         "/provider-test-coverage",
         "Show live-test evidence for the current provider/model",
@@ -553,14 +553,27 @@ impl App {
         }
 
         if prefix.starts_with("/routing ") {
-            return [
-                ("/routing show", "Show active worker routing"),
-                ("/routing edit", "Edit role models and fallbacks"),
-            ]
-            .into_iter()
-            .filter(|(command, _)| command.starts_with(&prefix))
-            .map(|(command, description)| (command.into(), description))
-            .collect();
+            let mut candidates: Vec<(String, &'static str)> = vec![
+                ("/routing show".to_string(), "Show active worker routing"),
+                (
+                    "/routing edit".to_string(),
+                    "Edit role models and fallbacks in $EDITOR",
+                ),
+            ];
+            if let Ok(config) = crate::config::Config::load_strict() {
+                let mut roles: Vec<_> = config.agents.roles.keys().cloned().collect();
+                roles.sort();
+                for role in roles {
+                    candidates.push((
+                        format!("/routing {role}"),
+                        "Open role to pick primary and fallback models",
+                    ));
+                }
+            }
+            return candidates
+                .into_iter()
+                .filter(|(command, _)| command.starts_with(&prefix))
+                .collect();
         }
         if prefix.starts_with("/agents ") {
             return self.rank_suggestions(
@@ -804,8 +817,14 @@ impl App {
         if prefix_trimmed == "/auto-jcode" {
             return vec![
                 ("/auto-jcode".into(), "Show auto-router decision audit"),
-                ("/auto-jcode frontier".into(), "Force the next turn to frontier"),
-                ("/auto-jcode implement".into(), "Force the next turn to implement"),
+                (
+                    "/auto-jcode frontier".into(),
+                    "Force the next turn to frontier",
+                ),
+                (
+                    "/auto-jcode implement".into(),
+                    "Force the next turn to implement",
+                ),
                 ("/auto-jcode fast".into(), "Force the next turn to fast"),
             ];
         }

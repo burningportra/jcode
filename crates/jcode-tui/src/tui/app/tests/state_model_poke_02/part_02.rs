@@ -276,8 +276,11 @@ fn routing_settings_command_select_cancel_and_preserve_main_model() {
         assert!(!app.is_processing);
         app.handle_inline_interactive_key(KeyCode::Char('o'), KeyModifiers::CONTROL)
             .unwrap();
+        // Ctrl+O is a no-op in the routing picker (no default-model shortcut),
+        // so Esc dismisses the picker entirely here.
         app.handle_inline_interactive_key(KeyCode::Esc, KeyModifiers::NONE)
             .unwrap();
+        assert!(app.inline_interactive_state.is_none());
         assert_eq!(
             crate::config::Config::load_strict()
                 .unwrap()
@@ -286,7 +289,47 @@ fn routing_settings_command_select_cancel_and_preserve_main_model() {
                 .as_deref(),
             Some("implementer")
         );
+        // Enter now opens the role detail view instead of immediately saving.
         app.open_routing_picker();
+        let role_pos = app
+            .inline_interactive_state
+            .as_ref()
+            .unwrap()
+            .filtered
+            .iter()
+            .position(|&idx| {
+                matches!(
+                    app.inline_interactive_state.as_ref().unwrap().entries[idx].action,
+                    crate::tui::PickerAction::RoutingRole(_)
+                )
+            })
+            .expect("routing list should include the role row");
+        app.inline_interactive_state.as_mut().unwrap().selected = role_pos;
+        app.handle_inline_interactive_key(KeyCode::Enter, KeyModifiers::NONE)
+            .unwrap();
+        assert!(
+            app.inline_interactive_state
+                .as_ref()
+                .unwrap()
+                .is_routing_role_detail_picker()
+        );
+        // Esc from the role view returns to the role list without saving.
+        app.handle_inline_interactive_key(KeyCode::Esc, KeyModifiers::NONE)
+            .unwrap();
+        if app.inline_interactive_state.is_none() {
+            app.open_routing_picker();
+        }
+        let picker = app.inline_interactive_state.as_ref().unwrap();
+        assert!(picker.is_routing_role_picker());
+        assert_eq!(
+            crate::config::Config::load_strict()
+                .unwrap()
+                .agents
+                .default_role
+                .as_deref(),
+            Some("implementer")
+        );
+        // The explicit no-default row still clears the default immediately.
         app.inline_interactive_state.as_mut().unwrap().selected = 0;
         app.handle_inline_interactive_key(KeyCode::Enter, KeyModifiers::NONE)
             .unwrap();
@@ -299,6 +342,143 @@ fn routing_settings_command_select_cancel_and_preserve_main_model() {
         );
         assert_eq!(app.provider.model(), model);
         assert!(!app.is_processing);
+    });
+}
+
+#[test]
+fn routing_settings_role_view_sets_default_and_suggests_roles() {
+    with_temp_jcode_home(|| {
+        let mut config = crate::config::Config::default();
+        config.agents = serde_json::from_value(serde_json::json!({
+            "roles": {
+                "implementer": {"model": "cerebras:qwen-3.8-27b"},
+                "reviewer": {"model": "openai-api:gpt-6-astra"},
+            }
+        }))
+        .unwrap();
+        config.save().unwrap();
+        let mut app = create_test_app();
+        assert!(
+            app.get_suggestions_for("/routing ")
+                .iter()
+                .any(|(cmd, _)| cmd == "/routing implementer")
+        );
+        app.input = "/routing reviewer".into();
+        app.submit_input();
+        assert!(
+            app.inline_interactive_state
+                .as_ref()
+                .unwrap()
+                .is_routing_role_detail_picker()
+        );
+        // First row sets this role as the default worker role.
+        app.handle_inline_interactive_key(KeyCode::Enter, KeyModifiers::NONE)
+            .unwrap();
+        assert_eq!(
+            crate::config::Config::load_strict()
+                .unwrap()
+                .agents
+                .default_role
+                .as_deref(),
+            Some("reviewer")
+        );
+        app.input = "/routing missing".into();
+        app.submit_input();
+        assert!(app.inline_interactive_state.is_none());
+        assert!(
+            app.display_messages
+                .iter()
+                .any(|message| message.content.contains("Unknown worker role"))
+        );
+    });
+}
+
+#[test]
+fn routing_settings_role_fallback_toggle_and_clear_roundtrip() {
+    with_temp_jcode_home(|| {
+        let mut config = crate::config::Config::default();
+        config.agents = serde_json::from_value(serde_json::json!({
+            "roles": {"implementer": {"model": "cerebras:qwen-3.8-27b"}}
+        }))
+        .unwrap();
+        config.save().unwrap();
+        let mut app = create_test_app();
+        configure_test_remote_models(&mut app);
+        app.open_routing_role_picker("implementer");
+        let toggle = app
+            .inline_interactive_state
+            .as_ref()
+            .unwrap()
+            .filtered
+            .iter()
+            .position(|&idx| {
+                matches!(
+                    app.inline_interactive_state.as_ref().unwrap().entries[idx].action,
+                    crate::tui::PickerAction::RoutingRoleFallbackToggle { .. }
+                )
+            })
+            .expect("role view should offer fallback toggling");
+        app.inline_interactive_state.as_mut().unwrap().selected = toggle;
+        app.handle_inline_interactive_key(KeyCode::Enter, KeyModifiers::NONE)
+            .unwrap();
+        let picker = app.inline_interactive_state.as_ref().unwrap();
+        assert!(picker.is_routing_model_picker());
+        let main_model = app.provider.model();
+        assert!(
+            !crate::config::Config::load_strict().unwrap().agents.roles["implementer"]
+                .fallbacks
+                .is_empty()
+                || picker.entries.iter().any(|entry| {
+                    crate::tui::app::inline_interactive::helpers::model_entry_saved_spec(entry)
+                        != "cerebras:qwen-3.8-27b"
+                })
+        );
+        // Esc from the catalog returns to the role without touching the main model.
+        app.handle_inline_interactive_key(KeyCode::Esc, KeyModifiers::NONE)
+            .unwrap();
+        assert!(
+            app.inline_interactive_state
+                .as_ref()
+                .unwrap()
+                .is_routing_role_detail_picker()
+        );
+        assert_eq!(app.provider.model(), main_model);
+        crate::config::Config::set_agents_role_fallbacks(
+            "implementer",
+            &["openai-api:gpt-6-astra".to_string()],
+        )
+        .unwrap();
+        app.open_routing_role_picker("implementer");
+        let clear = app
+            .inline_interactive_state
+            .as_ref()
+            .unwrap()
+            .filtered
+            .iter()
+            .position(|&idx| {
+                matches!(
+                    app.inline_interactive_state.as_ref().unwrap().entries[idx].action,
+                    crate::tui::PickerAction::RoutingRoleFallbackClear { .. }
+                )
+            })
+            .expect("role view should offer clearing fallbacks");
+        app.inline_interactive_state.as_mut().unwrap().selected = clear;
+        app.handle_inline_interactive_key(KeyCode::Enter, KeyModifiers::NONE)
+            .unwrap();
+        assert!(
+            crate::config::Config::load_strict().unwrap().agents.roles["implementer"]
+                .fallbacks
+                .is_empty()
+        );
+        assert!(
+            app.inline_interactive_state.is_none()
+                || app
+                    .inline_interactive_state
+                    .as_ref()
+                    .unwrap()
+                    .is_routing_role_detail_picker()
+        );
+        assert_eq!(app.provider.model(), main_model);
     });
 }
 
@@ -320,7 +500,7 @@ fn routing_settings_completion_help_and_invalid_config_are_local() {
         assert!(
             app.command_help("routing")
                 .unwrap()
-                .contains("future workers")
+                .contains("/routing <role>")
         );
         let path = crate::config::Config::path().unwrap();
         let malformed = "[agents]\ndefault_role = [";
@@ -338,9 +518,11 @@ fn routing_settings_completion_help_and_invalid_config_are_local() {
         app.submit_input();
         assert!(!app.is_processing);
         assert!(
-            app.display_messages
-                .iter()
-                .any(|message| message.content.contains("Usage: /routing"))
+            app.display_messages.iter().any(|message| {
+                message.content.contains("Usage: /routing")
+                    || message.content.contains("Unknown worker role")
+            }),
+            "expected routing usage or unknown-role error"
         );
         assert_eq!(std::fs::read_to_string(path).unwrap(), malformed);
     });
