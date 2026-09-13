@@ -62,6 +62,7 @@ async fn assign_next_prefers_worker_with_dependency_context() {
     let mcp_pool = Arc::new(crate::mcp::SharedMcpPool::from_default_config());
 
     handle_comm_assign_next(
+        None,
         102,
         requester.to_string(),
         None,

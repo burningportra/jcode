@@ -102,6 +102,7 @@ fn communicate_input_accepts_cleanup_lifecycle_flags() {
 fn cleanup_candidates_default_to_owned_terminal_workers() {
     let members = vec![
         AgentInfo {
+            routing: None,
             session_id: "coord".to_string(),
             friendly_name: Some("coord".to_string()),
             files_touched: vec![],
@@ -116,6 +117,7 @@ fn cleanup_candidates_default_to_owned_terminal_workers() {
             ..Default::default()
         },
         AgentInfo {
+            routing: None,
             session_id: "owned-done".to_string(),
             friendly_name: Some("owned".to_string()),
             files_touched: vec![],
@@ -130,6 +132,7 @@ fn cleanup_candidates_default_to_owned_terminal_workers() {
             ..Default::default()
         },
         AgentInfo {
+            routing: None,
             session_id: "user-created".to_string(),
             friendly_name: Some("user".to_string()),
             files_touched: vec![],
@@ -144,6 +147,7 @@ fn cleanup_candidates_default_to_owned_terminal_workers() {
             ..Default::default()
         },
         AgentInfo {
+            routing: None,
             session_id: "owned-running".to_string(),
             friendly_name: Some("running".to_string()),
             files_touched: vec![],
@@ -211,6 +215,7 @@ fn format_members_includes_status_and_detail() {
     let output = format_members(
         &ctx,
         &[AgentInfo {
+            routing: None,
             session_id: "sess-peer".to_string(),
             friendly_name: Some("bear".to_string()),
             files_touched: vec!["src/main.rs".to_string()],
@@ -246,6 +251,7 @@ fn format_members_renders_activity_progress_churn_and_turns() {
     let output = format_members(
         &ctx,
         &[AgentInfo {
+            routing: None,
             session_id: "session_peer_1234567890_aaaaaaaaaaaa0001".to_string(),
             friendly_name: Some("otter".to_string()),
             files_touched: vec![],
@@ -304,6 +310,7 @@ fn format_members_labels_idle_ready_agent() {
     let output = format_members(
         &ctx,
         &[AgentInfo {
+            routing: None,
             session_id: "session_peer_1234567890_bbbbbbbbbbbb0002".to_string(),
             friendly_name: Some("idle-one".to_string()),
             files_touched: vec![],
@@ -332,6 +339,7 @@ fn format_members_disambiguates_duplicate_friendly_names() {
         &ctx,
         &[
             AgentInfo {
+                routing: None,
                 session_id: "session_shark_1234567890_aaaaaaaaaaaa0001".to_string(),
                 friendly_name: Some("shark".to_string()),
                 files_touched: vec![],
@@ -346,6 +354,7 @@ fn format_members_disambiguates_duplicate_friendly_names() {
                 ..Default::default()
             },
             AgentInfo {
+                routing: None,
                 session_id: "session_shark_1234567890_bbbbbbbbbbbb0002".to_string(),
                 friendly_name: Some("shark".to_string()),
                 files_touched: vec![],
@@ -396,6 +405,7 @@ fn format_awaited_members_disambiguates_duplicate_friendly_names() {
 #[test]
 fn format_status_snapshot_includes_activity_and_metadata() {
     let output = super::format_status_snapshot(&AgentStatusSnapshot {
+        routing: None,
         session_id: "sess-peer".to_string(),
         friendly_name: Some("bear".to_string()),
         swarm_id: Some("swarm-test".to_string()),

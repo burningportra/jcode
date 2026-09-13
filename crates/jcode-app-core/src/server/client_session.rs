@@ -387,6 +387,7 @@ async fn ensure_client_swarm_member(
             members.insert(
                 client_session_id.to_string(),
                 SwarmMember {
+                    routing: None,
                     session_id: client_session_id.to_string(),
                     event_tx: client_event_tx.clone(),
                     event_txs: HashMap::from([(

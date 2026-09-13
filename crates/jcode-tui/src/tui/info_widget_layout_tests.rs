@@ -59,6 +59,7 @@ fn contended_data() -> InfoWidgetData {
             // high-priority contender to the placement contention.
             managed_members: vec![
                 crate::protocol::SwarmMemberStatus {
+                    routing: None,
                     session_id: "worker-1".to_string(),
                     friendly_name: Some("worker-1".to_string()),
                     status: "running".to_string(),
@@ -75,6 +76,7 @@ fn contended_data() -> InfoWidgetData {
                     runtime: crate::protocol::SwarmMemberRuntime::default(),
                 },
                 crate::protocol::SwarmMemberStatus {
+                    routing: None,
                     session_id: "worker-2".to_string(),
                     friendly_name: Some("worker-2".to_string()),
                     status: "blocked".to_string(),

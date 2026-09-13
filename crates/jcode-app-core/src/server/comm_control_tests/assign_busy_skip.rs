@@ -151,6 +151,7 @@ async fn assign_task_does_not_stack_on_busy_worker() {
     let mutation_runtime = SwarmMutationRuntime::default();
 
     handle_comm_assign_task(
+        Ok(None),
         104,
         requester.to_string(),
         None,

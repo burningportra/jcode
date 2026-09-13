@@ -48,6 +48,7 @@ async fn assign_task_rejects_explicit_blocked_task() {
     let mutation_runtime = SwarmMutationRuntime::default();
 
     handle_comm_assign_task(
+        Ok(None),
         88,
         requester.to_string(),
         Some(worker.to_string()),

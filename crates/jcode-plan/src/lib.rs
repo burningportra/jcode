@@ -33,9 +33,21 @@ pub struct PlanItem {
     pub assigned_to: Option<String>,
 }
 
+/// Selected named routing policy, separate from swarm topology permissions.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AgentRoutingSelection {
+    pub agent_role: String,
+    pub model: String,
+    pub provider: String,
+    pub api_method: String,
+    pub provider_key: Option<String>,
+}
+
 /// Durable progress associated with a swarm plan task.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SwarmTaskProgress {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub routing: Option<AgentRoutingSelection>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub assigned_session_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

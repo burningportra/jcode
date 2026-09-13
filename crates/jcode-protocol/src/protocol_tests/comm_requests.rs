@@ -320,6 +320,7 @@ fn test_comm_task_control_roundtrip() -> Result<()> {
 fn test_comm_assign_task_roundtrip_without_explicit_task_id() -> Result<()> {
     let req = Request::CommAssignTask {
         id: 57,
+        agent_role: None,
         session_id: "sess_coord".to_string(),
         target_session: None,
         task_id: None,
@@ -378,6 +379,7 @@ fn test_comm_assign_task_response_roundtrip() -> Result<()> {
 fn test_comm_assign_next_roundtrip() -> Result<()> {
     let req = Request::CommAssignNext {
         id: 60,
+        agent_role: None,
         session_id: "sess_coord".to_string(),
         target_session: Some("sess_worker".to_string()),
         working_dir: Some("/tmp/project".to_string()),
@@ -449,6 +451,7 @@ fn test_comm_stop_roundtrip_with_force() -> Result<()> {
 fn test_comm_spawn_roundtrip_with_optional_nonce() -> Result<()> {
     let req = Request::CommSpawn {
         id: 59,
+        agent_role: None,
         session_id: "sess_coord".to_string(),
         working_dir: Some("/tmp/project".to_string()),
         initial_message: Some("Start here".to_string()),

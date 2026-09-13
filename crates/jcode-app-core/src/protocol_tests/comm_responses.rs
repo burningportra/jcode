@@ -155,6 +155,7 @@ fn test_comm_members_roundtrip_includes_status() -> Result<()> {
     let event = ServerEvent::CommMembers {
         id: 9,
         members: vec![AgentInfo {
+            routing: None,
             session_id: "sess-peer".to_string(),
             friendly_name: Some("bear".to_string()),
             files_touched: vec!["src/main.rs".to_string()],
@@ -213,6 +214,7 @@ fn test_comm_status_response_roundtrip() -> Result<()> {
     let event = ServerEvent::CommStatusResponse {
         id: 57,
         snapshot: AgentStatusSnapshot {
+            routing: None,
             session_id: "sess-peer".to_string(),
             friendly_name: Some("bear".to_string()),
             swarm_id: Some("swarm-test".to_string()),

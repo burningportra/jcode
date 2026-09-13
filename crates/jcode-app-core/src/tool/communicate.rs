@@ -1369,6 +1369,7 @@ async fn run_swarm_plan_loop(
         while slots_remaining > 0 {
             let request = Request::CommAssignNext {
                 id: REQUEST_ID,
+                agent_role: params.agent_role.clone(),
                 session_id: ctx.session_id.clone(),
                 target_session: params.target_session.clone(),
                 working_dir: params.working_dir.clone(),
@@ -1529,6 +1530,7 @@ async fn run_swarm_plan_loop(
 async fn spawn_assignment_session(ctx: &ToolContext, params: &CommunicateInput) -> Result<String> {
     let spawn_request = Request::CommSpawn {
         id: REQUEST_ID,
+        agent_role: params.agent_role.clone(),
         session_id: ctx.session_id.clone(),
         working_dir: params.working_dir.clone(),
         initial_message: None,
@@ -1564,6 +1566,7 @@ async fn assign_task_to_session(
 ) -> Result<ToolOutput> {
     let retry_request = Request::CommAssignTask {
         id: REQUEST_ID,
+        agent_role: params.agent_role.clone(),
         session_id: ctx.session_id.clone(),
         target_session: Some(target_session.clone()),
         task_id: params.task_id.clone(),
@@ -1931,6 +1934,8 @@ struct CommunicateInput {
     /// Takes precedence over agents.swarm_model; see list_models for routes.
     #[serde(default)]
     model: Option<String>,
+    #[serde(default)]
+    agent_role: Option<String>,
     /// Short human-readable label for a spawned agent shown in swarm UI.
     /// Required and nonblank for the explicit `spawn` action.
     #[serde(default)]
@@ -2145,9 +2150,13 @@ impl Tool for CommunicateTool {
                     "enum": ["visible", "headless", "inline", "auto"],
                     "description": "Spawn UI mode: visible terminal, headless, inline gallery, or auto. Defaults to inline."
                 },
+                "agent_role": {
+                    "type": "string",
+                    "description": "Named routing policy from agents.roles. Overrides model hints for creation and reuse. Omission applies agents.default_role. Distinct from coordinator/agent topology role."
+                },
                 "model": {
                     "type": "string",
-                    "description": "Model for newly spawned workers (spawn, assign_task, assign_next, fill_slots, run_plan), e.g. 'gpt-6-astra' or 'openai-api:gpt-5.6-luna'. Overrides agents.swarm_model. Omit to use that default or inherit the coordinator if unset. Use 'inherit' to force the coordinator's model and route. Does not change reused workers. See list_models."
+                    "description": "Model for newly spawned workers (spawn, assign_task, assign_next, fill_slots, run_plan), e.g. 'gpt-6-astra' or 'openai-api:gpt-5.6-luna'. Overridden by agent_role or agents.default_role. Without a named policy, overrides agents.swarm_model. Omit to use that default or inherit the coordinator if unset. Without a named policy, inherit forces coordinator inheritance. Does not change reused workers. See list_models."
                 },
                 "effort": {
                     "type": "string",
@@ -2307,6 +2316,10 @@ impl Tool for CommunicateTool {
         // Normalize common action synonyms that models invent (e.g. `inbox`, `send`,
         // `msg`) so a near-miss verb maps to the real action instead of erroring out.
         params.action = canonical_swarm_action(&params.action).to_string();
+        if params.agent_role.is_some() && !matches!(params.action.as_str(), "spawn" | "assign_task" | "assign_next" | "fill_slots" | "run_plan") {
+            anyhow::bail!("agent_role is supported only for spawn, assign_task, assign_next, fill_slots and run_plan. Recovery actions preserve the recorded task policy.");
+        }
+
 
         match params.action.as_str() {
             "share" | "share_append" => {
@@ -2821,6 +2834,7 @@ impl Tool for CommunicateTool {
                 let label = params.required_spawn_label()?;
                 let request = Request::CommSpawn {
                     id: REQUEST_ID,
+                    agent_role: params.agent_role.clone(),
                     session_id: ctx.session_id.clone(),
                     working_dir: params.working_dir.clone(),
                     initial_message: params.spawn_initial_message(),
@@ -2832,14 +2846,22 @@ impl Tool for CommunicateTool {
                 };
 
                 match send_request(request).await {
-                    Ok(ServerEvent::CommSpawnResponse { new_session_id, .. })
-                        if !new_session_id.is_empty() =>
-                    {
-                        Ok(ToolOutput::new(format!(
-                            "Spawned new agent: {}\nUse to_session=`{}` (or target_session) to message, assign tasks, or stop it.",
-                            new_session_id, new_session_id
-                        )))
-                    }
+                    Ok(ServerEvent::CommSpawnResponse {
+                        new_session_id,
+                        routing,
+                        ..
+                    }) if !new_session_id.is_empty() => Ok(ToolOutput::new(format!(
+                        "Spawned new agent: {}{}\nUse to_session=`{}` (or target_session) to message, assign tasks, or stop it.",
+                        new_session_id,
+                        routing
+                            .as_ref()
+                            .map(|r| format!(
+                                "\nAgent role: {} | model: {} | provider: {} | route: {}",
+                                r.agent_role, r.model, r.provider, r.api_method
+                            ))
+                            .unwrap_or_default(),
+                        new_session_id
+                    ))),
                     Ok(response) => {
                         ensure_success(&response)?;
                         Err(anyhow::anyhow!(
@@ -3072,6 +3094,7 @@ impl Tool for CommunicateTool {
 
                 let request = Request::CommAssignTask {
                     id: REQUEST_ID,
+                    agent_role: params.agent_role.clone(),
                     session_id: ctx.session_id.clone(),
                     target_session: params.target_session.clone(),
                     task_id: params.task_id.clone(),
@@ -3125,6 +3148,7 @@ impl Tool for CommunicateTool {
 
                 let request = Request::CommAssignNext {
                     id: REQUEST_ID,
+                    agent_role: params.agent_role.clone(),
                     session_id: ctx.session_id.clone(),
                     target_session: params.target_session.clone(),
                     working_dir: params.working_dir.clone(),
@@ -3177,6 +3201,7 @@ impl Tool for CommunicateTool {
                 for _ in 0..available_slots {
                     let request = Request::CommAssignNext {
                         id: REQUEST_ID,
+                        agent_role: params.agent_role.clone(),
                         session_id: ctx.session_id.clone(),
                         target_session: params.target_session.clone(),
                         working_dir: params.working_dir.clone(),

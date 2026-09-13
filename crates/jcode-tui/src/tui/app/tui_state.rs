@@ -1442,6 +1442,7 @@ impl crate::tui::TuiState for App {
                 let has_activity = status != "ready" || detail.is_some();
                 if has_activity {
                     members.push(crate::protocol::SwarmMemberStatus {
+                        routing: None,
                         session_id: self.session.id.clone(),
                         friendly_name: Some(self.session.display_name().to_string()),
                         status,
@@ -2391,6 +2392,7 @@ mod inline_swarm_subtree_tests {
 
     fn member(id: &str, parent: Option<&str>) -> SwarmMemberStatus {
         SwarmMemberStatus {
+            routing: None,
             session_id: id.to_string(),
             friendly_name: Some(id.to_string()),
             status: "running".to_string(),

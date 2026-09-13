@@ -365,6 +365,7 @@ async fn e2e_deep_expand_inserts_gate_in_live_plan() {
 
     // Assign + dispatch root to the worker so it owns the node, then expand.
     handle_comm_assign_task(
+        Ok(None),
         2,
         fx.coord.clone(),
         Some(fx.worker.clone()),
@@ -451,6 +452,7 @@ async fn e2e_deep_assignment_carries_fanout_and_artifact_contract() {
 
     // Assign a node to the worker via the live path.
     handle_comm_assign_task(
+        Ok(None),
         2,
         fx.coord.clone(),
         Some(fx.worker.clone()),
@@ -500,6 +502,7 @@ async fn e2e_deep_assignment_carries_fanout_and_artifact_contract() {
     lfx.seed("light", vec![node_spec("light.a", "explore", &[])])
         .await;
     handle_comm_assign_task(
+        Ok(None),
         3,
         lfx.coord.clone(),
         Some(lfx.worker.clone()),
@@ -614,6 +617,7 @@ async fn e2e_deep_gate_assignment_carries_inject_gap_contract() {
 
     // Assign the gate to the worker; its prompt must carry the gate contract.
     handle_comm_assign_task(
+        Ok(None),
         4,
         fx.coord.clone(),
         Some(fx.worker.clone()),
@@ -675,6 +679,7 @@ async fn e2e_complete_flows_artifact_to_downstream_assignment() {
 
     // Assign "api" to the worker, mark running, then complete with an artifact.
     handle_comm_assign_task(
+        Ok(None),
         2,
         fx.coord.clone(),
         Some(fx.worker.clone()),
@@ -739,6 +744,7 @@ async fn e2e_complete_flows_artifact_to_downstream_assignment() {
 
     // Assign "ui": its prompt must be hydrated with api's artifact.
     handle_comm_assign_task(
+        Ok(None),
         5,
         fx.coord.clone(),
         Some(fx.worker.clone()),
@@ -940,6 +946,7 @@ async fn e2e_solo_seeder_is_elected_coordinator_and_can_assign() {
 
     // And it can now drive the graph: assign the ready node to the worker.
     handle_comm_assign_task(
+        Ok(None),
         2,
         seeder.clone(),
         Some(worker.clone()),
@@ -1063,6 +1070,7 @@ async fn e2e_deep_participant_can_assign_without_being_coordinator() {
     // The worker (a non-coordinator deep participant) assigns the ready node to a
     // distinct swarm member (`coord` here stands in for any other worker).
     handle_comm_assign_task(
+        Ok(None),
         2,
         fx.worker.clone(),
         Some(fx.coord.clone()),
@@ -1112,6 +1120,7 @@ async fn e2e_light_non_coordinator_participant_cannot_assign() {
     }
 
     handle_comm_assign_task(
+        Ok(None),
         2,
         fx.worker.clone(),
         Some(fx.coord.clone()),

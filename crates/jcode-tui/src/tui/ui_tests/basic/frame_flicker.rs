@@ -167,6 +167,7 @@ fn test_active_swarm_spinner_keeps_redrawing_at_deep_idle() {
     // idle loop stops repainting, freezing every agent's spinner mid-frame.
     fn swarm_member(status: &str) -> crate::protocol::SwarmMemberStatus {
         crate::protocol::SwarmMemberStatus {
+            routing: None,
             session_id: format!("session-{status}"),
             friendly_name: Some("worker".to_string()),
             status: status.to_string(),

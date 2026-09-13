@@ -410,6 +410,7 @@ impl App {
                 ];
                 self.remote_swarm_members = (0..n)
                     .map(|i| crate::protocol::SwarmMemberStatus {
+                        routing: None,
                         session_id: format!("session_{:02}", i),
                         friendly_name: Some(names[i % names.len()].to_string()),
                         status: statuses[i % statuses.len()].to_string(),
@@ -498,6 +499,7 @@ impl App {
                     "session_count": 1,
                     "client_count": null,
                     "members": vec![crate::protocol::SwarmMemberStatus {
+                        routing: None,
                         session_id: self.session.id.clone(),
                         friendly_name: Some(self.session.display_name().to_string()),
                         status: match &self.status {

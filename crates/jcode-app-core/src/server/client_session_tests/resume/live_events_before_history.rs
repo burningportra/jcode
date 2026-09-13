@@ -49,6 +49,7 @@ async fn handle_resume_session_registers_live_events_before_history_replay() -> 
     let swarm_members = Arc::new(RwLock::new(HashMap::from([(
         temp_session_id.to_string(),
         SwarmMember {
+            routing: None,
             session_id: temp_session_id.to_string(),
             event_tx: placeholder_event_tx,
             event_txs: HashMap::new(),

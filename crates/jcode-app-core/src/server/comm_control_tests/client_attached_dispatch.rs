@@ -84,6 +84,7 @@ async fn assign_task_to_client_attached_session_skips_server_side_run() {
     let mutation_runtime = SwarmMutationRuntime::default();
 
     handle_comm_assign_task(
+        Ok(None),
         91,
         requester.to_string(),
         Some(worker.to_string()),

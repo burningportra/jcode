@@ -210,9 +210,13 @@ impl<'de> Deserialize<'de> for SwarmLifecycleStatus {
     }
 }
 
+pub use jcode_plan::AgentRoutingSelection;
+
 /// Durable, persistable portion of a swarm member.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SwarmMemberRecord {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub routing: Option<AgentRoutingSelection>,
     pub session_id: String,
     pub working_dir: Option<PathBuf>,
     pub swarm_id: Option<String>,

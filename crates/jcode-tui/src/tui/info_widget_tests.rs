@@ -1306,6 +1306,7 @@ fn render_context_compact_reports_updating_when_snapshot_is_stale() {
 
 fn managed_member(id: &str, status: &str, role: Option<&str>) -> SwarmMemberStatus {
     SwarmMemberStatus {
+        routing: None,
         session_id: id.to_string(),
         friendly_name: Some(id.to_string()),
         status: status.to_string(),
@@ -1387,6 +1388,7 @@ fn swarm_widget_renders_member_roles_and_details() {
             client_count: Some(1),
             members: vec![
                 SwarmMemberStatus {
+                    routing: None,
                     session_id: "coord-12345678".to_string(),
                     friendly_name: Some("coord".to_string()),
                     status: "running".to_string(),
@@ -1403,6 +1405,7 @@ fn swarm_widget_renders_member_roles_and_details() {
                     runtime: crate::protocol::SwarmMemberRuntime::default(),
                 },
                 SwarmMemberStatus {
+                    routing: None,
                     session_id: "tree-12345678".to_string(),
                     friendly_name: Some("trees".to_string()),
                     status: "ready".to_string(),
@@ -1463,6 +1466,7 @@ fn swarm_widget_handles_empty_swarm_and_zero_area_without_panic() {
     let _ = super::render_swarm_widget(&data, Rect::new(0, 0, 0, 0));
     let mut member_data = data.clone();
     member_data.swarm_info.as_mut().unwrap().members = vec![SwarmMemberStatus {
+        routing: None,
         session_id: "abc".to_string(),
         friendly_name: None,
         status: "running".to_string(),
@@ -1486,6 +1490,7 @@ fn swarm_widget_handles_empty_swarm_and_zero_area_without_panic() {
 fn swarm_widget_caps_member_rows_for_large_swarms() {
     let members: Vec<SwarmMemberStatus> = (0..500)
         .map(|i| SwarmMemberStatus {
+            routing: None,
             session_id: format!("session-{i:04}"),
             friendly_name: Some(format!("worker-{i}")),
             status: "running".to_string(),

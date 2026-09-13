@@ -82,6 +82,7 @@ pub(super) async fn handle_comm_channel_members(
             .iter()
             .filter_map(|sid: &String| {
                 members.get(sid).map(|member| AgentInfo {
+                    routing: member.routing.clone(),
                     session_id: sid.clone(),
                     friendly_name: member.friendly_name.clone(),
                     files_touched: Vec::new(),

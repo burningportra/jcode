@@ -267,6 +267,7 @@ fn attached_swarm_member(
     event_tx: mpsc::UnboundedSender<ServerEvent>,
 ) -> SwarmMember {
     SwarmMember {
+        routing: None,
         session_id: session_id.to_string(),
         event_tx,
         event_txs: HashMap::new(),
@@ -298,6 +299,7 @@ fn persisted_headless_member(
 ) -> SwarmMember {
     let (event_tx, _event_rx) = mpsc::unbounded_channel();
     SwarmMember {
+        routing: None,
         session_id: session_id.to_string(),
         event_tx,
         event_txs: HashMap::new(),

@@ -46,6 +46,7 @@ async fn assign_task_without_task_id_picks_highest_priority_runnable_task() {
     let mutation_runtime = SwarmMutationRuntime::default();
 
     handle_comm_assign_task(
+        Ok(None),
         77,
         requester.to_string(),
         Some(worker.to_string()),
@@ -151,6 +152,7 @@ async fn assign_task_marks_completed_worker_queued_before_returning() {
     let mutation_runtime = SwarmMutationRuntime::default();
 
     handle_comm_assign_task(
+        Ok(None),
         78,
         requester.to_string(),
         Some(worker.to_string()),

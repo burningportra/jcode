@@ -25,6 +25,8 @@ pub(crate) enum PersistedSwarmMutationResponse {
         retry_after_secs: Option<u64>,
     },
     Spawn {
+        #[serde(default)]
+        routing: Option<jcode_swarm_core::AgentRoutingSelection>,
         new_session_id: String,
     },
 }
@@ -49,7 +51,11 @@ impl PersistedSwarmMutationResponse {
                 message,
                 retry_after_secs,
             },
-            Self::Spawn { new_session_id } => ServerEvent::CommSpawnResponse {
+            Self::Spawn {
+                new_session_id,
+                routing,
+            } => ServerEvent::CommSpawnResponse {
+                routing,
                 id,
                 session_id: session_id.to_string(),
                 new_session_id,

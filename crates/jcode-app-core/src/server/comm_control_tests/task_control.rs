@@ -47,6 +47,7 @@ async fn task_control_wake_returns_structured_response_with_plan_summary() {
     let mutation_runtime = SwarmMutationRuntime::default();
 
     handle_comm_task_control(
+        Ok(None),
         101,
         requester.to_string(),
         "wake".to_string(),
@@ -138,6 +139,7 @@ async fn task_control_resume_without_task_id_uses_unique_target_assignment() {
     let mutation_runtime = SwarmMutationRuntime::default();
 
     handle_comm_task_control(
+        Ok(None),
         102,
         requester.to_string(),
         "resume".to_string(),
@@ -225,6 +227,7 @@ async fn task_control_without_task_id_rejects_ambiguous_target_assignments() {
     let mutation_runtime = SwarmMutationRuntime::default();
 
     handle_comm_task_control(
+        Ok(None),
         103,
         requester.to_string(),
         "resume".to_string(),
@@ -325,6 +328,7 @@ async fn task_control_resume_busy_agent_rejects_without_mutating_plan() {
     let _busy_guard = worker_agent.lock().await;
 
     handle_comm_task_control(
+        Ok(None),
         104,
         requester.to_string(),
         "resume".to_string(),
@@ -394,6 +398,7 @@ async fn requeue_existing_assignment_preserves_prior_progress_history() {
             task_progress: HashMap::from([(
                 "requeue-me".to_string(),
                 crate::server::SwarmTaskProgress {
+                    routing: None,
                     assigned_session_id: Some(worker.to_string()),
                     assignment_summary: Some("original assignment".to_string()),
                     assigned_at_unix_ms: Some(1_000),
@@ -533,6 +538,7 @@ async fn task_control_retry_re_dispatches_after_recent_identical_retry() {
         let mutation_runtime = mutation_runtime.clone();
         async move {
             handle_comm_task_control(
+                Ok(None),
                 id,
                 requester,
                 "retry".to_string(),

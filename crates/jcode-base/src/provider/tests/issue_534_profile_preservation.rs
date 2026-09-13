@@ -78,6 +78,10 @@ input = ["text"]
             Some("my-gateway".to_string())
         );
 
+        let parts = provider.direct_openai_compatible_route_parts().expect("MultiProvider delegates compatible profile identity");
+        assert_eq!(parts.1, "openai-compatible:my-gateway");
+        assert!(!provider.supports_provider_routing_features());
+
         let err = provider
             .set_model("openrouter:openrouter/owl-alpha")
             .expect_err("OpenRouter switch without credentials should fail");

@@ -73,6 +73,7 @@ pub(super) async fn maybe_handle_session_admin_command(
             None => "create_session".to_string(),
         };
         let created = create_headless_session(
+            None,
             sessions,
             session_id,
             provider,

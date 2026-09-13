@@ -7,7 +7,10 @@ a standard config file. Edit freely: override globally at
 
 Model routing guidance for spawned swarm agents. Pass `model` to choose a model
 for newly spawned workers, including workers created by assignment or `run_plan`.
-An explicit model overrides `agents.swarm_model`. When omitted, workers use that
+Use `agent_role` for a named policy from `agents.roles`. Named policies and
+`agents.default_role` override every model hint, including `inherit`, and constrain
+reused workers. These names are separate from coordinator/agent topology roles.
+Without a named policy, an explicit model overrides `agents.swarm_model`. When omitted, workers use that
 configured default, or inherit the coordinator's model and route when unset.
 Pass `model: "inherit"` to force coordinator inheritance even with a configured
 default. Model selection does not change reused workers. Run `swarm list_models`

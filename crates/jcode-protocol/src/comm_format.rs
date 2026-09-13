@@ -166,15 +166,26 @@ pub fn format_comm_members(current_session_id: &str, members: &[AgentInfo]) -> S
                 .unwrap_or_default();
             // Stable task label: what this agent was spawned/assigned for.
             // Skip when the transient detail already says the same thing.
-            let task_suffix = match member.task_label.as_deref() {
-                Some(task)
-                    if !task.trim().is_empty()
-                        && member.detail.as_deref().is_none_or(|d| !d.contains(task)) =>
-                {
-                    format!("\n    Task: {}", task)
-                }
-                _ => String::new(),
-            };
+            let routing_suffix = member
+                .routing
+                .as_ref()
+                .map(|r| {
+                    format!(
+                        "\n    Agent role: {} | model: {} | provider: {} | route: {}",
+                        r.agent_role, r.model, r.provider, r.api_method
+                    )
+                })
+                .unwrap_or_default();
+            let task_suffix = routing_suffix
+                + &match member.task_label.as_deref() {
+                    Some(task)
+                        if !task.trim().is_empty()
+                            && member.detail.as_deref().is_none_or(|d| !d.contains(task)) =>
+                    {
+                        format!("\n    Task: {}", task)
+                    }
+                    _ => String::new(),
+                };
             let age_suffix = match member.status_age_secs {
                 Some(age) if status == "ready" || status == "idle" => {
                     format!(" · idle {}", format_secs(age))
@@ -368,6 +379,12 @@ pub fn format_comm_status_snapshot(snapshot: &AgentStatusSnapshot) -> String {
         "Status snapshot for {} ({})\n\n",
         target, snapshot.session_id
     );
+    if let Some(r) = &snapshot.routing {
+        output.push_str(&format!(
+            "  Agent role: {} | model: {} | provider: {} | route: {}\n",
+            r.agent_role, r.model, r.provider, r.api_method
+        ));
+    }
     output.push_str(&format!("  Lifecycle: {}", status));
     if let Some(detail) = snapshot.detail.as_deref() {
         output.push_str(&format!(" — {}", detail));

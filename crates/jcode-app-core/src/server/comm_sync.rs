@@ -308,6 +308,7 @@ pub(super) async fn handle_comm_status(
         };
 
         AgentStatusSnapshot {
+            routing: member.routing.clone(),
             session_id: member.session_id.clone(),
             friendly_name: member.friendly_name.clone(),
             swarm_id: member.swarm_id.clone(),

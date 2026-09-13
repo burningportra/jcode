@@ -186,6 +186,7 @@ impl SwarmState {
 /// Information about a session in a swarm
 #[derive(Clone, Debug)]
 pub struct SwarmMember {
+    pub routing: Option<jcode_swarm_core::AgentRoutingSelection>,
     pub session_id: String,
     /// Primary channel to send events to this session.
     ///
@@ -242,6 +243,7 @@ pub struct SwarmMember {
 impl SwarmMember {
     pub fn durable_record(&self) -> SwarmMemberRecord {
         SwarmMemberRecord {
+            routing: self.routing.clone(),
             session_id: self.session_id.clone(),
             working_dir: self.working_dir.clone(),
             swarm_id: self.swarm_id.clone(),
@@ -272,6 +274,7 @@ impl SwarmMember {
         event_tx: mpsc::UnboundedSender<ServerEvent>,
     ) -> Self {
         Self {
+            routing: record.routing,
             session_id: record.session_id,
             event_tx,
             event_txs: HashMap::new(),

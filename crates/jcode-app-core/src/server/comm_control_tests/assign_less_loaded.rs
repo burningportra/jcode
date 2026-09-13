@@ -63,6 +63,7 @@ async fn assign_task_without_target_prefers_less_loaded_ready_agent() {
     let mutation_runtime = SwarmMutationRuntime::default();
 
     handle_comm_assign_task(
+        Ok(None),
         100,
         requester.to_string(),
         None,

@@ -638,6 +638,7 @@ mod tests {
         role: Option<&str>,
     ) -> SwarmMemberStatus {
         SwarmMemberStatus {
+            routing: None,
             session_id: id.to_string(),
             friendly_name: Some(id.to_string()),
             status: status.to_string(),

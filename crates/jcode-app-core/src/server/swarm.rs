@@ -699,6 +699,7 @@ async fn broadcast_swarm_status_now(
                 .get(sid)
                 .filter(|m| member_in_status_broadcast(m, broadcast_terminal_retention))
                 .map(|m| crate::protocol::SwarmMemberStatus {
+                    routing: m.routing.clone(),
                     session_id: m.session_id.clone(),
                     friendly_name: m.friendly_name.clone(),
                     status: m.status.clone(),
@@ -1810,6 +1811,7 @@ mod tests {
         let (event_tx, event_rx) = mpsc::unbounded_channel();
         (
             SwarmMember {
+                routing: None,
                 session_id: session_id.to_string(),
                 event_tx,
                 event_txs: HashMap::new(),

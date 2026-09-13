@@ -100,6 +100,7 @@ async fn idle_prewarm_never_holds_agent_lock_across_pending_preparation() {
 fn test_swarm_member(session_id: &str, status: &str) -> SwarmMember {
     let (event_tx, _event_rx) = mpsc::unbounded_channel();
     SwarmMember {
+        routing: None,
         session_id: session_id.to_string(),
         event_tx,
         event_txs: HashMap::new(),

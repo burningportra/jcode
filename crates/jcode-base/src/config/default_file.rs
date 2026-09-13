@@ -444,6 +444,13 @@ wake_mode = "internal"
 # An explicit `model` in the swarm tool overrides this default for new workers.
 # Env override: JCODE_SWARM_MODEL
 # swarm_model = "inherit"
+# Enforce a named routing policy when agent_role is omitted (overrides model hints).
+# default_role = "implementer"
+# Define role tables after other [agents] settings, for example:
+# [agents.roles.implementer]
+# model = "openai-api:gpt-5.6-luna"
+# fallbacks = ["claude-api:claude-opus-4-6"]
+# Fallbacks are ordered catalog-availability checks before dispatch, not task retries.
 #
 # Default reasoning effort for spawned swarm workers when the spawn call does
 # not pass an explicit `effort` ("low", "medium", "high", ...). Leave unset so

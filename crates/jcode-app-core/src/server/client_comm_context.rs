@@ -238,6 +238,7 @@ pub(super) async fn handle_comm_list(
         // before gathering per-session runtime extras (which briefly lock
         // individual agents and read the connection map).
         struct MemberStatic {
+            routing: Option<jcode_swarm_core::AgentRoutingSelection>,
             session_id: String,
             friendly_name: Option<String>,
             files: Vec<String>,
@@ -267,6 +268,7 @@ pub(super) async fn handle_comm_list(
                             .collect();
                         files.sort();
                         MemberStatic {
+                            routing: member.routing.clone(),
                             session_id: sid.clone(),
                             friendly_name: member.friendly_name.clone(),
                             files,
@@ -296,6 +298,7 @@ pub(super) async fn handle_comm_list(
             .await;
 
             member_list.push(AgentInfo {
+                routing: m.routing,
                 session_id: m.session_id,
                 friendly_name: m.friendly_name,
                 files_touched: m.files,

@@ -35,6 +35,7 @@ pub(super) enum HeadlessMemoryScope {
     reason = "headless session creation wires provider, global session, swarm state, interrupts, and MCP pool together"
 )]
 pub(super) async fn create_headless_session(
+    exact_route: Option<jcode_provider_core::RouteSelection>,
     sessions: &SessionAgents,
     global_session_id: &Arc<RwLock<String>>,
     provider_template: &Arc<dyn Provider>,
@@ -111,7 +112,10 @@ pub(super) async fn create_headless_session(
     }
     let client_session_id = new_agent.session_id().to_string();
 
-    if let Some(model) = model_override {
+    if let Some(selection) = exact_route {
+        new_agent.set_route_selection(&selection)?;
+        super::named_agent_routing::verify_provider(provider.as_ref(), &selection)?;
+    } else if let Some(model) = model_override {
         // Build a model-switch request that preserves the coordinator's auth
         // route (e.g. claude-api vs claude-oauth, or an openai-compatible
         // profile) so the spawned headless agent reconstructs the exact
@@ -241,6 +245,7 @@ pub(super) async fn create_headless_session(
         members.insert(
             client_session_id.clone(),
             SwarmMember {
+                routing: None,
                 session_id: client_session_id.clone(),
                 event_tx: event_tx.clone(),
                 event_txs: HashMap::new(),

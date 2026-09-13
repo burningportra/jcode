@@ -587,10 +587,62 @@ pub struct AuthConfig {
     pub trusted_external_source_paths: Vec<String>,
 }
 
+/// Ordered, pre-dispatch routing policy. Never retries an already started task.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AgentRoleConfig {
+    pub model: String,
+    #[serde(default)]
+    pub fallbacks: Vec<String>,
+}
+
+impl AgentsConfig {
+    pub fn validate_roles(&self) -> Result<(), String> {
+        for (name, role) in &self.roles {
+            if name.is_empty()
+                || !name
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+            {
+                return Err(format!(
+                    "Invalid agents.roles name '{name}': use letters, digits, '_' or '-'"
+                ));
+            }
+            for model in std::iter::once(&role.model).chain(&role.fallbacks) {
+                if model.trim() != model
+                    || model.is_empty()
+                    || model.chars().any(char::is_whitespace)
+                    || matches!(
+                        model.to_ascii_lowercase().as_str(),
+                        "inherit" | "coordinator" | "auto" | "jcode-auto"
+                    )
+                    || model.ends_with(':')
+                {
+                    return Err(format!(
+                        "Invalid model '{model}' in agents.roles.{name}: a concrete model is required"
+                    ));
+                }
+            }
+        }
+        if let Some(name) = &self.default_role {
+            if !self.roles.contains_key(name) {
+                return Err(format!(
+                    "Unknown agents.default_role '{name}': define agents.roles.{name}"
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
 /// Agent-specific model defaults.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct AgentsConfig {
+    /// Named routing policies, independent of coordinator/agent topology roles.
+    pub roles: std::collections::BTreeMap<String, AgentRoleConfig>,
+    /// Applied whenever a worker request omits `agent_role`.
+    pub default_role: Option<String>,
     /// Optional default model override for spawned swarm/subagent sessions.
     ///
     /// Leave unset (or use `"inherit"` / `"coordinator"`) to have spawned swarm
@@ -709,6 +761,8 @@ fn default_memory_rerank_min_agree() -> usize {
 impl Default for AgentsConfig {
     fn default() -> Self {
         Self {
+            roles: Default::default(),
+            default_role: None,
             swarm_model: None,
             swarm_effort: None,
             swarm_spawn_mode: SwarmSpawnMode::default(),

@@ -60,6 +60,7 @@ impl Config {
         let mut config = toml::from_str::<Self>(&content).map_err(|e| {
             anyhow::anyhow!("Failed to parse config file {}: {}", path.display(), e)
         })?;
+        config.agents.validate_roles().map_err(anyhow::Error::msg)?;
         config.display.apply_legacy_compat();
         config.repair_frozen_sponsors_optout(&content);
         Ok(Some(config))

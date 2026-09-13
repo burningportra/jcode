@@ -245,7 +245,7 @@ pub(super) struct SwarmSpawnSelection {
 /// to the persisted session snapshot so spawned agents still inherit the
 /// coordinator's model, provider key, and auth route instead of silently
 /// dropping to the config default (e.g. Claude OAuth instead of the API route).
-async fn resolve_coordinator_spawn_identity(
+pub(super) async fn resolve_coordinator_spawn_identity(
     req_session_id: &str,
     sessions: &SessionAgents,
 ) -> CoordinatorSpawnIdentity {
@@ -549,6 +549,7 @@ async fn register_visible_spawned_member(
         members.insert(
             session_id.to_string(),
             SwarmMember {
+                routing: None,
                 session_id: session_id.to_string(),
                 event_tx,
                 event_txs: HashMap::new(),
@@ -618,6 +619,7 @@ pub(super) fn resolve_swarm_spawn_effort(
 }
 
 pub(super) async fn spawn_swarm_agent(
+    agent_role: Option<String>,
     req_session_id: &str,
     swarm_id: &str,
     working_dir: Option<String>,
@@ -649,14 +651,31 @@ pub(super) async fn spawn_swarm_agent(
     // startup env (#405).
     let client_terminal_env =
         client_terminal_env_for_session(req_session_id, client_connections).await;
-    let agents_config = &crate::config::config().agents;
+    let config = crate::config::Config::load_strict()?;
+    let agents_config = &config.agents;
+    let routing = super::named_agent_routing::resolve(
+        agents_config,
+        agent_role.as_deref(),
+        &provider_template.model_routes(),
+    )?;
     let configured_swarm_model = agents_config.swarm_model.clone();
     let resolved_spawn_mode = spawn_mode.unwrap_or(agents_config.swarm_spawn_mode);
-    let selection = resolve_swarm_spawn_selection(
-        requested_model.clone(),
-        configured_swarm_model.clone(),
-        &coordinator,
-    )?;
+    let selection = if let Some(route) = &routing {
+        super::named_agent_routing::spawn_selection(route)
+    } else {
+        resolve_swarm_spawn_selection(
+            requested_model.clone(),
+            configured_swarm_model.clone(),
+            &coordinator,
+        )?
+    };
+    let exact_spawn_route = routing.as_ref().map(super::named_agent_routing::exact_selection);
+    // Validate before a visible terminal can consume its startup prompt.
+    if let Some(exact) = &exact_spawn_route {
+        let fork = provider_template.fork();
+        fork.set_route_selection(exact)?;
+        super::named_agent_routing::verify_provider(fork.as_ref(), exact)?;
+    }
     let spawn_model = selection.model.clone();
     let spawn_provider_key = selection.provider_key.clone();
     let spawn_route_api_method = selection.route_api_method.clone();
@@ -723,6 +742,9 @@ pub(super) async fn spawn_swarm_agent(
                 "create_session".to_string()
             };
             create_headless_session(
+                routing
+                    .as_ref()
+                    .map(super::named_agent_routing::exact_selection),
                 sessions,
                 global_session_id,
                 provider_template,
@@ -790,6 +812,9 @@ pub(super) async fn spawn_swarm_agent(
             swarm_event_tx,
         )
         .await;
+    }
+    if let Some(member) = swarm_members.write().await.get_mut(&new_session_id) {
+        member.routing = routing.clone();
     }
     // Label the worker with what it was spawned for so the swarm strip and
     // member lists can show the task, not just the animal name. An explicit
@@ -891,6 +916,7 @@ pub(super) async fn spawn_swarm_agent(
 
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn handle_comm_spawn(
+    agent_role: Option<String>,
     id: u64,
     req_session_id: String,
     working_dir: Option<String>,
@@ -959,6 +985,7 @@ pub(super) async fn handle_comm_spawn(
             effort.clone().unwrap_or_default(),
             model.clone().unwrap_or_default(),
             label.clone().unwrap_or_default(),
+            agent_role.clone().unwrap_or_default(),
         ],
     );
     let Some(mutation_state) = begin_or_replay(
@@ -975,6 +1002,7 @@ pub(super) async fn handle_comm_spawn(
     };
 
     let response = match spawn_swarm_agent(
+        agent_role.clone(),
         &req_session_id,
         &swarm_id,
         working_dir,
@@ -999,7 +1027,14 @@ pub(super) async fn handle_comm_spawn(
     )
     .await
     {
-        Ok(new_session_id) => PersistedSwarmMutationResponse::Spawn { new_session_id },
+        Ok(new_session_id) => PersistedSwarmMutationResponse::Spawn {
+            routing: swarm_members
+                .read()
+                .await
+                .get(&new_session_id)
+                .and_then(|m| m.routing.clone()),
+            new_session_id,
+        },
         Err(error) => PersistedSwarmMutationResponse::Error {
             message: format!("Failed to spawn agent: {error}"),
             retry_after_secs: None,

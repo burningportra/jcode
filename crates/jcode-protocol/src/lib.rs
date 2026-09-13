@@ -202,6 +202,8 @@ pub struct ContextEntry {
 /// Info about an agent
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AgentInfo {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub routing: Option<jcode_swarm_core::AgentRoutingSelection>,
     pub session_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub friendly_name: Option<String>,
@@ -278,6 +280,8 @@ pub struct AgentInfo {
 /// Lightweight status snapshot for a swarm member.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentStatusSnapshot {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub routing: Option<jcode_swarm_core::AgentRoutingSelection>,
     pub session_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub friendly_name: Option<String>,
@@ -474,6 +478,8 @@ impl PlanGraphStatus {
 /// Swarm member status for lifecycle updates
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SwarmMemberStatus {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub routing: Option<jcode_swarm_core::AgentRoutingSelection>,
     pub session_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub friendly_name: Option<String>,

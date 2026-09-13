@@ -72,6 +72,7 @@ fn test_local_bus_dictation_completion_applies_transcript() {
 #[test]
 fn test_handle_server_event_swarm_status_announces_member_completion() {
     let member = |id: &str, status: &str, parent: Option<&str>| crate::protocol::SwarmMemberStatus {
+        routing: None,
         session_id: id.to_string(),
         friendly_name: Some(id.to_string()),
         status: status.to_string(),

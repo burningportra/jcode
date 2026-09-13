@@ -78,6 +78,7 @@ impl Fixture {
         let members = Arc::new(RwLock::new(HashMap::from([(
             id.clone(),
             SwarmMember {
+                routing: None,
                 session_id: id.clone(),
                 event_tx: events.clone(),
                 event_txs: HashMap::from([("original".into(), events.clone())]),

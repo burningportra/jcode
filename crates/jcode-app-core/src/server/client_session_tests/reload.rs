@@ -314,6 +314,7 @@ fn handle_reload_queues_signal_for_canary_session() -> Result<()> {
             (
                 "session_test_reload".to_string(),
                 SwarmMember {
+                    routing: None,
                     session_id: "session_test_reload".to_string(),
                     event_tx: tx.clone(),
                     event_txs: HashMap::from([("conn-trigger".to_string(), tx.clone())]),
@@ -339,6 +340,7 @@ fn handle_reload_queues_signal_for_canary_session() -> Result<()> {
             (
                 "session_peer".to_string(),
                 SwarmMember {
+                    routing: None,
                     session_id: "session_peer".to_string(),
                     event_tx: peer_tx.clone(),
                     event_txs: HashMap::from([("conn-peer".to_string(), peer_tx.clone())]),

@@ -1251,6 +1251,7 @@ fn test_redacted_for_export_redacts_replay_events() -> Result<()> {
         "OPENROUTER_API_KEY=sk-or-v1-secret-value",
     );
     session.record_swarm_status_event(vec![crate::protocol::SwarmMemberStatus {
+        routing: None,
         session_id: "session_fox".to_string(),
         friendly_name: Some("fox".to_string()),
         status: "running".to_string(),

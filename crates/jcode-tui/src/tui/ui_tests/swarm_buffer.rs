@@ -16,6 +16,7 @@ use ratatui::backend::TestBackend;
 
 fn strip_member(id: &str, name: &str, status: &str) -> SwarmMemberStatus {
     SwarmMemberStatus {
+        routing: None,
         session_id: id.to_string(),
         friendly_name: Some(name.to_string()),
         status: status.to_string(),

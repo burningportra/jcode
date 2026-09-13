@@ -799,6 +799,7 @@ fn in_flight_slot_accounting_counts_queued_workers_not_coordinator() {
     };
     let members = vec![
         AgentInfo {
+            routing: None,
             session_id: "coord".to_string(),
             friendly_name: None,
             files_touched: Vec::new(),
@@ -813,6 +814,7 @@ fn in_flight_slot_accounting_counts_queued_workers_not_coordinator() {
             ..Default::default()
         },
         AgentInfo {
+            routing: None,
             session_id: "worker-queued".to_string(),
             friendly_name: None,
             files_touched: Vec::new(),
@@ -827,6 +829,7 @@ fn in_flight_slot_accounting_counts_queued_workers_not_coordinator() {
             ..Default::default()
         },
         AgentInfo {
+            routing: None,
             session_id: "worker-ready".to_string(),
             friendly_name: None,
             files_touched: Vec::new(),
@@ -875,6 +878,7 @@ fn in_flight_count_excludes_foreign_queued_session() {
     };
     let members = vec![
         AgentInfo {
+            routing: None,
             session_id: "coord".to_string(),
             status: Some("running".to_string()),
             role: Some("coordinator".to_string()),
@@ -883,6 +887,7 @@ fn in_flight_count_excludes_foreign_queued_session() {
             ..Default::default()
         },
         AgentInfo {
+            routing: None,
             session_id: "foreign-human".to_string(),
             status: Some("queued".to_string()),
             role: Some("agent".to_string()),
@@ -1732,6 +1737,7 @@ fn default_await_members_targets_include_ready() {
 
 fn credential_failed_worker(session_id: &str, detail: &str, age_secs: u64) -> AgentInfo {
     AgentInfo {
+        routing: None,
         session_id: session_id.to_string(),
         status: Some("failed".to_string()),
         detail: Some(detail.to_string()),
@@ -1751,6 +1757,7 @@ fn credential_failure_wave_detected_for_recent_auth_failed_workers() {
     // completed. That must classify as a wave, not as N independent failures.
     let members = vec![
         AgentInfo {
+            routing: None,
             session_id: "coord".to_string(),
             status: Some("running".to_string()),
             role: Some("coordinator".to_string()),

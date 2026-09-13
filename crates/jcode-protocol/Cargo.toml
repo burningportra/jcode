@@ -5,6 +5,7 @@ edition = "2024"
 publish = false
 
 [dependencies]
+jcode-swarm-core = { path = "../jcode-swarm-core" }
 jcode-batch-types = { path = "../jcode-batch-types" }
 jcode-config-types = { path = "../jcode-config-types" }
 jcode-message-types = { path = "../jcode-message-types" }

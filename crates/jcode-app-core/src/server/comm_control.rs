@@ -1389,6 +1389,7 @@ enum AssignDedupMode {
     reason = "task assignment coordinates sessions, interrupts, connections, swarm plan state, and event history"
 )]
 pub(super) async fn handle_comm_assign_task(
+    routing: anyhow::Result<Option<jcode_swarm_core::AgentRoutingSelection>>,
     id: u64,
     req_session_id: String,
     target_session: Option<String>,
@@ -1408,6 +1409,7 @@ pub(super) async fn handle_comm_assign_task(
     swarm_mutation_runtime: &SwarmMutationRuntime,
 ) {
     handle_comm_assign_task_with_mode(
+        routing,
         id,
         req_session_id,
         target_session,
@@ -1435,6 +1437,7 @@ pub(super) async fn handle_comm_assign_task(
     reason = "task assignment coordinates sessions, interrupts, connections, swarm plan state, and event history"
 )]
 async fn handle_comm_assign_task_with_mode(
+    routing: anyhow::Result<Option<jcode_swarm_core::AgentRoutingSelection>>,
     id: u64,
     req_session_id: String,
     target_session: Option<String>,
@@ -1454,6 +1457,27 @@ async fn handle_comm_assign_task_with_mode(
     swarm_event_tx: &broadcast::Sender<SwarmEvent>,
     swarm_mutation_runtime: &SwarmMutationRuntime,
 ) {
+    let routing = match routing {
+        Ok(routing) => routing,
+        Err(error) => {
+            let _ = client_event_tx.send(ServerEvent::Error {
+                id,
+                message: error.to_string(),
+                retry_after_secs: None,
+            });
+            return;
+        }
+    };
+    let eligible =
+        super::named_agent_routing::eligible_members(routing.as_ref(), sessions, swarm_members)
+            .await;
+    if let (Some(route), Some(target)) = (&routing, &target_session) {
+        if !super::named_agent_routing::matches_worker(target, route, sessions, swarm_members).await
+        {
+            let _ = client_event_tx.send(ServerEvent::Error { id, message: format!("Worker '{target}' does not match agent_role '{}' on {} / {} ({}). Spawn a matching worker; existing workers are never switched implicitly.", route.agent_role, route.model, route.provider, route.api_method), retry_after_secs: None });
+            return;
+        }
+    }
     let requested_target_session = target_session.and_then(|target| {
         let trimmed = target.trim();
         (!trimmed.is_empty()).then(|| trimmed.to_string())
@@ -1490,6 +1514,7 @@ async fn handle_comm_assign_task_with_mode(
                 .clone()
                 .unwrap_or_else(|| "__next_runnable__".to_string()),
             message.clone().unwrap_or_default(),
+            serde_json::to_string(&routing).unwrap_or_default(),
         ],
     );
     let mutation_state = match dedup_mode {
@@ -1524,7 +1549,7 @@ async fn handle_comm_assign_task_with_mode(
         &req_session_id,
         &swarm_id,
         requested_target_session.as_deref(),
-        swarm_members,
+        &eligible,
         swarm_plans,
     )
     .await
@@ -1623,6 +1648,7 @@ async fn handle_comm_assign_task_with_mode(
             plan.task_progress.insert(
                 item_id.clone(),
                 SwarmTaskProgress {
+                    routing: routing.clone(),
                     assigned_session_id: Some(target_session.clone()),
                     assignment_summary: Some(truncate_detail(
                         &combine_assignment_text(&content, message.as_deref()),
@@ -1847,6 +1873,7 @@ async fn handle_comm_assign_task_with_mode(
     reason = "assign_next reuses task assignment orchestration and forwards the same runtime dependencies"
 )]
 pub(super) async fn handle_comm_assign_next(
+    agent_role: Option<String>,
     id: u64,
     req_session_id: String,
     target_session: Option<String>,
@@ -1872,6 +1899,21 @@ pub(super) async fn handle_comm_assign_next(
     mcp_pool: &Arc<crate::mcp::SharedMcpPool>,
     swarm_mutation_runtime: &SwarmMutationRuntime,
 ) {
+    let routing =
+        match super::named_agent_routing::load(agent_role.as_deref(), provider_template.as_ref()) {
+            Ok(routing) => routing,
+            Err(error) => {
+                let _ = client_event_tx.send(ServerEvent::Error {
+                    id,
+                    message: error.to_string(),
+                    retry_after_secs: None,
+                });
+                return;
+            }
+        };
+    let eligible =
+        super::named_agent_routing::eligible_members(routing.as_ref(), sessions, swarm_members)
+            .await;
     if target_session.is_none() {
         let swarm_id = match require_plan_driver_swarm(
             id,
@@ -1904,7 +1946,7 @@ pub(super) async fn handle_comm_assign_next(
             &swarm_id,
             &selected_task_id,
             None,
-            swarm_members,
+            &eligible,
             swarm_plans,
         )
         .await;
@@ -1919,6 +1961,7 @@ pub(super) async fn handle_comm_assign_next(
                 release_auto_assign_claim(&swarm_id, unused_target);
             }
             match super::comm_session::spawn_swarm_agent(
+                agent_role.clone(),
                 &req_session_id,
                 &swarm_id,
                 working_dir.clone(),
@@ -1945,6 +1988,7 @@ pub(super) async fn handle_comm_assign_next(
             {
                 Ok(spawned_session) => {
                     handle_comm_assign_task(
+                        Ok(routing.clone()),
                         id,
                         req_session_id,
                         Some(spawned_session),
@@ -1980,6 +2024,7 @@ pub(super) async fn handle_comm_assign_next(
         match preferred_target {
             Ok(target_session) => {
                 handle_comm_assign_task(
+                    Ok(routing.clone()),
                     id,
                     req_session_id,
                     Some(target_session.clone()),
@@ -2016,6 +2061,7 @@ pub(super) async fn handle_comm_assign_next(
     }
 
     handle_comm_assign_task(
+        Ok(routing.clone()),
         id,
         req_session_id,
         target_session,
@@ -2042,6 +2088,7 @@ pub(super) async fn handle_comm_assign_next(
     reason = "task control checks assignment state, delivery, and safe recovery paths together"
 )]
 pub(super) async fn handle_comm_task_control(
+    default_routing: anyhow::Result<Option<jcode_swarm_core::AgentRoutingSelection>>,
     id: u64,
     req_session_id: String,
     action: String,
@@ -2131,6 +2178,31 @@ pub(super) async fn handle_comm_task_control(
     }
 
     let current_assignee = snapshot.assigned_to.clone();
+    let previous_routing = snapshot.progress.as_ref().and_then(|progress| progress.routing.clone());
+    // Preserve assignment policy even after the old worker has been removed.
+    // An unrelated unavailable default must not block an explicitly routed task.
+    let routing = if let Some(previous) = previous_routing {
+        if let Err(error) = crate::config::Config::load_strict() {
+            let _ = client_event_tx.send(ServerEvent::Error { id, message: error.to_string(), retry_after_secs: None }); return;
+        }
+        Some(previous)
+    } else {
+        match default_routing {
+            Ok(default) => default,
+            Err(error) => { let _ = client_event_tx.send(ServerEvent::Error { id, message: error.to_string(), retry_after_secs: None }); return; }
+        }
+    };
+    if let Some(route) = &routing {
+        let target = target_session.as_ref().or(current_assignee.as_ref());
+        if let Some(target) = target {
+            if !super::named_agent_routing::matches_worker(target, route, sessions, swarm_members)
+                .await
+            {
+                let _ = client_event_tx.send(ServerEvent::Error { id, message: format!("Worker '{target}' does not match preserved agent_role '{}' route {} / {} ({})", route.agent_role, route.model, route.provider, route.api_method), retry_after_secs: None });
+                return;
+            }
+        }
+    }
     let require_assignee = matches!(
         action,
         TaskControlAction::Start
@@ -2332,6 +2404,7 @@ pub(super) async fn handle_comm_task_control(
                 },
             );
             handle_comm_assign_task_with_mode(
+                Ok(routing.clone()),
                 id,
                 req_session_id,
                 Some(assignee),
@@ -2459,6 +2532,7 @@ pub(super) async fn handle_comm_task_control(
             let displaced_new_target = new_target.clone();
             let displaced_req_session = req_session_id.clone();
             handle_comm_assign_task_with_mode(
+                Ok(routing.clone()),
                 id,
                 req_session_id,
                 Some(new_target),

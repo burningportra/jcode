@@ -778,6 +778,7 @@ fn test_swarm_completion_notification_inserts_agent_snapshot_without_report_pros
     let mut app = create_test_app();
     let session_id = "session_cow_snapshot";
     app.remote_swarm_members = vec![crate::protocol::SwarmMemberStatus {
+        routing: None,
         session_id: session_id.to_string(),
         friendly_name: Some("cow".to_string()),
         status: "completed".to_string(),

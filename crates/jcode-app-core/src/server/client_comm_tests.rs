@@ -67,6 +67,7 @@ async fn comm_message_default_does_not_queue_soft_interrupt_for_connected_sessio
         (
             sender_id.clone(),
             SwarmMember {
+                routing: None,
                 session_id: sender_id.clone(),
                 event_tx: sender_event_tx,
                 event_txs: HashMap::new(),
@@ -92,6 +93,7 @@ async fn comm_message_default_does_not_queue_soft_interrupt_for_connected_sessio
         (
             target_id.clone(),
             SwarmMember {
+                routing: None,
                 session_id: target_id.clone(),
                 event_tx: target_event_tx,
                 event_txs: HashMap::new(),
@@ -231,6 +233,7 @@ async fn comm_message_with_wake_queues_soft_interrupt_for_busy_connected_session
         (
             sender_id.clone(),
             SwarmMember {
+                routing: None,
                 session_id: sender_id.clone(),
                 event_tx: sender_event_tx,
                 event_txs: HashMap::new(),
@@ -256,6 +259,7 @@ async fn comm_message_with_wake_queues_soft_interrupt_for_busy_connected_session
         (
             target_id.clone(),
             SwarmMember {
+                routing: None,
                 session_id: target_id.clone(),
                 event_tx: target_event_tx,
                 event_txs: HashMap::new(),
@@ -384,6 +388,7 @@ async fn comm_list_includes_member_status_and_detail() {
         (
             requester_id.clone(),
             SwarmMember {
+                routing: None,
                 session_id: requester_id.clone(),
                 event_tx: requester_event_tx,
                 event_txs: HashMap::new(),
@@ -409,6 +414,7 @@ async fn comm_list_includes_member_status_and_detail() {
         (
             peer_id.clone(),
             SwarmMember {
+                routing: None,
                 session_id: peer_id.clone(),
                 event_tx: peer_event_tx,
                 event_txs: HashMap::new(),
@@ -492,6 +498,7 @@ async fn comm_message_accepts_friendly_name_dm_target() {
         (
             sender_id.clone(),
             SwarmMember {
+                routing: None,
                 session_id: sender_id.clone(),
                 event_tx: sender_event_tx,
                 event_txs: HashMap::new(),
@@ -517,6 +524,7 @@ async fn comm_message_accepts_friendly_name_dm_target() {
         (
             target_id.clone(),
             SwarmMember {
+                routing: None,
                 session_id: target_id.clone(),
                 event_tx: target_event_tx,
                 event_txs: HashMap::new(),
@@ -627,6 +635,7 @@ async fn comm_message_rejects_ambiguous_friendly_name_dm_target() {
         (
             sender_id.clone(),
             SwarmMember {
+                routing: None,
                 session_id: sender_id.clone(),
                 event_tx: sender_event_tx,
                 event_txs: HashMap::new(),
@@ -652,6 +661,7 @@ async fn comm_message_rejects_ambiguous_friendly_name_dm_target() {
         (
             target_one_id.clone(),
             SwarmMember {
+                routing: None,
                 session_id: target_one_id.clone(),
                 event_tx: target_one_event_tx,
                 event_txs: HashMap::new(),
@@ -677,6 +687,7 @@ async fn comm_message_rejects_ambiguous_friendly_name_dm_target() {
         (
             target_two_id.clone(),
             SwarmMember {
+                routing: None,
                 session_id: target_two_id.clone(),
                 event_tx: target_two_event_tx,
                 event_txs: HashMap::new(),
@@ -764,6 +775,7 @@ async fn comm_broadcast_reaches_only_senders_spawned_subtree() {
         let (event_tx, event_rx) = mpsc::unbounded_channel();
         (
             SwarmMember {
+                routing: None,
                 session_id: session_id.to_string(),
                 event_tx,
                 event_txs: HashMap::new(),

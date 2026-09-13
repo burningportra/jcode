@@ -114,6 +114,7 @@ mod transcript_routing_tests {
         let (event_tx, _event_rx) = mpsc::unbounded_channel::<ServerEvent>();
         let now = Instant::now();
         SwarmMember {
+            routing: None,
             session_id: session_id.to_string(),
             event_tx: event_tx.clone(),
             event_txs: HashMap::from([(connection_id.to_string(), event_tx)]),

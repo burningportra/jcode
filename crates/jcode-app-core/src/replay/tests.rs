@@ -243,6 +243,7 @@ fn test_export_timeline_includes_persisted_swarm_replay_events() {
             timestamp: base + Duration::milliseconds(200),
             kind: StoredReplayEventKind::SwarmStatus {
                 members: vec![SwarmMemberStatus {
+                    routing: None,
                     session_id: "session_fox".to_string(),
                     friendly_name: Some("fox".to_string()),
                     status: "running".to_string(),
@@ -316,6 +317,7 @@ fn test_timeline_to_replay_events_converts_swarm_replay_events() {
             t: 200,
             kind: TimelineEventKind::SwarmStatus {
                 members: vec![SwarmMemberStatus {
+                    routing: None,
                     session_id: "session_oak".to_string(),
                     friendly_name: Some("oak".to_string()),
                     status: "completed".to_string(),
@@ -389,6 +391,7 @@ fn test_load_swarm_sessions_discovers_related_sessions() {
     // with no visible messages and no parent would otherwise skip persisting.
     seed.saved = true;
     seed.record_swarm_status_event(vec![SwarmMemberStatus {
+        routing: None,
         session_id: "session_seed".to_string(),
         friendly_name: Some("seed".to_string()),
         status: "running".to_string(),

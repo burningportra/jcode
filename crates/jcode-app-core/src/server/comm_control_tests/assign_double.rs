@@ -217,6 +217,7 @@ async fn assign_task_rejects_double_assignment_of_actively_worked_task() {
     let mutation_runtime = SwarmMutationRuntime::default();
 
     handle_comm_assign_task(
+        Ok(None),
         91,
         requester.to_string(),
         Some(intruder.to_string()),
@@ -301,6 +302,7 @@ async fn assign_task_allows_taking_over_stale_assignment() {
     let mutation_runtime = SwarmMutationRuntime::default();
 
     handle_comm_assign_task(
+        Ok(None),
         92,
         requester.to_string(),
         Some(intruder.to_string()),
@@ -390,6 +392,7 @@ async fn task_control_reassign_tells_displaced_worker_to_stand_down() {
     let mutation_runtime = SwarmMutationRuntime::default();
 
     handle_comm_task_control(
+        Ok(None),
         93,
         requester.to_string(),
         "reassign".to_string(),

@@ -410,6 +410,7 @@ pub(super) async fn handle_lightweight_control_request(
         }
         Request::CommSpawn {
             id,
+            agent_role,
             session_id: req_session_id,
             working_dir,
             initial_message,
@@ -424,6 +425,7 @@ pub(super) async fn handle_lightweight_control_request(
                 None => return Ok(()),
             };
             handle_comm_spawn(
+                agent_role,
                 id,
                 req_session_id,
                 working_dir,
@@ -633,12 +635,14 @@ pub(super) async fn handle_lightweight_control_request(
         }
         Request::CommAssignTask {
             id,
+            agent_role,
             session_id: req_session_id,
             target_session,
             task_id,
             message,
         } => {
             handle_comm_assign_task(
+                super::named_agent_routing::load(agent_role.as_deref(), provider_template.as_ref()),
                 id,
                 req_session_id,
                 target_session,
@@ -661,6 +665,7 @@ pub(super) async fn handle_lightweight_control_request(
         }
         Request::CommAssignNext {
             id,
+            agent_role,
             session_id: req_session_id,
             target_session,
             working_dir,
@@ -671,6 +676,7 @@ pub(super) async fn handle_lightweight_control_request(
             effort,
         } => {
             handle_comm_assign_next(
+                agent_role,
                 id,
                 req_session_id,
                 target_session,
@@ -707,6 +713,7 @@ pub(super) async fn handle_lightweight_control_request(
             message,
         } => {
             handle_comm_task_control(
+                super::named_agent_routing::load(None, provider_template.as_ref()),
                 id,
                 req_session_id,
                 action,

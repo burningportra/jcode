@@ -577,6 +577,8 @@ pub enum Request {
         id: u64,
         session_id: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        agent_role: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         working_dir: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         initial_message: Option<String>,
@@ -686,6 +688,8 @@ pub enum Request {
         id: u64,
         session_id: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        agent_role: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         target_session: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         task_id: Option<String>,
@@ -698,6 +702,8 @@ pub enum Request {
     CommAssignNext {
         id: u64,
         session_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        agent_role: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         target_session: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1470,6 +1476,8 @@ pub enum ServerEvent {
     /// Response to comm_spawn request
     #[serde(rename = "comm_spawn_response")]
     CommSpawnResponse {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        routing: Option<jcode_swarm_core::AgentRoutingSelection>,
         id: u64,
         session_id: String,
         new_session_id: String,

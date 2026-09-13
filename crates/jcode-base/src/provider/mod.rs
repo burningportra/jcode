@@ -2147,6 +2147,19 @@ impl Provider for MultiProvider {
         state.clear_forced_next_tier();
     }
 
+    fn direct_openai_compatible_route_parts(&self) -> Option<(String, String, String)> {
+        matches!(self.active_provider(), ActiveProvider::OpenRouter)
+            .then(|| self.active_openrouter_execution_provider())
+            .flatten()
+            .and_then(|provider| provider.direct_openai_compatible_route_parts())
+    }
+
+    fn supports_provider_routing_features(&self) -> bool {
+        matches!(self.active_provider(), ActiveProvider::OpenRouter)
+            && self.active_openrouter_execution_provider()
+                .is_some_and(|provider| provider.supports_provider_routing_features())
+    }
+
     fn explicit_provider_pin_for_current_model(&self) -> Option<String> {
         matches!(self.active_provider(), ActiveProvider::OpenRouter)
             .then(|| self.active_openrouter_execution_provider())

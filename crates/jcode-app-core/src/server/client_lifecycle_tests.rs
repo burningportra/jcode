@@ -1035,6 +1035,7 @@ async fn client_initiated_turn_fans_out_stream_and_terminal_events_to_live_attac
     let swarm_members = Arc::new(RwLock::new(HashMap::from([(
         session_id.to_string(),
         SwarmMember {
+            routing: None,
             session_id: session_id.to_string(),
             event_tx: origin_tx.clone(),
             event_txs: HashMap::from([("origin".to_string(), origin_tx.clone())]),

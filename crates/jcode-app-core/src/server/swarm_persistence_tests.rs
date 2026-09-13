@@ -52,6 +52,7 @@ fn persisted_swarm_state_round_trips_and_marks_running_stale() {
             task_progress: HashMap::from([(
                 "task-1".to_string(),
                 SwarmTaskProgress {
+                    routing: None,
                     assigned_session_id: Some("session-1".to_string()),
                     assignment_summary: Some("do thing".to_string()),
                     assigned_at_unix_ms: Some(10),
@@ -75,6 +76,7 @@ fn persisted_swarm_state_round_trips_and_marks_running_stale() {
     let coordinators = HashMap::from([("swarm-alpha".to_string(), "session-2".to_string())]);
     let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel();
     let members = vec![SwarmMember {
+        routing: None,
         session_id: "session-1".to_string(),
         event_tx,
         event_txs: HashMap::new(),
@@ -150,6 +152,7 @@ fn ready_headless_member_with_report_stops_without_losing_report() {
 
     let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel();
     let members = vec![SwarmMember {
+        routing: None,
         session_id: "session-ready".to_string(),
         event_tx,
         event_txs: HashMap::new(),
@@ -194,6 +197,7 @@ fn ready_detached_client_stops_on_reload_until_it_reattaches() {
 
     let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel();
     let members = vec![SwarmMember {
+        routing: None,
         session_id: "session-detached".to_string(),
         event_tx,
         event_txs: HashMap::new(),
@@ -280,6 +284,7 @@ fn dormant_plan_expiry_preserves_active_work_and_prunes_old_unassigned_graphs() 
 fn terminal_member_retention_preserves_recent_reports_and_prunes_expired_records() {
     let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel();
     let member = SwarmMember {
+        routing: None,
         session_id: "session-terminal".to_string(),
         event_tx,
         event_txs: HashMap::new(),
@@ -328,6 +333,7 @@ fn terminal_member_retention_preserves_recent_reports_and_prunes_expired_records
 fn legacy_terminal_member_uses_snapshot_time_as_retention_fallback() {
     let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel();
     let member = SwarmMember {
+        routing: None,
         session_id: "session-legacy-terminal".to_string(),
         event_tx,
         event_txs: HashMap::new(),
@@ -369,6 +375,7 @@ fn legacy_terminal_member_uses_snapshot_time_as_retention_fallback() {
 fn recovery_induced_terminal_status_starts_retention_at_load_time() {
     let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel();
     let member = SwarmMember {
+        routing: None,
         session_id: "session-ready-recovery".to_string(),
         event_tx,
         event_txs: HashMap::new(),
@@ -411,6 +418,7 @@ fn startup_gc_removes_expired_terminal_members_from_durable_snapshot() {
     let _env = test_env(&dir);
     let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel();
     let members = vec![SwarmMember {
+        routing: None,
         session_id: "session-expired".to_string(),
         event_tx,
         event_txs: HashMap::new(),
@@ -1046,6 +1054,7 @@ fn persisted_swarm_state_without_plan_still_restores_coordinator_and_members() {
 
     let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel();
     let members = vec![SwarmMember {
+        routing: None,
         session_id: "coord-1".to_string(),
         event_tx,
         event_txs: HashMap::new(),
