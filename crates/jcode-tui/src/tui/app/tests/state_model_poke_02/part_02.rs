@@ -382,6 +382,11 @@ fn routing_settings_role_view_sets_default_and_suggests_roles() {
                 .as_deref(),
             Some("reviewer")
         );
+        // The role view stays open with the row relabeled to active.
+        let picker = app.inline_interactive_state.as_ref().unwrap();
+        assert!(picker.is_routing_role_detail_picker());
+        assert_eq!(picker.entries[0].name, "Default role (active)");
+        assert!(picker.entries[0].is_current);
         app.input = "/routing missing".into();
         app.submit_input();
         assert!(app.inline_interactive_state.is_none());

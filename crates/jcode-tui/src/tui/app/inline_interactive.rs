@@ -3667,13 +3667,29 @@ impl App {
                         self.set_status_notice(format!("Usage → {}", title));
                     }
                     PickerAction::RoutingDefaultRole(role) => {
-                        self.inline_interactive_state = None;
+                        // The role-detail view reuses this action for its first
+                        // row. Reopen the role so the row relabels to active
+                        // instead of dropping the user back to no picker.
+                        let reopen = self
+                            .inline_interactive_state
+                            .as_ref()
+                            .is_some_and(|picker| picker.is_routing_role_detail_picker());
+                        if !reopen {
+                            self.inline_interactive_state = None;
+                        }
                         match crate::config::Config::set_agents_default_role(role.as_deref()) {
                             Ok(()) => {
                                 self.push_display_message(DisplayMessage::system(
                                     super::commands::routing::summary(),
                                 ));
                                 self.set_status_notice("Worker routing saved");
+                                if reopen {
+                                    if let Some(role) = role {
+                                        self.open_routing_role_picker(&role);
+                                    } else {
+                                        self.open_routing_picker();
+                                    }
+                                }
                             }
                             Err(error) => self.push_display_message(DisplayMessage::error(
                                 format!("Failed to save worker routing: {error}"),
