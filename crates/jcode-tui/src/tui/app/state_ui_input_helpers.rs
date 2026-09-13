@@ -566,7 +566,7 @@ impl App {
                 for role in roles {
                     candidates.push((
                         format!("/routing {role}"),
-                        "Open role to pick primary and fallback models",
+                        "Open role to set default, primary, and fallbacks",
                     ));
                 }
             }

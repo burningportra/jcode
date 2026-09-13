@@ -119,6 +119,10 @@ Run `/routing` to see the active default worker role, primary route and ordered
 fallbacks, then press Enter on a role to open it. The role view sets that role
 as the default, picks its primary model from the live model catalog, toggles
 catalog models in or out of its ordered fallbacks, or clears all fallbacks.
+When a saved primary or fallback no longer appears in the live catalog, the
+picker appends it as an explicit unavailable "saved route" row so the current
+policy stays visible; picking it reports the route as unavailable instead of
+writing config.
 Picking a routing model only rewrites that role's `model`/`fallbacks` config;
 it never switches the main conversation model. Esc steps back from a model
 list to the role, and again to the role list. Select **No default
