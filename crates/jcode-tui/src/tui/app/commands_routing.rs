@@ -107,6 +107,7 @@ fn option(name: &str, detail: &str, policy: &str) -> PickerOption {
     }
 }
 
+#[cfg(test)]
 fn blank_entry(name: &str, action: PickerAction) -> PickerEntry {
     PickerEntry {
         name: name.into(),
@@ -446,13 +447,6 @@ impl App {
         } else {
             format!("Role {role}: pick a catalog model as the new primary route. Esc goes back.")
         }));
-    }
-
-    pub(crate) fn reopen_routing_parent(&mut self, role: Option<String>) {
-        match role {
-            Some(role) => self.open_routing_role_picker(&role),
-            None => self.open_routing_picker(),
-        }
     }
 }
 
