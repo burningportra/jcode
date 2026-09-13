@@ -96,6 +96,7 @@ pub(super) fn picker_account_provider_scope(picker: &InlineInteractiveState) -> 
         | PickerAction::LogoutProfile(_)
         | PickerAction::LogoutAll
         | PickerAction::Usage { .. }
+        | PickerAction::RoutingDefaultRole(_)
         | PickerAction::AgentTarget(_)
         | PickerAction::AgentModelChoice { .. }
         | PickerAction::SubagentModelChoice { .. } => None,

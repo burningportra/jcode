@@ -31,6 +31,7 @@ pub(super) fn ssh_unsupported_command(input: &str) -> bool {
             | "/permissions"
             | "/permission"
             | "/agents"
+            | "/routing"
             | "/swarm-prompt"
             | "/keys"
             | "/keybindings"

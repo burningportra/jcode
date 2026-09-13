@@ -3631,6 +3631,16 @@ impl App {
                         self.push_display_message(DisplayMessage::usage(content.join("\n")));
                         self.set_status_notice(format!("Usage → {}", title));
                     }
+                    PickerAction::RoutingDefaultRole(role) => {
+                        self.inline_interactive_state = None;
+                        match crate::config::Config::set_agents_default_role(role.as_deref()) {
+                            Ok(()) => {
+                                self.push_display_message(DisplayMessage::system(super::commands::routing::summary()));
+                                self.set_status_notice("Worker routing saved");
+                            }
+                            Err(error) => self.push_display_message(DisplayMessage::error(format!("Failed to save worker routing: {error}"))),
+                        }
+                    }
                     PickerAction::AgentTarget(target) => {
                         self.open_agent_model_picker(target);
                     }

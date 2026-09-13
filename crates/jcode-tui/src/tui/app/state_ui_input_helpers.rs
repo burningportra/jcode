@@ -50,6 +50,7 @@ const REGISTERED_COMMANDS: &[RegisteredCommand] = &[
     RegisteredCommand::hidden("/model-status", "Alias for /provider-test-coverage"),
     RegisteredCommand::public("/refresh-model-list", "Refresh provider model catalogs"),
     RegisteredCommand::public("/agents", "Configure models for agent roles"),
+    RegisteredCommand::public("/routing", "Configure named worker routing"),
     RegisteredCommand::public(
         "/swarm-prompt",
         "Open the active swarm routing prompt in your editor",
@@ -551,6 +552,16 @@ impl App {
             return self.rank_suggestions(input, suggestions);
         }
 
+        if prefix.starts_with("/routing ") {
+            return [
+                ("/routing show", "Show active worker routing"),
+                ("/routing edit", "Edit role models and fallbacks"),
+            ]
+            .into_iter()
+            .filter(|(command, _)| command.starts_with(&prefix))
+            .map(|(command, description)| (command.into(), description))
+            .collect();
+        }
         if prefix.starts_with("/agents ") {
             return self.rank_suggestions(
                 input,
@@ -1685,6 +1696,7 @@ impl App {
                 | "/model"
                 | "/auto"
                 | "/agents"
+                | "/routing"
                 | "/effort"
                 | "/fast"
                 | "/transport"

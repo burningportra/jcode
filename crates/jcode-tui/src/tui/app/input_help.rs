@@ -40,6 +40,9 @@ impl App {
             "agents" => {
                 "/agents\nOpen the agent-model config picker.\n\n/agents <swarm|review|judge|memory|ambient>\nJump straight to that agent role's saved model override."
             }
+            "routing" => {
+                "/routing\nChoose a default named role for future workers.\n\n/routing show\nShow the active policy.\n\n/routing edit\nEdit role models and ordered fallbacks in $VISUAL or $EDITOR. Main conversation and existing workers stay unchanged."
+            }
             "swarm-prompt" => {
                 "/swarm-prompt\nOpen the active swarm routing prompt in $VISUAL or $EDITOR.\n\nJcode uses a nonblank project override at ./.jcode/swarm-prompt.md when present, then ~/.jcode/swarm-prompt.md, then the built-in default. If no editable override exists, this command creates the global file from the built-in default. Restart or reload Jcode after editing because running agent tool registries cache the prompt."
             }

@@ -16,6 +16,7 @@ impl App {
         ) {
             return;
         }
+        self.push_display_message(DisplayMessage::system(crate::tui::app::commands::routing::summary()));
         let models = [
             AgentModelTarget::Swarm,
             AgentModelTarget::Review,
@@ -36,7 +37,7 @@ impl App {
                     api_method: agent_model_target_config_path(target).to_string(),
                     available: true,
                     detail: if target == AgentModelTarget::Swarm {
-                        "/agents swarm · routing: /swarm-prompt".to_string()
+                        "Worker policy: /routing · prompt: /swarm-prompt".to_string()
                     } else {
                         format!("/agents {}", agent_model_target_slug(target))
                     },

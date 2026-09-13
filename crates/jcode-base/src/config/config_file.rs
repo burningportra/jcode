@@ -125,6 +125,13 @@ impl Config {
         super::invalidate_config_cache();
     }
 
+    pub fn set_agents_default_role(role: Option<&str>) -> anyhow::Result<()> {
+        let mut config = Self::load_for_update()?;
+        config.agents.default_role = role.map(str::to_owned);
+        config.agents.validate_roles().map_err(anyhow::Error::msg)?;
+        config.save()
+    }
+
     /// Update the copilot premium mode in the config file.
     /// Reloads, patches, and saves so it doesn't clobber other fields.
     pub fn set_copilot_premium(mode: Option<&str>) -> anyhow::Result<()> {
@@ -752,6 +759,10 @@ impl Config {
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[path = "routing_settings_tests.rs"]
+mod routing_settings_tests;
 
 #[cfg(test)]
 mod issue_1056_tests {

@@ -3300,7 +3300,13 @@ fn handle_reasoning_display_command(app: &mut App, trimmed: &str) -> bool {
     true
 }
 
+#[path = "commands_routing.rs"]
+pub(crate) mod routing;
+
 pub(super) fn handle_config_command(app: &mut App, trimmed: &str) -> bool {
+    if routing::handle(app, trimmed) {
+        return true;
+    }
     if handle_alignment_command(app, trimmed) {
         return true;
     }
@@ -3471,7 +3477,7 @@ pub(super) fn handle_config_command(app: &mut App, trimmed: &str) -> bool {
         use crate::config::config;
         app.push_display_message(DisplayMessage {
             role: "system".to_string(),
-            content: config().display_string(),
+            content: format!("{}\n\n{}", config().display_string(), routing::summary()),
             tool_calls: vec![],
             duration_secs: None,
             title: None,

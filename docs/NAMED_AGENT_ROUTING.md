@@ -112,3 +112,17 @@ Focused tests live in `server/named_agent_routing_tests.rs`, with assignment and
 provider-runtime regression tests alongside their existing suites. Runtime smoke
 should use a separate `JCODE_HOME` and socket, never the user's configuration or
 shared daemon. Build with `selfdev build target=tui` before running that smoke.
+
+## TUI settings
+
+Run `/routing` to see the active default worker role, primary route and ordered
+fallbacks, and choose a different configured default role. Select **No default
+role** to restore unnamed-worker routing. Explicit named roles remain available.
+Use `/routing show` for the summary without the picker, or `/routing edit` to edit
+role models and fallbacks in `$VISUAL` or `$EDITOR`. Invalid configuration is
+reported instead of overwritten. `/config` and `/agents` also show the active
+worker-routing summary and link to this menu.
+
+Changes apply to future worker dispatch. They do not switch the main conversation
+model or retarget existing workers. These local settings are unavailable while
+controlling an SSH-remote session.

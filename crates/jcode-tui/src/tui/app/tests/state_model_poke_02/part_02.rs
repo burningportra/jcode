@@ -252,3 +252,96 @@ fn test_model_picker_preview_enter_selects_model() {
     assert!(app.input().is_empty());
     assert_eq!(app.cursor_pos(), 0);
 }
+
+#[test]
+fn routing_settings_command_select_cancel_and_preserve_main_model() {
+    with_temp_jcode_home(|| {
+        let mut config = crate::config::Config::default();
+        config.agents = serde_json::from_value(serde_json::json!({
+            "default_role": "implementer",
+            "roles": {"implementer": {"model": "cerebras:qwen-3.8-27b"}}
+        }))
+        .unwrap();
+        config.save().unwrap();
+        let mut app = create_test_app();
+        let model = app.provider.model();
+        app.input = "/routing".into();
+        app.submit_input();
+        assert!(
+            app.inline_interactive_state
+                .as_ref()
+                .unwrap()
+                .is_routing_picker()
+        );
+        assert!(!app.is_processing);
+        app.handle_inline_interactive_key(KeyCode::Char('o'), KeyModifiers::CONTROL)
+            .unwrap();
+        app.handle_inline_interactive_key(KeyCode::Esc, KeyModifiers::NONE)
+            .unwrap();
+        assert_eq!(
+            crate::config::Config::load_strict()
+                .unwrap()
+                .agents
+                .default_role
+                .as_deref(),
+            Some("implementer")
+        );
+        app.open_routing_picker();
+        app.inline_interactive_state.as_mut().unwrap().selected = 0;
+        app.handle_inline_interactive_key(KeyCode::Enter, KeyModifiers::NONE)
+            .unwrap();
+        assert!(
+            crate::config::Config::load_strict()
+                .unwrap()
+                .agents
+                .default_role
+                .is_none()
+        );
+        assert_eq!(app.provider.model(), model);
+        assert!(!app.is_processing);
+    });
+}
+
+#[test]
+fn routing_settings_completion_help_and_invalid_config_are_local() {
+    with_temp_jcode_home(|| {
+        let mut app = create_test_app();
+        assert!(
+            app.get_suggestions_for("/rout")
+                .iter()
+                .any(|(cmd, _)| cmd == "/routing")
+        );
+        assert!(
+            app.get_suggestions_for("/routing e")
+                .iter()
+                .any(|(cmd, _)| cmd == "/routing edit")
+        );
+        assert!(App::command_accepts_args("/routing"));
+        assert!(
+            app.command_help("routing")
+                .unwrap()
+                .contains("future workers")
+        );
+        let path = crate::config::Config::path().unwrap();
+        let malformed = "[agents]\ndefault_role = [";
+        std::fs::write(&path, malformed).unwrap();
+        app.input = "/routing".into();
+        app.submit_input();
+        assert!(app.inline_interactive_state.is_none());
+        assert!(!app.is_processing);
+        assert!(
+            app.display_messages
+                .iter()
+                .any(|message| message.content.contains("configuration error"))
+        );
+        app.input = "/routing invalid".into();
+        app.submit_input();
+        assert!(!app.is_processing);
+        assert!(
+            app.display_messages
+                .iter()
+                .any(|message| message.content.contains("Usage: /routing"))
+        );
+        assert_eq!(std::fs::read_to_string(path).unwrap(), malformed);
+    });
+}
