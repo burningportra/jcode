@@ -494,6 +494,189 @@ fn routing_settings_primary_model_save_roundtrip_preserves_main_model() {
 }
 
 #[test]
+fn routing_settings_fallback_toggle_add_remove_roundtrip() {
+    with_temp_jcode_home(|| {
+        let mut config = crate::config::Config::default();
+        config.agents = serde_json::from_value(serde_json::json!({
+            "roles": {"implementer": {"model": "cerebras:qwen-3.8-27b"}}
+        }))
+        .unwrap();
+        config.save().unwrap();
+        let mut app = create_test_app();
+        configure_test_remote_models(&mut app);
+        let main_model = app.provider.model();
+
+        // Open the fallback catalog from the role view.
+        app.open_routing_role_picker("implementer");
+        let toggle = app
+            .inline_interactive_state
+            .as_ref()
+            .unwrap()
+            .filtered
+            .iter()
+            .position(|&idx| {
+                matches!(
+                    app.inline_interactive_state.as_ref().unwrap().entries[idx].action,
+                    crate::tui::PickerAction::RoutingRoleFallbackToggle { .. }
+                )
+            })
+            .expect("role view should offer fallback toggling");
+        app.inline_interactive_state.as_mut().unwrap().selected = toggle;
+        app.handle_inline_interactive_key(KeyCode::Enter, KeyModifiers::NONE)
+            .unwrap();
+        assert!(
+            app.inline_interactive_state
+                .as_ref()
+                .unwrap()
+                .is_routing_model_picker()
+        );
+
+        // Choose an available catalog row that is not the primary.
+        let target = app
+            .inline_interactive_state
+            .as_ref()
+            .unwrap()
+            .filtered
+            .iter()
+            .position(|&idx| {
+                let picker = app.inline_interactive_state.as_ref().unwrap();
+                let entry = &picker.entries[idx];
+                entry.options.iter().any(|option| option.available)
+                    && crate::tui::app::inline_interactive::helpers::model_entry_saved_spec(entry)
+                        != "cerebras:qwen-3.8-27b"
+            })
+            .expect("fallback catalog should offer a non-primary available route");
+        let target_idx = app.inline_interactive_state.as_ref().unwrap().filtered[target];
+        let spec = crate::tui::app::inline_interactive::helpers::model_entry_saved_spec(
+            &app.inline_interactive_state.as_ref().unwrap().entries[target_idx],
+        );
+        app.inline_interactive_state.as_mut().unwrap().selected = target;
+        // Route columns navigate first; advance to the final column if needed.
+        for _ in 0..3 {
+            let column = app
+                .inline_interactive_state
+                .as_ref()
+                .unwrap()
+                .max_navigable_column();
+            let current_column = app.inline_interactive_state.as_ref().unwrap().column;
+            if current_column >= column {
+                break;
+            }
+            app.handle_inline_interactive_key(KeyCode::Enter, KeyModifiers::NONE)
+                .unwrap();
+            if app
+                .inline_interactive_state
+                .as_ref()
+                .is_none_or(|picker| picker.is_routing_role_detail_picker())
+            {
+                break;
+            }
+        }
+        if app
+            .inline_interactive_state
+            .as_ref()
+            .is_some_and(|picker| picker.is_routing_model_picker())
+        {
+            app.handle_inline_interactive_key(KeyCode::Enter, KeyModifiers::NONE)
+                .unwrap();
+        }
+        // Toggle-on writes the fallback and returns to the role view.
+        let saved = crate::config::Config::load_strict().unwrap();
+        assert_eq!(
+            saved.agents.roles["implementer"].fallbacks,
+            vec![spec.clone()]
+        );
+        assert_eq!(app.provider.model(), main_model);
+        assert!(
+            app.inline_interactive_state
+                .as_ref()
+                .unwrap()
+                .is_routing_role_detail_picker()
+        );
+
+        // Reopen the fallback catalog: the added spec is marked current.
+        app.open_routing_role_picker("implementer");
+        let toggle = app
+            .inline_interactive_state
+            .as_ref()
+            .unwrap()
+            .filtered
+            .iter()
+            .position(|&idx| {
+                matches!(
+                    app.inline_interactive_state.as_ref().unwrap().entries[idx].action,
+                    crate::tui::PickerAction::RoutingRoleFallbackToggle { .. }
+                )
+            })
+            .expect("role view should still offer fallback toggling");
+        app.inline_interactive_state.as_mut().unwrap().selected = toggle;
+        app.handle_inline_interactive_key(KeyCode::Enter, KeyModifiers::NONE)
+            .unwrap();
+        let picker = app.inline_interactive_state.as_ref().unwrap();
+        assert!(picker.is_routing_model_picker());
+        let marked = picker
+            .entries
+            .iter()
+            .position(|entry| entry.is_current)
+            .expect("catalog should mark the added fallback");
+        assert_eq!(
+            crate::tui::app::inline_interactive::helpers::model_entry_saved_spec(
+                &picker.entries[marked]
+            ),
+            spec
+        );
+        // Toggle the same row off.
+        let selected = picker
+            .filtered
+            .iter()
+            .position(|&idx| idx == marked)
+            .unwrap_or(0);
+        app.inline_interactive_state.as_mut().unwrap().selected = selected;
+        for _ in 0..3 {
+            let column = app
+                .inline_interactive_state
+                .as_ref()
+                .unwrap()
+                .max_navigable_column();
+            let current_column = app.inline_interactive_state.as_ref().unwrap().column;
+            if current_column >= column {
+                break;
+            }
+            app.handle_inline_interactive_key(KeyCode::Enter, KeyModifiers::NONE)
+                .unwrap();
+            if app
+                .inline_interactive_state
+                .as_ref()
+                .is_none_or(|picker| picker.is_routing_role_detail_picker())
+            {
+                break;
+            }
+        }
+        if app
+            .inline_interactive_state
+            .as_ref()
+            .is_some_and(|picker| picker.is_routing_model_picker())
+        {
+            app.handle_inline_interactive_key(KeyCode::Enter, KeyModifiers::NONE)
+                .unwrap();
+        }
+        let saved = crate::config::Config::load_strict().unwrap();
+        assert!(saved.agents.roles["implementer"].fallbacks.is_empty());
+        assert_eq!(
+            saved.agents.roles["implementer"].model,
+            "cerebras:qwen-3.8-27b"
+        );
+        assert_eq!(app.provider.model(), main_model);
+        assert!(
+            app.inline_interactive_state
+                .as_ref()
+                .unwrap()
+                .is_routing_role_detail_picker()
+        );
+    });
+}
+
+#[test]
 fn routing_settings_role_fallback_toggle_and_clear_roundtrip() {
     with_temp_jcode_home(|| {
         let mut config = crate::config::Config::default();
