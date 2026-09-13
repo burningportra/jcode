@@ -419,6 +419,65 @@ impl App {
             self.open_routing_role_picker(&role);
             return;
         }
+        // The saved primary/fallback specs may not exist in the live catalog
+        // (renamed model, stale config, filtered provider). Surface them as
+        // explicit rows so the current policy is visible and selectable
+        // instead of silently showing nothing marked.
+        let known: std::collections::HashSet<String> = picker
+            .entries
+            .iter()
+            .map(super::super::inline_interactive::helpers::model_entry_saved_spec)
+            .collect();
+        let mut missing: Vec<String> = Vec::new();
+        if !fallback {
+            if !known.contains(&primary) {
+                missing.push(primary.clone());
+            }
+            for fallback_spec in &fallbacks {
+                if !known.contains(fallback_spec)
+                    && !missing.iter().any(|item| item == fallback_spec)
+                {
+                    missing.push(fallback_spec.clone());
+                }
+            }
+        } else {
+            for fallback_spec in &fallbacks {
+                if !known.contains(fallback_spec)
+                    && !missing.iter().any(|item| item == fallback_spec)
+                {
+                    missing.push(fallback_spec.clone());
+                }
+            }
+            if !known.contains(&primary) && !missing.iter().any(|item| item == &primary) {
+                missing.push(primary.clone());
+            }
+        }
+        for spec in missing {
+            picker.entries.push(PickerEntry {
+                name: spec.clone(),
+                options: vec![PickerOption {
+                    provider: "saved route".into(),
+                    api_method: "not in current catalog".into(),
+                    available: false,
+                    detail: "saved worker route; pick a catalog row to replace it".into(),
+                    estimated_reference_cost_micros: None,
+                }],
+                action: PickerAction::RoutingModelChoice {
+                    role: role.clone(),
+                    fallback,
+                },
+                selected_option: 0,
+                is_current: false,
+                is_default: false,
+                is_favorite: false,
+                recommended: false,
+                recommendation_rank: usize::MAX,
+                usage_score: 0,
+                old: false,
+                created_date: None,
+                effort: None,
+            });
+        }
         for entry in &mut picker.entries {
             let spec = super::super::inline_interactive::helpers::model_entry_saved_spec(entry);
             entry.action = PickerAction::RoutingModelChoice {

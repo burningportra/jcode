@@ -394,6 +394,106 @@ fn routing_settings_role_view_sets_default_and_suggests_roles() {
 }
 
 #[test]
+fn routing_settings_primary_model_save_roundtrip_preserves_main_model() {
+    with_temp_jcode_home(|| {
+        let mut config = crate::config::Config::default();
+        config.agents = serde_json::from_value(serde_json::json!({
+            "roles": {"implementer": {
+                "model": "cerebras:qwen-3.8-27b",
+                "fallbacks": ["cerebras:gpt-oss-120b"],
+            }}
+        }))
+        .unwrap();
+        config.save().unwrap();
+        let mut app = create_test_app();
+        configure_test_remote_models(&mut app);
+        let main_model = app.provider.model();
+        app.open_routing_role_picker("implementer");
+        let primary = app
+            .inline_interactive_state
+            .as_ref()
+            .unwrap()
+            .filtered
+            .iter()
+            .position(|&idx| {
+                matches!(
+                    app.inline_interactive_state.as_ref().unwrap().entries[idx].action,
+                    crate::tui::PickerAction::RoutingRolePrimaryModel { .. }
+                )
+            })
+            .expect("role view should offer primary model picking");
+        app.inline_interactive_state.as_mut().unwrap().selected = primary;
+        app.handle_inline_interactive_key(KeyCode::Enter, KeyModifiers::NONE)
+            .unwrap();
+        let picker = app.inline_interactive_state.as_ref().unwrap();
+        assert!(picker.is_routing_model_picker());
+        // The current primary is marked without touching the main model.
+        let current = picker
+            .entries
+            .iter()
+            .position(|entry| entry.is_current)
+            .expect("catalog should mark the current primary");
+        let spec = crate::tui::app::inline_interactive::helpers::model_entry_saved_spec(
+            &picker.entries[current],
+        );
+        assert_eq!(spec, "cerebras:qwen-3.8-27b");
+        assert_eq!(app.provider.model(), main_model);
+        // Pick a different catalog entry as the new primary.
+        let other = picker
+            .filtered
+            .iter()
+            .position(|&idx| {
+                crate::tui::app::inline_interactive::helpers::model_entry_saved_spec(
+                    &picker.entries[idx],
+                ) != "cerebras:qwen-3.8-27b"
+            })
+            .expect("catalog should offer another route");
+        app.inline_interactive_state.as_mut().unwrap().selected = other;
+        // Route columns navigate first; advance to the final column if needed.
+        for _ in 0..3 {
+            let column = app
+                .inline_interactive_state
+                .as_ref()
+                .unwrap()
+                .max_navigable_column();
+            let current_column = app.inline_interactive_state.as_ref().unwrap().column;
+            if current_column >= column {
+                break;
+            }
+            app.handle_inline_interactive_key(KeyCode::Enter, KeyModifiers::NONE)
+                .unwrap();
+            if app
+                .inline_interactive_state
+                .as_ref()
+                .is_none_or(|picker| picker.is_routing_role_detail_picker())
+            {
+                break;
+            }
+        }
+        // If navigation is still inside the catalog, one more Enter saves.
+        if app
+            .inline_interactive_state
+            .as_ref()
+            .is_some_and(|picker| picker.is_routing_model_picker())
+        {
+            app.handle_inline_interactive_key(KeyCode::Enter, KeyModifiers::NONE)
+                .unwrap();
+        }
+        let saved = crate::config::Config::load_strict().unwrap();
+        let policy = &saved.agents.roles["implementer"];
+        assert_ne!(policy.model, "cerebras:qwen-3.8-27b");
+        assert!(!policy.fallbacks.iter().any(|item| item == &policy.model));
+        assert_eq!(app.provider.model(), main_model);
+        assert!(
+            app.inline_interactive_state
+                .as_ref()
+                .unwrap()
+                .is_routing_role_detail_picker()
+        );
+    });
+}
+
+#[test]
 fn routing_settings_role_fallback_toggle_and_clear_roundtrip() {
     with_temp_jcode_home(|| {
         let mut config = crate::config::Config::default();
