@@ -151,6 +151,7 @@ impl Config {
             anyhow::bail!("Unknown worker role '{role}'");
         };
         policy.model = model.to_string();
+        policy.fallbacks.retain(|fallback| fallback != model);
         config.agents.validate_roles().map_err(anyhow::Error::msg)?;
         config.save()
     }

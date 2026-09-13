@@ -77,6 +77,15 @@ fn routing_settings_reject_malformed_config_without_writing() {
 #[test]
 fn routing_settings_role_model_update_preserves_other_settings() {
     with_config(CONFIG, |path| {
+        // Promoting the existing fallback to primary prunes it from fallbacks.
+        Config::set_agents_role_model("implementer", "cerebras:gpt-oss-120b").unwrap();
+        let promoted: Config = toml::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        assert_eq!(
+            promoted.agents.roles["implementer"].model,
+            "cerebras:gpt-oss-120b"
+        );
+        assert!(promoted.agents.roles["implementer"].fallbacks.is_empty());
+        std::fs::write(path, CONFIG).unwrap();
         Config::set_agents_role_model("reviewer", "claude-api:claude-opus-4-6").unwrap();
         let saved: Config = toml::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
         assert_eq!(
