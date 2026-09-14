@@ -858,6 +858,39 @@ fn version_command_shows_remote_server_identity_and_update_status() {
 }
 
 #[test]
+fn help_topic_resolves_installed_skill_and_suggests_it() {
+    let mut app = create_test_app();
+    let temp = tempfile::tempdir().expect("tempdir");
+    let skill_dir = temp.path().join(".jcode/skills/help-skill");
+    std::fs::create_dir_all(&skill_dir).expect("create skill dir");
+    std::fs::write(
+        skill_dir.join("SKILL.md"),
+        "---\nname: help-skill\ndescription: Help lookup regression skill\n---\nUse it.\n",
+    )
+    .expect("write skill");
+    app.session.working_dir = Some(temp.path().to_string_lossy().to_string());
+
+    // The skill is advertised in `/` autocomplete alongside commands.
+    let suggestions = app.get_suggestions_for("/help-sk");
+    assert!(
+        suggestions.iter().any(|(cmd, _)| cmd == "/help-skill"),
+        "expected /help-skill in suggestions: {suggestions:?}"
+    );
+
+    // And `/help <skill>` documents it instead of erroring Unknown command.
+    let help = app
+        .command_help("help-skill")
+        .expect("installed skill must have help text");
+    assert!(help.contains("/help-skill"), "{help}");
+    assert!(help.contains("Help lookup regression skill"), "{help}");
+
+    // Case-insensitive with a leading slash.
+    assert!(app.command_help("/HELP-SKILL").is_some());
+    // Unknown topics still return None so /help errors as before.
+    assert!(app.command_help("no-such-skill-xyz").is_none());
+}
+
+#[test]
 fn skills_command_lists_loaded_and_endorsed_skills() {
     let mut app = create_test_app();
 

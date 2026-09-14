@@ -217,7 +217,7 @@ impl App {
             "continue" | "resumeall" | "resume-all" if self.is_remote => {
                 "/continue\nContinue every interrupted live session that would auto-resume on a reload.\n\nThe server walks all currently-live sessions and, for each idle one that still owes the model a reply (a turn that errored or was interrupted mid-generation), injects the standard \"continue where you left off\" reminder so it picks back up. Sessions that are busy, fresh, or already complete are left untouched.\n\nAlias: /resumeall."
             }
-            _ => return None,
+            _ => return self.skill_help(&topic),
         };
         let help = help.replace(
             "{effort_keys}",
@@ -234,5 +234,49 @@ impl App {
             &format!("{}+", jcode_tui_core::keybind::alt_label()),
         );
         Some(help)
+    }
+
+    /// Help text for an installed skill slash command (`/help <skill>`).
+    ///
+    /// Skills are listed alongside commands in `/` autocomplete and the
+    /// `/help` overlay, so a skill with no detail entry would be advertised
+    /// but undocumented. Resolve against the same snapshot the autocomplete
+    /// uses (global + project-local overlay, or remote names when remote).
+    /// Returns `None` when no skill matches so unknown topics still error.
+    fn skill_help(&self, topic: &str) -> Option<String> {
+        let name = topic.trim().trim_start_matches('/').to_lowercase();
+        if name.is_empty() {
+            return None;
+        }
+        if self.is_remote {
+            if !self.remote_skills.is_empty()
+                && self
+                    .remote_skills
+                    .iter()
+                    .any(|skill| skill.eq_ignore_ascii_case(&name))
+            {
+                let canonical = self
+                    .remote_skills
+                    .iter()
+                    .find(|skill| skill.eq_ignore_ascii_case(&name))
+                    .map(String::as_str)
+                    .unwrap_or(&name);
+                return Some(format!(
+                    "/{canonical}\nActivate the {canonical} skill.\n\nSkill details are provided by the remote session; run /skills there for the full description."
+                ));
+            }
+            return None;
+        }
+        let snapshot = self.current_skills_snapshot();
+        let skill = snapshot.get(&name).or_else(|| {
+            snapshot
+                .list()
+                .into_iter()
+                .find(|s| s.name.eq_ignore_ascii_case(&name))
+        })?;
+        Some(format!(
+            "/{}\n{}\n\nType /{} to activate this skill. Run /skills for the full loaded-skills report.",
+            skill.name, skill.description, skill.name
+        ))
     }
 }
