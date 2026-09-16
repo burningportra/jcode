@@ -146,8 +146,21 @@ impl PromptSuggestionService {
 
     async fn generate(&self, snapshot: PromptSuggestionSnapshot) -> Result<Option<String>> {
         let prompt = build_prompt(&snapshot);
-        let raw = (self.complete)(SYSTEM_PROMPT.to_string(), prompt).await?;
-        normalize_suggestion(&raw, snapshot.max_chars)
+        let start = std::time::Instant::now();
+        let raw = (self.complete)(SYSTEM_PROMPT.to_string(), prompt).await;
+        match &raw {
+            Ok(text) => crate::logging::info(&format!(
+                "PROMPT_SUGGESTION_SIDECAR_OK duration_ms={} raw_len={}",
+                start.elapsed().as_millis(),
+                text.len()
+            )),
+            Err(error) => crate::logging::warn(&format!(
+                "PROMPT_SUGGESTION_SIDECAR_ERROR duration_ms={} error={:#}",
+                start.elapsed().as_millis(),
+                error
+            )),
+        }
+        normalize_suggestion(&raw?, snapshot.max_chars)
     }
 
     async fn finish_generation(
