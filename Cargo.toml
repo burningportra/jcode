@@ -92,6 +92,7 @@ members = [
     "crates/jcode-telemetry-core",
     "crates/jcode-tui-workspace",
     "crates/jcode-render-core", "crates/jcode-provider-inference-runtime",
+    "crates/jcode-typesafe",
 ]
 
 [lib]

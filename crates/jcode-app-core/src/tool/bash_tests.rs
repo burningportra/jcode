@@ -901,6 +901,9 @@ fn gate_ctx(working_dir: &str) -> ToolContext {
 
 #[tokio::test]
 async fn bash_refuses_to_delete_the_home_directory() {
+    // Process-global `HOME` mutation: hold the serialization guard for the whole
+    // body so a sibling test can't reset `HOME` between our set and read-back.
+    let _home_lock = crate::tool::home_env_guard::guard();
     // The #604 incident, at the real tool boundary.
     let temp = tempfile::tempdir().expect("temp home");
     let home = temp.path().to_string_lossy().to_string();
@@ -1007,6 +1010,9 @@ async fn bash_does_not_interfere_with_ordinary_commands() {
 
 #[tokio::test]
 async fn indirect_dispatch_paths_cannot_bypass_the_gate() {
+    // Process-global `HOME` mutation: hold the serialization guard for the whole
+    // body so a sibling test can't reset `HOME` between our set and read-back.
+    let _home_lock = crate::tool::home_env_guard::guard();
     // batch, and every other caller, dispatch through Tool::execute rather than
     // reimplementing it, so the gate lives at the only chokepoint. Assert that
     // directly: calling execute for a background job (the one path that returns

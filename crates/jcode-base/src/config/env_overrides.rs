@@ -539,6 +539,44 @@ impl Config {
             self.websearch.searxng_url = Some(v);
         }
 
+        // TypeSafe (System One)
+        if let Ok(v) = std::env::var("JCODE_TYPESAFE_ENABLED")
+            && let Some(parsed) = parse_env_bool(&v)
+        {
+            self.typesafe.enabled = parsed;
+        }
+        if let Ok(v) = std::env::var("JCODE_TYPESAFE_API_KEY")
+            && !v.trim().is_empty()
+        {
+            self.typesafe.api_key = Some(v);
+        }
+        if let Ok(v) = std::env::var("JCODE_TYPESAFE_API_KEY_ENV")
+            && !v.trim().is_empty()
+        {
+            self.typesafe.api_key_env = v;
+        }
+        if let Ok(v) = std::env::var("JCODE_TYPESAFE_MODEL")
+            && !v.trim().is_empty()
+        {
+            self.typesafe.model = v;
+        }
+        if let Ok(v) = std::env::var("JCODE_TYPESAFE_BASE_URL")
+            && !v.trim().is_empty()
+        {
+            self.typesafe.base_url = v.trim_end_matches('/').to_string();
+        }
+        if let Ok(v) = std::env::var("JCODE_TYPESAFE_TIMEOUT_SECS")
+            && let Ok(secs) = v.trim().parse::<u64>()
+            && secs > 0
+        {
+            self.typesafe.timeout_secs = secs;
+        }
+        if let Ok(v) = std::env::var("JCODE_TYPESAFE_RISK_ENABLED")
+            && let Some(parsed) = parse_env_bool(&v)
+        {
+            self.typesafe.risk.enabled = parsed;
+        }
+
         if let Ok(v) = std::env::var("JCODE_TRUSTED_EXTERNAL_AUTH_SOURCES") {
             let mut source_ids = Vec::new();
             let mut source_paths = Vec::new();

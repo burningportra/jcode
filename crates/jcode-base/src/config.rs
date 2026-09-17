@@ -14,7 +14,8 @@ pub use jcode_config_types::{
     PromptSuggestionAcceptanceKey, PromptSuggestionsConfig, PromptSuggestionsResolvedConfig,
     PromptSuggestionsWorkspaceOverride, ProviderConfig, QualityConfig, ReasoningDisplayMode,
     SafetyConfig, SearchConfig, SessionPickerResumeAction, SponsorsConfig, SwarmSpawnMode,
-    SwarmStripLayout, TerminalConfig, UpdateChannel, WebSearchConfig, WebSearchEngine,
+    SwarmStripLayout, TerminalConfig, TypesafeConfig, TypesafeRiskConfig, UpdateChannel,
+    WebSearchConfig, WebSearchEngine,
     normalize_prompt_suggestion_workspace,
 };
 use serde::{Deserialize, Serialize};
@@ -55,6 +56,13 @@ const CONFIG_ENV_KEYS: &[&str] = &[
     "JCODE_BING_API_KEY",
     "JCODE_BING_API_KEY_ENV",
     "JCODE_BING_MARKET",
+    "JCODE_TYPESAFE_API_KEY",
+    "JCODE_TYPESAFE_API_KEY_ENV",
+    "JCODE_TYPESAFE_BASE_URL",
+    "JCODE_TYPESAFE_ENABLED",
+    "JCODE_TYPESAFE_MODEL",
+    "JCODE_TYPESAFE_RISK_ENABLED",
+    "JCODE_TYPESAFE_TIMEOUT_SECS",
     "JCODE_CENTERED_TOGGLE_KEY",
     "JCODE_CHAT_NATIVE_SCROLLBAR",
     "JCODE_COMPACT_NOTIFICATIONS",
@@ -496,6 +504,9 @@ pub struct Config {
 
     /// Experimental sourced quality-report tool configuration.
     pub quality: QualityConfig,
+
+    /// TypeSafe (System One) structured-decision integration.
+    pub typesafe: TypesafeConfig,
 
     /// Built-in tool exposure configuration
     pub tools: ToolConfig,

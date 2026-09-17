@@ -860,12 +860,16 @@ impl Tool for BashTool {
         let mut params: BashInput = serde_json::from_value(input)?;
         let run_in_background = params.run_in_background.unwrap_or(false);
 
+        let typesafe_cfg = jcode_base::config::config();
         // Destructive-command gate (#604), before background dispatch.
         if let Some(refusal) = destructive_command_refusal(
             &params.command,
             params.justification.as_deref(),
             ctx.working_dir.clone(),
-        ) {
+            Some(&typesafe_cfg.typesafe),
+        )
+        .await
+        {
             return Err(anyhow::anyhow!(refusal));
         }
 

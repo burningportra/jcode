@@ -3332,6 +3332,7 @@ dependencies = [
  "jcode-terminal-image",
  "jcode-tool-core",
  "jcode-tool-types",
+ "jcode-typesafe",
  "jcode-update-core",
  "libc",
  "open",
@@ -4465,6 +4466,17 @@ name = "jcode-tui-workspace"
 version = "0.1.0"
 dependencies = [
  "ratatui",
+]
+
+[[package]]
+name = "jcode-typesafe"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]

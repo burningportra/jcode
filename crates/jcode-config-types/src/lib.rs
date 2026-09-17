@@ -1325,6 +1325,86 @@ impl Default for WebSearchConfig {
     }
 }
 
+/// Configuration for TypeSafe (System One) structured-decision integration.
+///
+/// TypeSafe answers typed questions (noul / choice / score) against a state in
+/// one fast call. jcode uses it in two places: the `typesafe` tool (agent-facing)
+/// and destructive-command adjudication in the bash gate (see `risk`). Both are
+/// fail-soft: without a key or when the service is unreachable, the agent keeps
+/// working and the gate falls back to the deterministic reflection prompt.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TypesafeConfig {
+    /// Master switch for the `typesafe` tool. The command-risk integration
+    /// additionally requires `risk.enabled`.
+    pub enabled: bool,
+    /// API key. Empty by default; the environment variable below is preferred
+    /// when set.
+    pub api_key: Option<String>,
+    /// Environment variable containing the API key.
+    pub api_key_env: String,
+    /// Model alias. Use `jev-latest` unless TypeSafe documents a successor.
+    pub model: String,
+    /// API base URL without the trailing `/v1/systemone` path.
+    pub base_url: String,
+    /// Per-request timeout in seconds.
+    pub timeout_secs: u64,
+    /// Destructive-command adjudication in the bash gate. Opt-in.
+    pub risk: TypesafeRiskConfig,
+}
+
+/// Thresholds for the bash gate's TypeSafe adjudication of `Confirm`-tier
+/// destructive commands.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TypesafeRiskConfig {
+    /// Enable the adjudication pass. Default off: the gate stays fully
+    /// deterministic unless the user opts in.
+    pub enabled: bool,
+    /// A noul (yes = "serves the user's request") of at least this value
+    /// admits the command without a reflection turn.
+    pub allow_above: f64,
+    /// A noul of at most this value refuses the command outright.
+    ///
+    /// Between the two thresholds (or on any error) the existing reflection
+    /// prompt applies, exactly as before.
+    pub require_below: f64,
+}
+
+impl Default for TypesafeRiskConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            allow_above: 0.7,
+            require_below: 0.5,
+        }
+    }
+}
+
+impl Default for TypesafeConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            api_key: None,
+            api_key_env: "TYPESAFE_API_KEY".to_string(),
+            model: "jev-latest".to_string(),
+            base_url: "https://api.typesafe.ai".to_string(),
+            timeout_secs: 30,
+            risk: TypesafeRiskConfig::default(),
+        }
+    }
+}
+
+impl TypesafeConfig {
+    /// Resolved API key: environment variable wins over the config file value.
+    pub fn resolved_api_key(&self) -> Option<String> {
+        std::env::var(&self.api_key_env)
+            .ok()
+            .filter(|v| !v.trim().is_empty())
+            .or_else(|| self.api_key.clone().filter(|v| !v.trim().is_empty()))
+    }
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum AutoRouterFastProvider {

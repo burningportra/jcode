@@ -1726,17 +1726,20 @@ fn the_dialect_sweep_catches_the_issue_754_schema() {
 /// own tools their strict mode, since that would drop the structured-output
 /// guarantees on every OpenAI-route tool call with nothing to notice.
 ///
-/// The four tools listed below were already non-strict before that change, for
+/// The five tools listed below were already non-strict before that change, for
 /// reasons unrelated to it (`batch` declares `additionalProperties: true` so its
 /// sub-call payloads stay open-world; the others carry open maps or untyped
 /// action payloads). Pinning the exact set is what makes this a regression
-/// detector: a fifth name appearing means a stricter rule went too far, and a
+/// detector: a sixth name appearing means a stricter rule went too far, and a
 /// name disappearing means a tool became strict-eligible and the list is stale.
 #[tokio::test]
 async fn only_the_known_open_world_tools_are_ineligible_for_openai_strict_mode() {
     /// Built-ins that legitimately cannot be strict. Verified against master
     /// before the #711/#713 eligibility changes, so this is pre-existing.
-    const KNOWN_OPEN_WORLD_TOOLS: &[&str] = &["batch", "browser", "initiative", "swarm"];
+    // `typesafe` joins the set as of the System One integration: its open
+    // `state` object and open question map make it open-world by design.
+    const KNOWN_OPEN_WORLD_TOOLS: &[&str] =
+        &["batch", "browser", "initiative", "swarm", "typesafe"];
 
     let provider: Arc<dyn Provider> = Arc::new(MockProvider);
     let registry = Registry::new(provider).await;

@@ -20,6 +20,31 @@ mod edit;
 mod feedback;
 mod gmail;
 mod goal;
+
+/// Tests that mutate the process-global `HOME` env var and then read it back
+/// (via the destructive-command gate's `RiskContext::from_env`) must not run
+/// concurrently: `std::env::set_var` is process-wide, so a sibling thread
+/// restoring the real `HOME` mid-test makes its own temp target look like an
+/// ordinary outside-cwd path and a `rm -rf <temp-home>` would run for real.
+/// Every such test holds this guard for its whole body, which serializes them
+/// deterministically. Hold it via `crate::tool::home_env_guard::guard()`.
+#[cfg(test)]
+pub mod home_env_guard {
+    use std::sync::LazyLock;
+    use std::sync::Mutex;
+
+    static HOME_ENV_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+
+    /// Acquire the HOME-serialization guard. It restores nothing; callers still
+    /// set and restore `HOME` themselves, but while the guard is held no other
+    /// test will observe an intermediate value.
+    pub fn guard() -> std::sync::MutexGuard<'static, ()> {
+        HOME_ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+}
+
 pub mod inflight;
 mod invalid;
 mod jcode_docs;
@@ -39,6 +64,7 @@ mod side_panel;
 pub(crate) mod skill;
 mod symbol_relocate;
 mod todo;
+mod typesafe;
 mod webfetch;
 mod websearch;
 mod write;
@@ -425,6 +451,12 @@ impl Registry {
             );
             Self::insert_tool_timed(&mut m, &mut timings, "todo", todo::TodoTool::new);
             Self::insert_tool_timed(&mut m, &mut timings, "quality", quality::QualityTool::new);
+            Self::insert_tool_timed(
+                &mut m,
+                &mut timings,
+                "typesafe",
+                typesafe::TypesafeTool::new,
+            );
             Self::insert_tool_timed(&mut m, &mut timings, "bg", bg::BgTool::new);
             Self::insert_tool_timed(
                 &mut m,

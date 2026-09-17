@@ -252,6 +252,9 @@ fn test_parse_update_without_explicit_at() {
 
 #[tokio::test]
 async fn apply_patch_refuses_to_delete_a_protected_path() {
+    // Process-global `HOME` mutation: hold the serialization guard for the whole
+    // body so a sibling test can't reset `HOME` between our set and read-back.
+    let _home_lock = crate::tool::home_env_guard::guard();
     let temp = tempfile::tempdir().expect("temp home");
     let home = temp.path().to_path_buf();
     let previous = std::env::var("HOME").ok();
