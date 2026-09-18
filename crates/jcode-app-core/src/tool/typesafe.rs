@@ -1,10 +1,10 @@
 //! The `typesafe` tool: TypeSafe (System One) structured decisions.
 //!
 //! One call answers any number of typed questions against structured `state` —
-//! noul (a 0..1 yes-probability), choice (pick one of the options, first win is
-//! returned), score (a graded signal). Fail-soft: when the feature is disabled,
-//! no API key is configured, or the service errors, the call returns a
-//! descriptive error and the agent falls back to its own judgment and keeps
+//! noul (a 0..1 yes-probability), choice (pick one option from `criteria`),
+//! score (an ordered rubric in `criteria`). Fail-soft: when the feature is
+//! disabled, no API key is configured, or the service errors, the call returns
+//! a descriptive error and the agent falls back to its own judgment and keeps
 //! working.
 //!
 //! The client is built per call (reading the live config) rather than captured
@@ -99,11 +99,102 @@ fn prepare_request(cfg: &TypesafeConfig, input: Value) -> Result<jcode_typesafe:
         anyhow::bail!("question {id:?} needs a non-empty \"instructions\" string");
     }
 
+    let mut questions = Map::new();
+    for (id, q) in params.questions {
+        questions.insert(id.clone(), normalize_question(&id, q)?);
+    }
+
     Ok(jcode_typesafe::SystemOneRequest {
         state: params.state,
         model: cfg.model.clone(),
-        questions: Map::from_iter(params.questions),
+        questions,
     })
+}
+
+/// Build one question object in the TypeSafe wire shape.
+///
+/// Choice and Score require `criteria` (map vs ordered array). A string-array
+/// `options` field is accepted as a legacy alias and rewritten so a caller
+/// that followed the old tool schema does not 422 against the live API.
+fn normalize_question(id: &str, q: Value) -> Result<Value> {
+    let qtype = q
+        .get("type")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    let instructions = q
+        .get("instructions")
+        .cloned()
+        .ok_or_else(|| anyhow!("question {id:?} needs a non-empty \"instructions\" string"))?;
+
+    let mut spec = Map::new();
+    spec.insert("type".into(), json!(qtype));
+    spec.insert("instructions".into(), instructions);
+
+    match qtype.as_str() {
+        "noul" => {
+            if let Some(criteria) = q.get("criteria") {
+                spec.insert("criteria".into(), criteria.clone());
+            }
+        }
+        "choice" => {
+            spec.insert("criteria".into(), choice_criteria(id, &q)?);
+        }
+        "score" => {
+            spec.insert("criteria".into(), score_criteria(id, &q)?);
+        }
+        _ => {}
+    }
+
+    Ok(Value::Object(spec))
+}
+
+fn choice_criteria(id: &str, q: &Value) -> Result<Value> {
+    if let Some(Value::Object(map)) = q.get("criteria") {
+        if map.is_empty() {
+            anyhow::bail!("question {id:?} choice criteria must have at least one option");
+        }
+        return Ok(Value::Object(map.clone()));
+    }
+    if let Some(Value::Array(opts)) = q.get("options") {
+        if opts.is_empty() {
+            anyhow::bail!("question {id:?} choice options must have at least one option");
+        }
+        let mut map = Map::new();
+        for opt in opts {
+            let key = opt
+                .as_str()
+                .ok_or_else(|| anyhow!("question {id:?} choice options must be strings"))?;
+            if key.trim().is_empty() {
+                anyhow::bail!("question {id:?} choice options must be non-empty strings");
+            }
+            map.insert(key.to_string(), Value::Null);
+        }
+        return Ok(Value::Object(map));
+    }
+    anyhow::bail!(
+        "question {id:?} of type choice needs \"criteria\" (option -> description map) \
+         or \"options\" (string array)"
+    )
+}
+
+fn score_criteria(id: &str, q: &Value) -> Result<Value> {
+    let levels = match q.get("criteria") {
+        Some(Value::Array(levels)) => levels,
+        Some(_) => anyhow::bail!(
+            "question {id:?} of type score needs \"criteria\" as an ordered array of at least two levels"
+        ),
+        None => match q.get("options") {
+            Some(Value::Array(levels)) => levels,
+            _ => anyhow::bail!(
+                "question {id:?} of type score needs \"criteria\" (ordered level descriptions, at least two)"
+            ),
+        },
+    };
+    if levels.len() < 2 {
+        anyhow::bail!("question {id:?} score criteria needs at least two levels");
+    }
+    Ok(Value::Array(levels.clone()))
 }
 
 fn build_client(cfg: &TypesafeConfig) -> jcode_typesafe::Client {
@@ -137,17 +228,20 @@ impl Tool for TypesafeTool {
                 "questions": {
                     "type": "object",
                     "minProperties": 1,
-                    "description": "Map of short id to {type,instructions[,options]}; all questions evaluated in one call.",
+                    "description": "Map of short id to {type,instructions[,criteria]}. Choice and score require criteria. All questions evaluated in one call.",
                     "additionalProperties": {
                         "type": "object",
                         "required": ["type", "instructions"],
                         "properties": {
-                            "type": { "type": "string", "enum": QUESTION_TYPES.to_vec(), "description": "noul=p(yes) 0..1; choice=pick one of options; score=graded 0..1." },
+                            "type": { "type": "string", "enum": QUESTION_TYPES.to_vec(), "description": "noul=p(yes) 0..1; choice=pick one of criteria; score=position on criteria levels." },
                             "instructions": { "type": "string" },
+                            "criteria": {
+                                "description": "choice: option->description map (null description ok). score: ordered level strings, at least two. noul: optional {true,false} clarifications."
+                            },
                             "options": {
                                 "type": "array",
                                 "items": { "type": "string" },
-                                "description": "For type=choice only: the options to choose from, first match wins."
+                                "description": "Legacy alias rewritten to criteria: choice option names, or score levels."
                             }
                         }
                     }
@@ -245,32 +339,84 @@ mod tests {
     }
 
     #[test]
-    fn choice_and_score_options_pass_through() {
+    fn choice_and_score_criteria_use_official_wire_shape() {
+        let questions = json!({
+            "verdict": {
+                "type": "choice",
+                "instructions": "Pick the safest response given the command and the request.",
+                "criteria": {
+                    "proceed": "Safe to run as issued",
+                    "ask_user": "Needs confirmation",
+                    "refuse": "Must not run"
+                }
+            },
+            "risk": {
+                "type": "score",
+                "instructions": "How irreversible is this command?",
+                "criteria": ["reversible", "hard to undo", "permanent"]
+            }
+        });
+        let req = prepare_request(&cfg_with_key(), input_object(r#"{"a":1}"#, questions)).unwrap();
+
+        let value: Value = serde_json::to_value(&req).unwrap();
+        let criteria = value["questions"]["verdict"]["criteria"]
+            .as_object()
+            .expect("choice criteria map");
+        assert_eq!(criteria.len(), 3);
+        assert_eq!(criteria["proceed"], json!("Safe to run as issued"));
+        assert!(value["questions"]["verdict"].get("options").is_none());
+        let levels = value["questions"]["risk"]["criteria"]
+            .as_array()
+            .expect("score criteria array");
+        assert_eq!(levels.len(), 3);
+        assert_eq!(levels[0], json!("reversible"));
+    }
+
+    #[test]
+    fn legacy_options_rewrite_to_criteria() {
         let questions = json!({
             "verdict": {
                 "type": "choice",
                 "instructions": "Pick the safest response given the command and the request.",
                 "options": ["proceed", "ask_user", "refuse"]
             },
-            "risk": { "type": "score", "instructions": "Irreversibility on a 0..1 scale." }
+            "risk": {
+                "type": "score",
+                "instructions": "Irreversibility.",
+                "options": ["low", "high"]
+            }
         });
         let req = prepare_request(&cfg_with_key(), input_object(r#"{"a":1}"#, questions)).unwrap();
 
         let value: Value = serde_json::to_value(&req).unwrap();
-        let opts = value["questions"]["verdict"]["options"]
+        let criteria = value["questions"]["verdict"]["criteria"]
+            .as_object()
+            .expect("rewritten choice criteria");
+        assert_eq!(criteria.get("proceed"), Some(&Value::Null));
+        assert_eq!(criteria.get("ask_user"), Some(&Value::Null));
+        assert_eq!(criteria.get("refuse"), Some(&Value::Null));
+        assert!(value["questions"]["verdict"].get("options").is_none());
+        let levels = value["questions"]["risk"]["criteria"]
             .as_array()
-            .expect("options array");
-        assert_eq!(opts.len(), 3);
-        assert_eq!(opts[0], json!("proceed"));
-        assert_eq!(value["questions"]["risk"]["type"], "score");
+            .expect("rewritten score criteria");
+        assert_eq!(levels, &vec![json!("low"), json!("high")]);
+        assert!(value["questions"]["risk"].get("options").is_none());
     }
 
     #[test]
     fn multiple_questions_in_one_call_serve_in_a_single_request() {
         let questions = json!({
             "p_safe": { "type": "noul", "instructions": "Is the target path explicitly named by the user?" },
-            "verdict": { "type": "choice", "instructions": "proceed or ask", "options": ["proceed", "ask_user"] },
-            "risk": { "type": "score", "instructions": "How irreversible, 0..1" }
+            "verdict": {
+                "type": "choice",
+                "instructions": "proceed or ask",
+                "criteria": { "proceed": null, "ask_user": null }
+            },
+            "risk": {
+                "type": "score",
+                "instructions": "How irreversible?",
+                "criteria": ["reversible", "permanent"]
+            }
         });
         let req = prepare_request(
             &cfg_with_key(),
@@ -282,6 +428,32 @@ mod tests {
         assert!(req.questions.contains_key("p_safe"));
         assert!(req.questions.contains_key("verdict"));
         assert!(req.questions.contains_key("risk"));
+    }
+
+    #[test]
+    fn choice_without_criteria_or_options_is_rejected() {
+        let err = prepare_request(
+            &cfg_with_key(),
+            input_object(
+                r#"{}"#,
+                json!({ "q": { "type": "choice", "instructions": "pick one" } }),
+            ),
+        )
+        .expect_err("choice needs criteria");
+        assert!(err.to_string().contains("criteria"), "{err}");
+    }
+
+    #[test]
+    fn score_without_enough_levels_is_rejected() {
+        let err = prepare_request(
+            &cfg_with_key(),
+            input_object(
+                r#"{}"#,
+                json!({ "q": { "type": "score", "instructions": "rate it", "criteria": ["only one"] } }),
+            ),
+        )
+        .expect_err("score needs two levels");
+        assert!(err.to_string().contains("at least two"), "{err}");
     }
 
     #[test]

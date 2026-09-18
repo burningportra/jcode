@@ -324,6 +324,16 @@ max_fff_indexes = 1
 # Report-only sourced standards check. This does not gate todo completion.
 enabled = true
 
+# TypeSafe (System One / jev): typed noul/choice/score judgments, not the
+# chat model. Off by default. Preferred: export TYPESAFE_API_KEY. Or set
+# api_key here. Choice/score questions need `criteria` (see TypeSafe docs).
+# [typesafe]
+# enabled = true
+# api_key_env = "TYPESAFE_API_KEY"
+# model = "jev-latest"
+# [typesafe.risk]
+# enabled = true
+
 [tools]
 # Controls which built-in tools are sent to the model.
 # Profiles: "full" (default), "acp", "minimal"/"lite", or "none".
