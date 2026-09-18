@@ -228,7 +228,7 @@ impl Tool for TypesafeTool {
                 "questions": {
                     "type": "object",
                     "minProperties": 1,
-                    "description": "Map of short id to {type,instructions[,criteria]}. Choice and score require criteria. All questions evaluated in one call.",
+                    "description": "Map of short id to {type,instructions[,criteria]}. Choice and score require criteria.",
                     "additionalProperties": {
                         "type": "object",
                         "required": ["type", "instructions"],
@@ -236,7 +236,7 @@ impl Tool for TypesafeTool {
                             "type": { "type": "string", "enum": QUESTION_TYPES.to_vec(), "description": "noul=p(yes) 0..1; choice=pick one of criteria; score=position on criteria levels." },
                             "instructions": { "type": "string" },
                             "criteria": {
-                                "description": "choice: option->description map (null description ok). score: ordered level strings, at least two. noul: optional {true,false} clarifications."
+                                "description": "choice: option->description map. score: ordered levels (>=2). noul: optional {true,false}."
                             },
                             "options": {
                                 "type": "array",
