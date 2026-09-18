@@ -442,7 +442,7 @@ pub(crate) async fn consult_jev_auto_pick(
     last_model_spec: Option<&str>,
     candidates: &[AutoModelCandidate],
 ) -> Option<JevAutoPick> {
-    if !cfg.auto.enabled || cfg.resolved_api_key().is_none() || candidates.len() < 2 {
+    if !jev_auto_consult_eligible(cfg, candidates) {
         return None;
     }
     let client = jcode_typesafe::Client::new(jcode_typesafe::ClientOptions {
@@ -456,6 +456,13 @@ pub(crate) async fn consult_jev_auto_pick(
         Ok(result) => accept_jev_choice(&result, candidates, cfg.auto.min_confidence),
         Err(jcode_typesafe::EvalError::NoApiKey | jcode_typesafe::EvalError::Service(_)) => None,
     }
+}
+
+fn jev_auto_consult_eligible(
+    cfg: &crate::config::TypesafeConfig,
+    candidates: &[AutoModelCandidate],
+) -> bool {
+    cfg.auto.enabled && cfg.resolved_api_key().is_some() && candidates.len() >= 2
 }
 
 pub(crate) fn filter_candidates_by_context(
@@ -1591,5 +1598,28 @@ mod tests {
         assert!(value["questions"]["route"]["criteria"]["openai-oauth:gpt-5.4"].is_string());
         assert!(value["questions"]["route"].get("options").is_none());
         assert_eq!(value["state"]["heuristic_category"], "implementation");
+    }
+
+    fn auto_cfg(enabled: bool, key: Option<&str>) -> crate::config::TypesafeConfig {
+        crate::config::TypesafeConfig {
+            api_key: key.map(str::to_string),
+            api_key_env: "JCODE_TEST_TYPESAFE_AUTO_KEY_UNSET".into(),
+            auto: crate::config::TypesafeAutoConfig {
+                enabled,
+                timeout_secs: 2,
+                min_confidence: 0.55,
+            },
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn jev_consult_is_skipped_when_disabled_unkeyed_or_singleton() {
+        let two = two_implement_candidates();
+        let one = two[..1].to_vec();
+        assert!(!jev_auto_consult_eligible(&auto_cfg(false, Some("k")), &two));
+        assert!(!jev_auto_consult_eligible(&auto_cfg(true, None), &two));
+        assert!(!jev_auto_consult_eligible(&auto_cfg(true, Some("k")), &one));
+        assert!(jev_auto_consult_eligible(&auto_cfg(true, Some("k")), &two));
     }
 }
