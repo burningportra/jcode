@@ -276,9 +276,43 @@ pub(crate) fn select_candidate_for_category(
     candidates: &[AutoModelCandidate],
     history_portable: bool,
 ) -> Option<AutoDecision> {
+    select_candidate_for_category_with_jev(state, category, candidates, history_portable, None)
+}
+
+/// Same as [`select_candidate_for_category`], with an optional jev Choice
+/// already resolved off the state lock. Forced-tier and same-category
+/// stickiness still win. A jev pick is used only when it matches a live
+/// candidate; otherwise the heuristic pick runs.
+pub(crate) fn select_candidate_for_category_with_jev(
+    state: &mut AutoRouteState,
+    category: TurnCategory,
+    candidates: &[AutoModelCandidate],
+    history_portable: bool,
+    jev_pick: Option<&JevAutoPick>,
+) -> Option<AutoDecision> {
     if state.forced_next_tier.is_none()
         && let Some(decision) = state.sticky_decision_for(category)
     {
+        return Some(decision);
+    }
+
+    if state.forced_next_tier.is_none()
+        && let Some(pick) = jev_pick
+        && let Some(candidate) = candidates
+            .iter()
+            .find(|candidate| candidate.model_spec == pick.model_spec)
+    {
+        let decision = AutoDecision {
+            tier: candidate.tier,
+            model_spec: candidate.model_spec.clone(),
+            provider_family: candidate.provider_family.clone(),
+            reason: format!(
+                "jev choice (confidence {:.2}): {}",
+                pick.confidence, candidate.reason
+            ),
+            at: Instant::now(),
+        };
+        state.record_decision(category, decision.clone());
         return Some(decision);
     }
 
@@ -303,6 +337,125 @@ pub(crate) fn select_candidate_for_category(
     };
     state.record_decision(category, decision.clone());
     Some(decision)
+}
+
+/// A jev Choice among live auto-router candidates, resolved before the
+/// state lock is taken.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct JevAutoPick {
+    pub model_spec: String,
+    pub confidence: f64,
+}
+
+const JEV_AUTO_QUESTION_ID: &str = "route";
+const JEV_TASK_TEXT_LIMIT: usize = 2_000;
+
+fn category_label(category: TurnCategory) -> &'static str {
+    match category {
+        TurnCategory::Planning => "planning",
+        TurnCategory::Implementation => "implementation",
+        TurnCategory::Mechanical => "mechanical",
+        TurnCategory::Unknown => "unknown",
+    }
+}
+
+fn truncate_task_text(text: &str) -> String {
+    let mut truncated = text.trim().to_string();
+    if truncated.chars().count() > JEV_TASK_TEXT_LIMIT {
+        truncated = truncated.chars().take(JEV_TASK_TEXT_LIMIT).collect();
+    }
+    truncated
+}
+
+fn candidate_criteria(
+    candidates: &[AutoModelCandidate],
+) -> serde_json::Map<String, serde_json::Value> {
+    let mut criteria = serde_json::Map::new();
+    for candidate in candidates {
+        let description = format!(
+            "tier={}, family={}. {}. Do not pick this for work that needs a different capability tier.",
+            tier_label(candidate.tier),
+            candidate.provider_family,
+            candidate.reason
+        );
+        criteria.insert(
+            candidate.model_spec.clone(),
+            serde_json::Value::String(description),
+        );
+    }
+    criteria
+}
+
+/// Build the TypeSafe Choice request for auto routing. Public for tests.
+pub(crate) fn jev_auto_request(
+    task_text: &str,
+    category: TurnCategory,
+    last_model_spec: Option<&str>,
+    candidates: &[AutoModelCandidate],
+    model: &str,
+) -> jcode_typesafe::SystemOneRequest {
+    let mut questions = serde_json::Map::new();
+    questions.insert(
+        JEV_AUTO_QUESTION_ID.to_string(),
+        serde_json::json!({
+            "type": "choice",
+            "instructions": "Which live model should handle this turn? Pick the option whose tier and traits fit the task. Prefer a cheaper/faster model when the work is mechanical or already decided. Prefer a frontier model when the work is planning, architecture, or a contested judgment.",
+            "criteria": candidate_criteria(candidates),
+        }),
+    );
+    jcode_typesafe::SystemOneRequest {
+        state: serde_json::json!({
+            "task": truncate_task_text(task_text),
+            "heuristic_category": category_label(category),
+            "last_model": last_model_spec,
+        }),
+        model: model.to_string(),
+        questions,
+    }
+}
+
+fn accept_jev_choice(
+    result: &jcode_typesafe::SystemOneResult,
+    candidates: &[AutoModelCandidate],
+    min_confidence: f64,
+) -> Option<JevAutoPick> {
+    let choice = result.choice(JEV_AUTO_QUESTION_ID)?;
+    let confidence = result.confidence(JEV_AUTO_QUESTION_ID).unwrap_or(0.0);
+    if confidence < min_confidence {
+        return None;
+    }
+    candidates
+        .iter()
+        .any(|candidate| candidate.model_spec == choice)
+        .then(|| JevAutoPick {
+            model_spec: choice.to_string(),
+            confidence,
+        })
+}
+
+/// Consult TypeSafe for a Choice among `candidates`. Fail-soft: any missing
+/// key, service error, unknown spec, or low confidence returns `None`.
+pub(crate) async fn consult_jev_auto_pick(
+    cfg: &crate::config::TypesafeConfig,
+    task_text: &str,
+    category: TurnCategory,
+    last_model_spec: Option<&str>,
+    candidates: &[AutoModelCandidate],
+) -> Option<JevAutoPick> {
+    if !cfg.auto.enabled || cfg.resolved_api_key().is_none() || candidates.len() < 2 {
+        return None;
+    }
+    let client = jcode_typesafe::Client::new(jcode_typesafe::ClientOptions {
+        api_key: cfg.resolved_api_key(),
+        base_url: cfg.base_url.clone(),
+        model: cfg.model.clone(),
+        timeout: std::time::Duration::from_secs(cfg.auto.timeout_secs.max(1)),
+    });
+    let request = jev_auto_request(task_text, category, last_model_spec, candidates, &cfg.model);
+    match client.evaluate(&request).await {
+        Ok(result) => accept_jev_choice(&result, candidates, cfg.auto.min_confidence),
+        Err(jcode_typesafe::EvalError::NoApiKey | jcode_typesafe::EvalError::Service(_)) => None,
+    }
 }
 
 pub(crate) fn filter_candidates_by_context(
@@ -599,7 +752,7 @@ fn latest_message_is_only_tool_results(messages: &[Message]) -> bool {
     })
 }
 
-fn latest_user_text(messages: &[Message]) -> Option<String> {
+pub(crate) fn latest_user_text(messages: &[Message]) -> Option<String> {
     messages
         .iter()
         .rev()
@@ -901,10 +1054,7 @@ mod tests {
         let catalog = AutoTierCatalog {
             anthropic_oauth_models: vec!["claude-opus-4-8".into(), "claude-sonnet-4-6".into()],
             openai_oauth_models: vec!["gpt-5.5-codex".into(), "gpt-5.4".into()],
-            oauth_subscription_models: vec![(
-                "copilot:gpt-5.5".to_string(),
-                "copilot".to_string(),
-            )],
+            oauth_subscription_models: vec![("copilot:gpt-5.5".to_string(), "copilot".to_string())],
             vercel_ai_gateway_models: vec!["glm-5.3".into(), "zai/glm-5.3-flash".into()],
             openrouter_models: vec!["deepseek/deepseek-v4.1-flash".into()],
             openweight_api_models: vec![],
@@ -1265,5 +1415,181 @@ mod tests {
             classify_turn(&[user("initial"), message], &[], 1),
             TurnCategory::Mechanical
         );
+    }
+
+    fn two_implement_candidates() -> Vec<AutoModelCandidate> {
+        vec![
+            AutoModelCandidate::new(
+                AutoTier::Implement,
+                "claude-oauth:claude-sonnet-4-6",
+                "anthropic",
+                "first",
+            ),
+            AutoModelCandidate::new(
+                AutoTier::Implement,
+                "openai-oauth:gpt-5.4",
+                "openai",
+                "second",
+            ),
+        ]
+    }
+
+    fn choice_result(choice: &str, confidence: f64) -> jcode_typesafe::SystemOneResult {
+        jcode_typesafe::SystemOneResult {
+            model: "jev-latest".into(),
+            answers: json!({
+                "route": {
+                    "type": "choice",
+                    "choice": choice,
+                    "confidence": confidence
+                }
+            }),
+            usage: jcode_typesafe::Usage {
+                input_tokens: 1,
+                output_tokens: 1,
+            },
+        }
+    }
+
+    #[test]
+    fn jev_choice_selects_a_live_candidate() {
+        let candidates = two_implement_candidates();
+        let mut state = AutoRouteState::new();
+        let pick = JevAutoPick {
+            model_spec: "openai-oauth:gpt-5.4".into(),
+            confidence: 0.91,
+        };
+        let decision = select_candidate_for_category_with_jev(
+            &mut state,
+            TurnCategory::Implementation,
+            &candidates,
+            true,
+            Some(&pick),
+        )
+        .expect("jev pick");
+        assert_eq!(decision.model_spec, "openai-oauth:gpt-5.4");
+        assert!(decision.reason.contains("jev choice"));
+        assert_eq!(state.decisions.len(), 1);
+    }
+
+    #[test]
+    fn sticky_decision_beats_jev_pick() {
+        let candidates = two_implement_candidates();
+        let mut state = AutoRouteState::new();
+        let first = select_candidate_for_category(
+            &mut state,
+            TurnCategory::Implementation,
+            &candidates,
+            true,
+        )
+        .expect("first");
+        let pick = JevAutoPick {
+            model_spec: "openai-oauth:gpt-5.4".into(),
+            confidence: 0.99,
+        };
+        let sticky = select_candidate_for_category_with_jev(
+            &mut state,
+            TurnCategory::Implementation,
+            &candidates,
+            true,
+            Some(&pick),
+        )
+        .expect("sticky");
+        assert_eq!(sticky.model_spec, first.model_spec);
+        assert_eq!(state.decisions.len(), 1);
+    }
+
+    #[test]
+    fn forced_tier_beats_jev_pick() {
+        let candidates = vec![
+            AutoModelCandidate::new(
+                AutoTier::Frontier,
+                "claude-oauth:claude-opus-4-8",
+                "anthropic",
+                "frontier",
+            ),
+            AutoModelCandidate::new(
+                AutoTier::Implement,
+                "claude-oauth:claude-sonnet-4-6",
+                "anthropic",
+                "implement",
+            ),
+        ];
+        let mut state = AutoRouteState::new();
+        state.force_next_tier(AutoTier::Frontier);
+        let pick = JevAutoPick {
+            model_spec: "claude-oauth:claude-sonnet-4-6".into(),
+            confidence: 0.99,
+        };
+        let forced = select_candidate_for_category_with_jev(
+            &mut state,
+            TurnCategory::Implementation,
+            &candidates,
+            true,
+            Some(&pick),
+        )
+        .expect("forced");
+        assert_eq!(forced.tier, AutoTier::Frontier);
+        assert_eq!(forced.model_spec, "claude-oauth:claude-opus-4-8");
+        assert!(state.forced_next_tier.is_none());
+    }
+
+    #[test]
+    fn unknown_jev_choice_falls_through_to_heuristic() {
+        let candidates = two_implement_candidates();
+        let mut state = AutoRouteState::new();
+        let pick = JevAutoPick {
+            model_spec: "not-a-live-spec".into(),
+            confidence: 0.99,
+        };
+        let decision = select_candidate_for_category_with_jev(
+            &mut state,
+            TurnCategory::Implementation,
+            &candidates,
+            true,
+            Some(&pick),
+        )
+        .expect("heuristic");
+        assert_eq!(decision.model_spec, "claude-oauth:claude-sonnet-4-6");
+        assert!(!decision.reason.contains("jev choice"));
+    }
+
+    #[test]
+    fn accept_jev_choice_requires_live_spec_and_confidence() {
+        let candidates = two_implement_candidates();
+        assert!(
+            accept_jev_choice(
+                &choice_result("openai-oauth:gpt-5.4", 0.91),
+                &candidates,
+                0.55
+            )
+            .is_some()
+        );
+        assert!(
+            accept_jev_choice(
+                &choice_result("openai-oauth:gpt-5.4", 0.40),
+                &candidates,
+                0.55
+            )
+            .is_none()
+        );
+        assert!(accept_jev_choice(&choice_result("missing", 0.99), &candidates, 0.55).is_none());
+    }
+
+    #[test]
+    fn jev_auto_request_uses_official_choice_criteria() {
+        let candidates = two_implement_candidates();
+        let request = jev_auto_request(
+            "implement the fix",
+            TurnCategory::Implementation,
+            Some("claude-oauth:claude-sonnet-4-6"),
+            &candidates,
+            "jev-latest",
+        );
+        let value = serde_json::to_value(&request).expect("serialize");
+        assert_eq!(value["questions"]["route"]["type"], "choice");
+        assert!(value["questions"]["route"]["criteria"]["openai-oauth:gpt-5.4"].is_string());
+        assert!(value["questions"]["route"].get("options").is_none());
+        assert_eq!(value["state"]["heuristic_category"], "implementation");
     }
 }

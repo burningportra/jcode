@@ -88,6 +88,14 @@ impl SystemOneResult {
             .and_then(Value::as_str)
     }
 
+    /// Confidence for one question id, if the answer carries it.
+    pub fn confidence(&self, id: &str) -> Option<f64> {
+        self.answers
+            .get(id)
+            .and_then(|a| a.get("confidence"))
+            .and_then(Value::as_f64)
+    }
+
     /// A formatted `id: ...` line per answer, for rendering.
     pub fn format_answers(&self) -> String {
         let entries = self

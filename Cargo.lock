@@ -3432,6 +3432,7 @@ dependencies = [
  "jcode-tool-core",
  "jcode-tool-types",
  "jcode-transport",
+ "jcode-typesafe",
  "jcode-usage-types",
  "libc",
  "open",

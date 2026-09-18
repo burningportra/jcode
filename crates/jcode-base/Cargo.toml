@@ -113,6 +113,7 @@ jcode-storage = { path = "../jcode-storage" }
 jcode-task-types = { path = "../jcode-task-types" }
 jcode-tool-core = { path = "../jcode-tool-core" }
 jcode-tool-types = { path = "../jcode-tool-types" }
+jcode-typesafe = { path = "../jcode-typesafe" }
 jcode-side-panel-types = { path = "../jcode-side-panel-types" }
 
 # Gzip decoding (used by provider import/helpers)

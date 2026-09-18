@@ -576,6 +576,24 @@ impl Config {
         {
             self.typesafe.risk.enabled = parsed;
         }
+        if let Ok(v) = std::env::var("JCODE_TYPESAFE_AUTO_ENABLED")
+            && let Some(parsed) = parse_env_bool(&v)
+        {
+            self.typesafe.auto.enabled = parsed;
+        }
+        if let Ok(v) = std::env::var("JCODE_TYPESAFE_AUTO_TIMEOUT_SECS")
+            && let Ok(secs) = v.trim().parse::<u64>()
+            && secs > 0
+        {
+            self.typesafe.auto.timeout_secs = secs;
+        }
+        if let Ok(v) = std::env::var("JCODE_TYPESAFE_AUTO_MIN_CONFIDENCE")
+            && let Ok(parsed) = v.trim().parse::<f64>()
+            && parsed.is_finite()
+            && (0.0..=1.0).contains(&parsed)
+        {
+            self.typesafe.auto.min_confidence = parsed;
+        }
 
         if let Ok(v) = std::env::var("JCODE_TRUSTED_EXTERNAL_AUTH_SOURCES") {
             let mut source_ids = Vec::new();

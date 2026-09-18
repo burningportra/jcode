@@ -1328,10 +1328,10 @@ impl Default for WebSearchConfig {
 /// Configuration for TypeSafe (System One) structured-decision integration.
 ///
 /// TypeSafe answers typed questions (noul / choice / score) against a state in
-/// one fast call. jcode uses it in two places: the `typesafe` tool (agent-facing)
-/// and destructive-command adjudication in the bash gate (see `risk`). Both are
-/// fail-soft: without a key or when the service is unreachable, the agent keeps
-/// working and the gate falls back to the deterministic reflection prompt.
+/// one fast call. jcode uses it in three places: the `typesafe` tool, destructive
+/// bash-gate adjudication (`risk`), and optional `jcode-auto` model routing
+/// (`auto`). All three are fail-soft: without a key or when the service is
+/// unreachable, the agent keeps working.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct TypesafeConfig {
@@ -1351,6 +1351,8 @@ pub struct TypesafeConfig {
     pub timeout_secs: u64,
     /// Destructive-command adjudication in the bash gate. Opt-in.
     pub risk: TypesafeRiskConfig,
+    /// Optional jev Choice for `jcode-auto` model routing. Opt-in.
+    pub auto: TypesafeAutoConfig,
 }
 
 /// Thresholds for the bash gate's TypeSafe adjudication of `Confirm`-tier
@@ -1381,6 +1383,33 @@ impl Default for TypesafeRiskConfig {
     }
 }
 
+/// Thresholds for jev Choice among live `jcode-auto` candidates.
+///
+/// Forced-tier and same-category stickiness still win first. When those do
+/// not decide, and at least two live candidates remain, one Choice call
+/// picks a model spec. Timeout, missing key, HTTP error, unknown spec, or
+/// low confidence fall through to the heuristic pick.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TypesafeAutoConfig {
+    /// Enable the auto-router Choice pass. Default off.
+    pub enabled: bool,
+    /// Per-request timeout in seconds for routing (short; not the tool timeout).
+    pub timeout_secs: u64,
+    /// Minimum Choice confidence to accept jev's pick.
+    pub min_confidence: f64,
+}
+
+impl Default for TypesafeAutoConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            timeout_secs: 2,
+            min_confidence: 0.55,
+        }
+    }
+}
+
 impl Default for TypesafeConfig {
     fn default() -> Self {
         Self {
@@ -1391,6 +1420,7 @@ impl Default for TypesafeConfig {
             base_url: "https://api.typesafe.ai".to_string(),
             timeout_secs: 30,
             risk: TypesafeRiskConfig::default(),
+            auto: TypesafeAutoConfig::default(),
         }
     }
 }

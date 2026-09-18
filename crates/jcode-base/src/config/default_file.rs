@@ -333,6 +333,10 @@ enabled = true
 # model = "jev-latest"
 # [typesafe.risk]
 # enabled = true
+# [typesafe.auto]
+# enabled = true
+# timeout_secs = 2
+# min_confidence = 0.55
 
 [tools]
 # Controls which built-in tools are sent to the model.

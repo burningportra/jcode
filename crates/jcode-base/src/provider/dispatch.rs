@@ -80,11 +80,38 @@ impl MultiProvider {
             auto_router::classify_turn(messages, tools, state.decisions.len())
         };
         let history_portable = auto_router::history_is_portable(messages);
+        let (last_model_spec, skip_jev) = {
+            let state = self
+                .auto_route_state
+                .read()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let last_model_spec = state
+                .last_resolved
+                .as_ref()
+                .map(|decision| decision.model_spec.clone());
+            let skip_jev =
+                state.forced_next_tier.is_some() || state.sticky_decision_for(category).is_some();
+            (last_model_spec, skip_jev)
+        };
+        let task_text = auto_router::latest_user_text(messages).unwrap_or_default();
+        let typesafe = crate::config::config().typesafe.clone();
+        let jev_pick = if skip_jev {
+            None
+        } else {
+            auto_router::consult_jev_auto_pick(
+                &typesafe,
+                &task_text,
+                category,
+                last_model_spec.as_deref(),
+                &candidates,
+            )
+            .await
+        };
         let mut attempted_specs = Vec::new();
         let mut notes = Vec::new();
 
         let mut decision = self
-            .select_auto_decision(category, &candidates, history_portable)
+            .select_auto_decision(category, &candidates, history_portable, jev_pick.as_ref())
             .ok_or_else(|| anyhow!("Auto router could not resolve a model for this turn"))?;
 
         loop {
@@ -122,23 +149,26 @@ impl MultiProvider {
                         return Err(err);
                     }
 
-                    let Some(next_decision) = self.select_auto_escalation_decision(
-                        category,
-                        decision.tier,
-                        &candidates,
-                        history_portable,
-                        &attempted_specs,
-                    ).or_else(|| {
-                        // No untried provider left in this tier or above: walk
-                        // every remaining untried candidate tier-down so a dead
-                        // transport (e.g. Vercel 402) falls through to the next
-                        // provider instead of failing the turn.
-                        self.select_auto_fallback_decision(
+                    let Some(next_decision) = self
+                        .select_auto_escalation_decision(
+                            category,
+                            decision.tier,
                             &candidates,
                             history_portable,
                             &attempted_specs,
                         )
-                    }) else {
+                        .or_else(|| {
+                            // No untried provider left in this tier or above: walk
+                            // every remaining untried candidate tier-down so a dead
+                            // transport (e.g. Vercel 402) falls through to the next
+                            // provider instead of failing the turn.
+                            self.select_auto_fallback_decision(
+                                &candidates,
+                                history_portable,
+                                &attempted_specs,
+                            )
+                        })
+                    else {
                         return Err(err.context(format!(
                             "Auto router exhausted tier escalation ({})",
                             notes.join("; ")
@@ -155,16 +185,18 @@ impl MultiProvider {
         category: auto_router::TurnCategory,
         candidates: &[auto_router::AutoModelCandidate],
         history_portable: bool,
+        jev_pick: Option<&auto_router::JevAutoPick>,
     ) -> Option<auto_router::AutoDecision> {
         let mut state = self
             .auto_route_state
             .write()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        auto_router::select_candidate_for_category(
+        auto_router::select_candidate_for_category_with_jev(
             &mut state,
             category,
             candidates,
             history_portable,
+            jev_pick,
         )
     }
 
@@ -247,8 +279,7 @@ impl MultiProvider {
         // Subscription families first, metered API transports last.
         let family_rank = |family: &str| match family {
             "anthropic" | "openai" => 0,
-            "copilot" | "gemini" | "antigravity" | "cursor" | "bedrock"
-            | "jcode-subscription" => 1,
+            "copilot" | "gemini" | "antigravity" | "cursor" | "bedrock" | "jcode-subscription" => 1,
             _ => 2,
         };
         ordered.sort_by(|a, b| {
@@ -272,9 +303,7 @@ impl MultiProvider {
                 && pinned != candidate.provider_family
                 && candidates.iter().any(|c| {
                     c.provider_family == pinned
-                        && !attempted_specs
-                            .iter()
-                            .any(|spec| spec == &c.model_spec)
+                        && !attempted_specs.iter().any(|spec| spec == &c.model_spec)
                 })
             {
                 return None;

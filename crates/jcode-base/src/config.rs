@@ -14,9 +14,8 @@ pub use jcode_config_types::{
     PromptSuggestionAcceptanceKey, PromptSuggestionsConfig, PromptSuggestionsResolvedConfig,
     PromptSuggestionsWorkspaceOverride, ProviderConfig, QualityConfig, ReasoningDisplayMode,
     SafetyConfig, SearchConfig, SessionPickerResumeAction, SponsorsConfig, SwarmSpawnMode,
-    SwarmStripLayout, TerminalConfig, TypesafeConfig, TypesafeRiskConfig, UpdateChannel,
-    WebSearchConfig, WebSearchEngine,
-    normalize_prompt_suggestion_workspace,
+    SwarmStripLayout, TerminalConfig, TypesafeAutoConfig, TypesafeConfig, TypesafeRiskConfig,
+    UpdateChannel, WebSearchConfig, WebSearchEngine, normalize_prompt_suggestion_workspace,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
@@ -63,6 +62,9 @@ const CONFIG_ENV_KEYS: &[&str] = &[
     "JCODE_TYPESAFE_MODEL",
     "JCODE_TYPESAFE_RISK_ENABLED",
     "JCODE_TYPESAFE_TIMEOUT_SECS",
+    "JCODE_TYPESAFE_AUTO_ENABLED",
+    "JCODE_TYPESAFE_AUTO_TIMEOUT_SECS",
+    "JCODE_TYPESAFE_AUTO_MIN_CONFIDENCE",
     "JCODE_CENTERED_TOGGLE_KEY",
     "JCODE_CHAT_NATIVE_SCROLLBAR",
     "JCODE_COMPACT_NOTIFICATIONS",
