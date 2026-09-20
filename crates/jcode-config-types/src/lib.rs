@@ -1389,7 +1389,7 @@ pub struct TypesafeCompactionConfig {
 impl Default for TypesafeCompactionConfig {
     fn default() -> Self {
         Self {
-            enabled: false,
+            enabled: true,  // Enabled by default
             min_confidence: 0.6,
         }
     }

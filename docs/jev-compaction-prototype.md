@@ -11,7 +11,7 @@ Jev (TypeSafe System One) is now integrated into jcode's context compaction syst
 Added `TypesafeCompactionConfig` struct:
 ```rust
 pub struct TypesafeCompactionConfig {
-    pub enabled: bool,           // Default: false (opt-in)
+    pub enabled: bool,           // Default: true (enabled by default)
     pub min_confidence: f64,     // Default: 0.6
 }
 ```
@@ -112,9 +112,32 @@ Requires all four sections because:
 - Missing sections indicate Jev didn't follow instructions
 - Better to fall back than to accept incomplete summaries
 
-## How to Enable
+## How to Use
 
-### Via Config File (`~/.jcode/config.toml`)
+### Automatic (Default Behavior)
+
+Jev-powered compaction is **enabled by default** and will activate automatically when:
+1. You have a TypeSafe API key configured (`JCODE_TYPESAFE_API_KEY` environment variable)
+2. The main TypeSafe integration is enabled (`[typesafe] enabled = true`)
+
+No additional configuration needed! Just set your API key:
+
+```bash
+export JCODE_TYPESAFE_API_KEY="your-key-here"
+```
+
+### Disabling Jev Compaction
+
+To disable and use only plain summarization, set in `~/.jcode/config.toml`:
+
+```toml
+[typesafe.compaction]
+enabled = false
+```
+
+### Custom Configuration
+
+Via Config File (`~/.jcode/config.toml`):
 
 ```toml
 [typesafe]
@@ -123,8 +146,8 @@ api_key_env = "JCODE_TYPESAFE_API_KEY"
 model = "jev-latest"
 
 [typesafe.compaction]
-enabled = true
-min_confidence = 0.6
+enabled = true          # Optional: already true by default
+min_confidence = 0.7    # Optional: raise threshold (default 0.6)
 ```
 
 ### Via Environment Variables
