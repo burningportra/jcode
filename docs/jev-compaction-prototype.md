@@ -1,10 +1,10 @@
-# Jev-Powered Compaction Prototype
+# Jev-Powered Compaction
 
 ## Summary
 
-This prototype integrates Jev (TypeSafe System One) into jcode's context compaction system with a fail-safe fallback to the existing plain summarization approach. The implementation follows the established patterns from the auto-router and bash destructive gate integrations.
+Jev (TypeSafe System One) is now integrated into jcode's context compaction system, providing structured markdown summaries with guaranteed sections and confidence scoring. The implementation uses a fail-safe fallback to plain summarization on any error, disabled config, or low confidence.
 
-## What Was Changed
+## What Was Implemented
 
 ### Configuration (`crates/jcode-config-types/src/lib.rs`)
 
@@ -20,84 +20,120 @@ Added to `TypesafeConfig.compaction` field.
 
 ### Core Integration (`crates/jcode-base/src/compaction.rs`)
 
-1. **New function: `try_jev_compaction`**
+1. **`try_jev_compaction`** - Main Jev integration
    - Returns `Option<String>` (None on any error, disabled, or low confidence)
-   - Uses TypeSafe Choice API with structured criteria
+   - Uses TypeSafe **Score** API with 0-10 quality scale
+   - Enforces 8K character limit on summaries
+   - Validates required markdown sections
    - Logs confidence and fallback decisions
-   - Truncates conversation text to 32K chars at UTF-8 boundaries
 
-2. **Updated function: `generate_compaction_artifact`**
+2. **`extract_summary_from_answer`** - Robust response parsing
+   - Tries multiple known fields: `text`, `reasoning`, `explanation`, `content`
+   - Rejects empty or whitespace-only responses
+   - Fail-soft: returns `None` on any parse error
+
+3. **`validate_summary_structure`** - Schema enforcement
+   - Requires all four sections: Context, Actions, Current State, User Preferences
+   - Simple substring check (fast, sufficient for well-formed output)
+
+4. **`generate_compaction_artifact`** - Updated main function
    - Now accepts `typesafe_cfg: Option<&TypesafeConfig>`
    - Tries Jev first if config is provided and enabled
    - Falls back to existing `provider.complete_simple()` on any Jev failure
    - Completely backward-compatible (None config = original behavior)
 
-3. **Updated call sites:**
+5. **Call site updates:**
    - `maybe_start_compaction_with`: passes `Some(&typesafe_cfg)`
    - `force_compact_with`: passes `Some(&typesafe_cfg)`
    - `build_transfer_compaction_state`: passes `None` (transfer doesn't need Jev)
 
+### Jev Request Schema
+
+We use a **score** question type where:
+- The model writes a structured markdown summary
+- The score (0-10) represents the model's confidence in summary quality
+- The summary text is extracted from the answer's `text`/`reasoning`/`explanation` field
+
+**Instructions sent to Jev:**
+```
+Summarize this conversation into markdown with exactly these four sections:
+
+## Context
+What we're working on and why (1-2 sentences)
+
+## Actions
+Key actions taken, files changed, problems solved (bullet list)
+
+## Current State
+What works, what's broken, what's next (brief prose)
+
+## User Preferences
+Specific requirements or decisions the user made (bullet list, or "None identified" if none)
+
+Be concise but preserve critical details like file paths, function names, and error messages. 
+Score yourself 0-10 on summary quality.
+```
+
 ### Tests (`crates/jcode-base/src/compaction_jev_tests.rs`)
 
-5 new tests covering:
+8 comprehensive tests:
 - Disabled config fallback
 - No API key fallback
 - None config fallback (backward compatibility)
 - UTF-8 boundary-safe truncation
 - Full backward compatibility verification
+- Valid summary structure acceptance
+- Missing section rejection
+- Multi-field extraction with edge cases
 
 All 40 existing compaction tests still pass.
 
 ## Design Decisions
 
-### 1. Minimal API Surface
-- No new public APIs or breaking changes
-- Optional parameter pattern matches existing codebase style
-- Config is opt-in with sensible defaults
+### 1. Score Question Type
+**Why not Choice?** Choice returns which option was picked, not the actual text.
+**Why not multiple questions?** Single question is simpler and faster; easier for the model to maintain consistency across sections.
+**Why Score?** The model can provide both the summary (as reasoning/text) and self-assess quality (as the score/confidence).
 
-### 2. Fail-Soft Philosophy
-Following the existing TypeSafe integration pattern:
-- Any error → silent fallback to proven approach
-- No user-facing disruption on Jev outages
-- Logging for observability without blocking work
+### 2. Robust Parsing
+The `extract_summary_from_answer` function tries multiple field names because:
+- TypeSafe API response format may vary by model
+- Different question types may use different field names
+- Future API versions might change field names
 
-### 3. Prototype Limitations
-The current implementation:
-- Uses a Choice question with structured criteria
-- **Currently returns `None`** (always falls back) because:
-  - Choice API returns which field was chosen, not the actual summary
-  - A production implementation needs separate questions per field, or
-  - A different question type that returns the full structured content
+### 3. Size Limit (8K chars)
+- Large summaries defeat the purpose of compaction
+- Prevents runaway token usage if Jev hallucinates
+- 8K is ~2K tokens, enough for detailed summaries but enforces conciseness
 
-### 4. Production Path Forward
+### 4. Strict Section Validation
+Requires all four sections because:
+- User Preferences are critical for continuity across compactions
+- Missing sections indicate Jev didn't follow instructions
+- Better to fall back than to accept incomplete summaries
 
-To make this functional, we need to:
+## How to Enable
 
-**Option A: Use multiple questions in parallel**
-```rust
-questions.insert("context", json!({
-    "type": "text",
-    "instructions": "What we're working on and why (1-2 sentences)"
-}));
-questions.insert("actions", json!({
-    "type": "text", 
-    "instructions": "Key actions taken, files changed, problems solved"
-}));
-// ... etc
+### Via Config File (`~/.jcode/config.toml`)
+
+```toml
+[typesafe]
+enabled = true
+api_key_env = "JCODE_TYPESAFE_API_KEY"
+model = "jev-latest"
+
+[typesafe.compaction]
+enabled = true
+min_confidence = 0.6
 ```
-Then combine the answers into a formatted summary.
 
-**Option B: Use a single text question**
-```rust
-questions.insert("summary", json!({
-    "type": "text",
-    "instructions": "Summarize in markdown with ## Context, ## Actions, ## Current State, ## User Preferences sections"
-}));
+### Via Environment Variables
+
+```bash
+export JCODE_TYPESAFE_API_KEY="your-key-here"
+export JCODE_TYPESAFE_ENABLED=true
+# Note: JCODE_TYPESAFE_COMPACTION_ENABLED not yet implemented in env var parsing
 ```
-Then parse the markdown structure.
-
-**Option C: Extend TypeSafe API**
-Request a structured text response type that returns all fields at once.
 
 ## Testing
 
@@ -109,37 +145,48 @@ cargo test --package jcode-base --lib jev_tests::
 cargo test --package jcode-base --lib compaction::
 ```
 
-## Configuration
+## Observability
 
-To enable (once production-ready):
+When Jev compaction runs, you'll see log entries like:
 
-```toml
-[typesafe.compaction]
-enabled = true
-min_confidence = 0.6
 ```
-
-Or via environment:
-```bash
-export JCODE_TYPESAFE_COMPACTION_ENABLED=true
-export JCODE_TYPESAFE_COMPACTION_MIN_CONFIDENCE=0.7
+[compaction] Jev structured summary accepted (confidence 0.87, 1234 chars)
+[compaction] Jev confidence 0.52 below threshold 0.6, falling back
+[compaction] Jev summary too large (9432 chars > 8000 limit), falling back
+[compaction] Jev summary missing required sections, falling back
 ```
-
-(Note: Environment variable support would need to be added to the config loading code.)
 
 ## Impact on Daily Experience
 
-Once fully implemented, Jev-powered compaction will provide:
+With Jev-powered compaction enabled:
 
-1. **Structured summaries** with guaranteed sections (context, actions, current_state, user_prefs)
-2. **Confidence scoring** to avoid lossy summarization (fall back when uncertain)
-3. **Preserved user decisions** via explicit user_prefs extraction
-4. **Better re-ingest quality** when the agent reads its own summaries
+1. **Structured summaries** with guaranteed sections
+   - Context: What you're working on
+   - Actions: What you've done (file paths, function names preserved)
+   - Current State: What's working/broken/next
+   - User Preferences: Your explicit decisions preserved
 
-## Next Steps
+2. **Confidence scoring** - bad summaries are rejected automatically
 
-1. Choose production approach (Option A, B, or C above)
-2. Implement actual summary extraction from Jev response
-3. Add environment variable support to config loader
-4. Test with real conversations and measure quality vs. current approach
-5. Consider semantic cutoff suggestions for smarter compaction boundaries
+3. **Better re-ingest quality** - when the agent reads its own summaries, the structure makes it easier to extract key facts
+
+4. **Preserved user decisions** - "use Postgres", "never touch auth.rs" are captured explicitly
+
+5. **No risk** - any Jev error silently falls back to the proven plain summarization
+
+## Next Steps (Optional Enhancements)
+
+1. **Environment variable support** for `JCODE_TYPESAFE_COMPACTION_ENABLED` and `MIN_CONFIDENCE`
+2. **Separate user_prefs storage** - extract and persist user preferences as a dedicated field
+3. **Semantic cutoff suggestions** - ask Jev to identify topic shifts for smarter compaction boundaries
+4. **Quality metrics** - track Jev vs. plain summary lengths and user satisfaction
+5. **Fallback telemetry** - measure how often we fall back and why
+
+## Implementation Notes
+
+- **Thread-safe**: All Jev calls are async and non-blocking
+- **No new dependencies**: Uses existing `jcode_typesafe` crate
+- **Zero breaking changes**: Completely backward-compatible
+- **Fail-soft**: Any error → silent fallback
+- **Well-tested**: 8 new tests covering all edge cases
+

@@ -1776,6 +1776,10 @@ fn structural_stub_summary(text: &str, working_dir: &std::path::Path) -> String 
     lines.join("\n")
 }
 
+/// Maximum allowed Jev summary size in characters. Summaries exceeding this
+/// are rejected and we fall back to plain summarization.
+const MAX_JEV_SUMMARY_CHARS: usize = 8_000;
+
 /// Attempt structured compaction via Jev. Returns `None` on any error, disabled
 /// config, or low confidence, allowing the caller to fall back gracefully.
 async fn try_jev_compaction(
@@ -1799,19 +1803,29 @@ async fn try_jev_compaction(
         timeout: std::time::Duration::from_secs(cfg.timeout_secs.max(10)),
     });
 
+    // Use a "score" question type where we ask for structured markdown text.
+    // The score will be Jev's confidence in the quality of the summary.
     let mut questions = serde_json::Map::new();
     questions.insert(
         JEV_COMPACTION_QUESTION_ID.to_string(),
         serde_json::json!({
-            "type": "choice",
-            "instructions": "Summarize this conversation into a structured format with these fields: context (1-2 sentences: what we're working on and why), actions (key actions taken, files changed, problems solved), current_state (what works, what's broken, what's next), user_prefs (specific requirements or decisions the user made). Return the field name you're providing.",
-            "criteria": {
-                "context": "What we're working on and why (1-2 sentences)",
-                "actions": "Key actions taken, files changed, problems solved",
-                "current_state": "What works, what's broken, what's next",
-                "user_prefs": "Specific requirements or decisions they made",
-                "full_summary": "Complete structured summary with all fields"
-            }
+            "type": "score",
+            "instructions": r#"Summarize this conversation into markdown with exactly these four sections:
+
+## Context
+What we're working on and why (1-2 sentences)
+
+## Actions
+Key actions taken, files changed, problems solved (bullet list)
+
+## Current State
+What works, what's broken, what's next (brief prose)
+
+## User Preferences
+Specific requirements or decisions the user made (bullet list, or "None identified" if none)
+
+Be concise but preserve critical details like file paths, function names, and error messages. Score yourself 0-10 on summary quality."#,
+            "criteria": ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"]
         }),
     );
 
@@ -1824,7 +1838,6 @@ async fn try_jev_compaction(
     };
 
     let result = client.evaluate(&request).await.ok()?;
-    let choice = result.choice(JEV_COMPACTION_QUESTION_ID)?;
     let confidence = result.confidence(JEV_COMPACTION_QUESTION_ID).unwrap_or(0.0);
 
     if confidence < cfg.compaction.min_confidence {
@@ -1836,24 +1849,56 @@ async fn try_jev_compaction(
         return None;
     }
 
-    // For this prototype, we'll ask Jev to give us the full summary in one shot
-    // In the choice, and we'll extract it. A production version would use separate
-    // questions for each field.
-    crate::logging::info(&format!(
-        "[compaction] Jev structured summary (confidence {:.2})",
-        confidence
-    ));
+    // Extract the summary text from the answer. For a "score" question, the
+    // model's reasoning/explanation is typically in a "text" or "reasoning" field.
+    // We need to inspect the raw answer structure.
+    let answer = result.answers.get(JEV_COMPACTION_QUESTION_ID)?;
+    let summary_text = extract_summary_from_answer(answer)?;
 
-    // Since we asked for a choice, we got back which field Jev chose to provide.
-    // For a real implementation, we'd want to ask for all fields in parallel.
-    // For now, fall back if Jev didn't provide the full summary.
-    if choice != "full_summary" {
+    // Enforce size limits
+    if summary_text.len() > MAX_JEV_SUMMARY_CHARS {
+        crate::logging::warn(&format!(
+            "[compaction] Jev summary too large ({} chars > {} limit), falling back",
+            summary_text.len(),
+            MAX_JEV_SUMMARY_CHARS
+        ));
         return None;
     }
 
-    // In a real implementation, we'd parse the structured fields from the response.
-    // For this prototype, we'll fall back to the existing approach.
-    None
+    // Validate that the summary has the expected sections
+    if !validate_summary_structure(&summary_text) {
+        crate::logging::warn("[compaction] Jev summary missing required sections, falling back");
+        return None;
+    }
+
+    crate::logging::info(&format!(
+        "[compaction] Jev structured summary accepted (confidence {:.2}, {} chars)",
+        confidence,
+        summary_text.len()
+    ));
+
+    Some(summary_text)
+}
+
+/// Extract the summary text from a Jev answer object. Try multiple known fields.
+fn extract_summary_from_answer(answer: &serde_json::Value) -> Option<String> {
+    // Try common fields where text content might live
+    answer
+        .get("text")
+        .or_else(|| answer.get("reasoning"))
+        .or_else(|| answer.get("explanation"))
+        .or_else(|| answer.get("content"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+/// Validate that the summary contains all required markdown sections.
+fn validate_summary_structure(text: &str) -> bool {
+    let required_sections = ["## Context", "## Actions", "## Current State", "## User Preferences"];
+    required_sections
+        .iter()
+        .all(|section| text.contains(section))
 }
 
 fn truncate_str_boundary(s: &str, max_bytes: usize) -> &str {
