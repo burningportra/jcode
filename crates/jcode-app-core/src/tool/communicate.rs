@@ -2316,10 +2316,16 @@ impl Tool for CommunicateTool {
         // Normalize common action synonyms that models invent (e.g. `inbox`, `send`,
         // `msg`) so a near-miss verb maps to the real action instead of erroring out.
         params.action = canonical_swarm_action(&params.action).to_string();
-        if params.agent_role.is_some() && !matches!(params.action.as_str(), "spawn" | "assign_task" | "assign_next" | "fill_slots" | "run_plan") {
-            anyhow::bail!("agent_role is supported only for spawn, assign_task, assign_next, fill_slots and run_plan. Recovery actions preserve the recorded task policy.");
+        if params.agent_role.is_some()
+            && !matches!(
+                params.action.as_str(),
+                "spawn" | "assign_task" | "assign_next" | "fill_slots" | "run_plan"
+            )
+        {
+            anyhow::bail!(
+                "agent_role is supported only for spawn, assign_task, assign_next, fill_slots and run_plan. Recovery actions preserve the recorded task policy."
+            );
         }
-
 
         match params.action.as_str() {
             "share" | "share_append" => {

@@ -2156,7 +2156,8 @@ impl Provider for MultiProvider {
 
     fn supports_provider_routing_features(&self) -> bool {
         matches!(self.active_provider(), ActiveProvider::OpenRouter)
-            && self.active_openrouter_execution_provider()
+            && self
+                .active_openrouter_execution_provider()
                 .is_some_and(|provider| provider.supports_provider_routing_features())
     }
 

@@ -454,13 +454,10 @@ pub(super) fn auto_candidates_for_routes(
                     profile_id.trim().to_string(),
                 ));
             }
-            jcode_provider_core::ModelRouteApiMethod::OpenAiCompatible {
-                profile_id: None,
-            } => {
-                catalog.openweight_api_models.push((
-                    route.model.clone(),
-                    "openai-compatible".to_string(),
-                ));
+            jcode_provider_core::ModelRouteApiMethod::OpenAiCompatible { profile_id: None } => {
+                catalog
+                    .openweight_api_models
+                    .push((route.model.clone(), "openai-compatible".to_string()));
             }
             _ => {}
         }

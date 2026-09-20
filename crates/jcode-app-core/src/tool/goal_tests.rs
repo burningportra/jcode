@@ -643,11 +643,12 @@ async fn initiative_list_invalid_format_errors() {
 
 #[test]
 fn initiative_accepts_milestones_without_ids() {
-    let milestones: Vec<jcode_task_types::GoalMilestone> = serde_json::from_value(serde_json::json!([
-        {"title": "Design", "steps": [{"content": "sketch types"}]},
-        {"content": "Ship", "steps": [{"description": "release"}]}
-    ]))
-    .expect("lenient milestone parse");
+    let milestones: Vec<jcode_task_types::GoalMilestone> =
+        serde_json::from_value(serde_json::json!([
+            {"title": "Design", "steps": [{"content": "sketch types"}]},
+            {"content": "Ship", "steps": [{"description": "release"}]}
+        ]))
+        .expect("lenient milestone parse");
     let mut milestones = milestones;
     jcode_task_types::normalize_milestones(&mut milestones);
     assert_eq!(milestones[0].id, "design");

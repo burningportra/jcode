@@ -669,7 +669,9 @@ pub(super) async fn spawn_swarm_agent(
             &coordinator,
         )?
     };
-    let exact_spawn_route = routing.as_ref().map(super::named_agent_routing::exact_selection);
+    let exact_spawn_route = routing
+        .as_ref()
+        .map(super::named_agent_routing::exact_selection);
     // Validate before a visible terminal can consume its startup prompt.
     if let Some(exact) = &exact_spawn_route {
         let fork = provider_template.fork();

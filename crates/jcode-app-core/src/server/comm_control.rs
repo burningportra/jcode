@@ -2178,18 +2178,33 @@ pub(super) async fn handle_comm_task_control(
     }
 
     let current_assignee = snapshot.assigned_to.clone();
-    let previous_routing = snapshot.progress.as_ref().and_then(|progress| progress.routing.clone());
+    let previous_routing = snapshot
+        .progress
+        .as_ref()
+        .and_then(|progress| progress.routing.clone());
     // Preserve assignment policy even after the old worker has been removed.
     // An unrelated unavailable default must not block an explicitly routed task.
     let routing = if let Some(previous) = previous_routing {
         if let Err(error) = crate::config::Config::load_strict() {
-            let _ = client_event_tx.send(ServerEvent::Error { id, message: error.to_string(), retry_after_secs: None }); return;
+            let _ = client_event_tx.send(ServerEvent::Error {
+                id,
+                message: error.to_string(),
+                retry_after_secs: None,
+            });
+            return;
         }
         Some(previous)
     } else {
         match default_routing {
             Ok(default) => default,
-            Err(error) => { let _ = client_event_tx.send(ServerEvent::Error { id, message: error.to_string(), retry_after_secs: None }); return; }
+            Err(error) => {
+                let _ = client_event_tx.send(ServerEvent::Error {
+                    id,
+                    message: error.to_string(),
+                    retry_after_secs: None,
+                });
+                return;
+            }
         }
     };
     if let Some(route) = &routing {
