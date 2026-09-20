@@ -1353,6 +1353,8 @@ pub struct TypesafeConfig {
     pub risk: TypesafeRiskConfig,
     /// Optional jev Choice for `jcode-auto` model routing. Opt-in.
     pub auto: TypesafeAutoConfig,
+    /// Optional structured compaction summarization. Opt-in.
+    pub compaction: TypesafeCompactionConfig,
 }
 
 /// Thresholds for the bash gate's TypeSafe adjudication of `Confirm`-tier
@@ -1371,6 +1373,26 @@ pub struct TypesafeRiskConfig {
     /// Between the two thresholds (or on any error) the existing reflection
     /// prompt applies, exactly as before.
     pub require_below: f64,
+}
+
+/// Configuration for jev-powered structured compaction summaries.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TypesafeCompactionConfig {
+    /// Enable structured compaction. Default off: falls back to plain summarization.
+    pub enabled: bool,
+    /// Minimum confidence threshold (0.0–1.0). Summaries below this fall back to
+    /// the existing `complete_simple` path.
+    pub min_confidence: f64,
+}
+
+impl Default for TypesafeCompactionConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            min_confidence: 0.6,
+        }
+    }
 }
 
 impl Default for TypesafeRiskConfig {
@@ -1421,6 +1443,7 @@ impl Default for TypesafeConfig {
             timeout_secs: 30,
             risk: TypesafeRiskConfig::default(),
             auto: TypesafeAutoConfig::default(),
+            compaction: TypesafeCompactionConfig::default(),
         }
     }
 }

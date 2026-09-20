@@ -14,8 +14,9 @@ pub use jcode_config_types::{
     PromptSuggestionAcceptanceKey, PromptSuggestionsConfig, PromptSuggestionsResolvedConfig,
     PromptSuggestionsWorkspaceOverride, ProviderConfig, QualityConfig, ReasoningDisplayMode,
     SafetyConfig, SearchConfig, SessionPickerResumeAction, SponsorsConfig, SwarmSpawnMode,
-    SwarmStripLayout, TerminalConfig, TypesafeAutoConfig, TypesafeConfig, TypesafeRiskConfig,
-    UpdateChannel, WebSearchConfig, WebSearchEngine, normalize_prompt_suggestion_workspace,
+    SwarmStripLayout, TerminalConfig, TypesafeAutoConfig, TypesafeCompactionConfig, TypesafeConfig,
+    TypesafeRiskConfig, UpdateChannel, WebSearchConfig, WebSearchEngine,
+    normalize_prompt_suggestion_workspace,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
