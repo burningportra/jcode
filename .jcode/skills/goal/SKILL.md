@@ -242,8 +242,9 @@ head:
 - At least once during the loop (ideally the architecture pass, and again near
   convergence), spawn a `swarm` reviewer on a **different model than this
   session**. Run `swarm list_models` to see routes; for design/review work
-  prefer a strong reasoning model (e.g. the `claude-fable-5` review route per the
-  swarm routing guidance) distinct from your implementation model.
+  prefer a strong reasoning model (e.g. `claude-opus-5-5` on the Anthropic
+  routes or `openai-api:gpt-6-astra` on OpenAI routes) distinct from your
+  implementation model.
 - Hand the reviewer the current plan file plus the rubric, and ask for concrete
   gaps, wrong assumptions, and risks, not a rewrite. Prompt shape:
   > You are an adversarial plan reviewer. Here is a plan and a rubric. With fresh
@@ -252,7 +253,7 @@ head:
   > part of the plan. Do not rewrite it; find what is wrong.
 - Fold the reviewer's findings back into the plan via `initiative update`, and
   note in the pass log which findings came from the cross-model reviewer
-  (e.g. `pass 1 (architecture) [+swarm review claude-fable-5]: ...`).
+  (e.g. `pass 1 (architecture) [+swarm review claude-opus-5-5]: ...`).
 - **Verify the reviewer actually ran a different model before claiming it did.**
   When `agents.swarm_model` is unpinned, workers inherit the coordinator's model
   and the per-spawn `model` parameter is silently ignored, so a pass can look

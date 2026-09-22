@@ -1,5 +1,5 @@
 /// Quality-first default for Claude-capable routes.
-pub const DEFAULT_CLAUDE_MODEL: &str = "claude-opus-5";
+pub const DEFAULT_CLAUDE_MODEL: &str = "claude-opus-5-5";
 
 /// Quality-first default for OpenAI-capable routes.
 pub const DEFAULT_OPENAI_MODEL: &str = "gpt-6-astra";
@@ -12,6 +12,7 @@ pub const DEFAULT_OPENAI_MODEL: &str = "gpt-6-astra";
 /// used for post-login default selection.
 pub const ALL_CLAUDE_MODELS: &[&str] = &[
     DEFAULT_CLAUDE_MODEL,
+    "claude-opus-5",
     "claude-fable-5-1",
     "claude-fable-5",
     "claude-opus-4-8",
@@ -669,6 +670,10 @@ mod tests {
     #[test]
     fn context_limit_classifies_claude_by_context_mode() {
         // Native-1M: 1M by default, suffix is a no-op.
+        assert_eq!(
+            context_limit_for_model_with_provider("claude-opus-5-5", Some("claude")),
+            Some(1_000_000)
+        );
         assert_eq!(
             context_limit_for_model_with_provider("claude-opus-5", Some("claude")),
             Some(1_000_000)

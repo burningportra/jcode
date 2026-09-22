@@ -157,6 +157,7 @@ pub fn anthropic_max_output_tokens(model: &str) -> u32 {
     // Opus 5, Opus 4.6-4.8, Sonnet 5, Sonnet 4.6, and Fable/Mythos 5 all
     // advertise 128K max output on the synchronous Messages API.
     const LARGE_OUTPUT_PREFIXES: &[&str] = &[
+        "claude-opus-5-5",
         "claude-opus-5",
         "claude-opus-4-8",
         "claude-opus-4.8",
@@ -470,6 +471,7 @@ mod tests {
             "claude-fable-5-1",
             "claude-fable-5",
             "claude-sonnet-5",
+            "claude-opus-5-5",
             "claude-opus-5",
             "claude-opus-4-8",
             "claude-opus-4-7",
@@ -522,6 +524,7 @@ mod tests {
     fn max_output_tokens_match_published_model_limits() {
         // 128K-output generations, including dotted and [1m]/dated aliases.
         for model in [
+            "claude-opus-5-5",
             "claude-opus-5",
             "claude-opus-4-8",
             "claude-opus-4.8",
