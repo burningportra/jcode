@@ -2174,3 +2174,55 @@ async fn system_prompt_socket_creation_attach_resume_fork_and_no_leaking() {
         .unwrap()
         .unwrap();
 }
+
+/// Pins the prompt-suggestion sender/opt-in registry lifecycle.
+///
+/// `PROMPT_SUGGESTION_SENDERS` and `PROMPT_SUGGESTION_OPT_IN` are
+/// process-global and keyed only by session id, so a departing client must
+/// drop both. Otherwise a successor attaching to the same session inherits a
+/// dead client's sender and `client_supports_prompt_suggestions` reports true
+/// for a connection that no longer exists.
+///
+/// The e2e disconnect suite exercises the opt-in gate but not this cleanup, so
+/// without this test the teardown path is unpinned.
+#[tokio::test]
+async fn prompt_suggestion_registry_is_cleared_when_a_client_departs() {
+    let session = "prompt-suggestion-registry-lifecycle";
+    let (tx, _rx) = mpsc::unbounded_channel();
+
+    // Opting in registers the session, and a dispatch-time sender insert is
+    // then allowed for it.
+    set_prompt_suggestion_opt_in(session, true);
+    assert!(prompt_suggestions_opted_in(session));
+    PROMPT_SUGGESTION_SENDERS
+        .lock()
+        .expect("senders")
+        .insert(session.to_string(), tx);
+
+    // A departing client drops the sender but keeps nothing stale behind.
+    unregister_prompt_suggestion_sender(session);
+    assert!(
+        !PROMPT_SUGGESTION_SENDERS
+            .lock()
+            .expect("senders")
+            .contains_key(session),
+        "a departed client's sender must not outlive its connection"
+    );
+
+    // Opting out clears the opt-in too, so a later dispatch cannot re-register.
+    set_prompt_suggestion_opt_in(session, false);
+    assert!(
+        !prompt_suggestions_opted_in(session),
+        "an opted-out session must not be treated as suggestion-capable"
+    );
+
+    // Full teardown is idempotent and leaves no residue.
+    remove_session_prompt_suggestions(session).await;
+    assert!(!prompt_suggestions_opted_in(session));
+    assert!(
+        !PROMPT_SUGGESTION_SENDERS
+            .lock()
+            .expect("senders")
+            .contains_key(session)
+    );
+}
