@@ -1396,21 +1396,19 @@ impl App {
         // must retain the existing eager local-history behavior.
         crate::env::remove_var("JCODE_RELOAD_FAST_START");
 
-        // Persisted-transcript restore is unconditional deferred on remote startup:
-        // the server delivers authoritative history post-connect.
-        if let Some(ref session_id) = resume_session
-            && !reload_fast_start
-        {
-            crate::logging::info(&format!(
-                "Remote startup: deferring persisted transcript for {} until server history",
-                session_id
-            ));
-        }
-
+        // Load session to get canary status (for "client self-dev" badge)
         if let Some(ref session_id) = resume_session {
-            if fresh_spawn {
+            if reload_fast_start {
                 crate::logging::info(&format!(
-                    "Remote startup fresh-spawn path: deferred persisted transcript for {}",
+                    "Remote reload fast start: deferring persisted transcript for {} until server history",
+                    session_id
+                ));
+            } else {
+                app.restore_remote_startup_history(session_id);
+            }
+            if fresh_spawn && !reload_fast_start {
+                crate::logging::info(&format!(
+                    "Remote startup fresh-spawn path: restored persisted transcript for {} while awaiting server history",
                     session_id
                 ));
             }
