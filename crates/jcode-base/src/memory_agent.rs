@@ -882,7 +882,6 @@ impl MemoryAgent {
 
         // Step 4: Format and store for main agent
         if !relevant.is_empty() {
-            let ids: Vec<String> = relevant.iter().map(|e| e.id.clone()).collect();
             {
                 let ss = self.session_state(session_id);
                 for entry in &relevant {
@@ -906,12 +905,23 @@ impl MemoryAgent {
                     .count()
                     .max(1);
 
-                memory::set_pending_memory_with_ids_and_display(
+                // Must bind the project: `take_pending_memory_for_project` is
+                // the consumer, and it discards any payload whose binding is
+                // missing or mismatched. Publishing unbound here silently
+                // disabled automatic recall entirely. Pinned by
+                // memory_agent_tests::auto_recall_publish_must_bind_the_project_
+                // or_the_consumer_discards_it.
+                let project_dir = self
+                    .sessions
+                    .get(session_id)
+                    .and_then(|state| state.working_dir.clone());
+                memory::set_pending_memory_for_project_with_selection(
                     session_id,
                     prompt,
                     count,
-                    ids,
+                    &relevant,
                     display_prompt,
+                    project_dir.as_deref(),
                 );
                 memory::set_state(MemoryState::FoundRelevant { count });
             } else {

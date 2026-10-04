@@ -213,3 +213,65 @@ fn dynamic_gate_empty_input_returns_empty() {
     let out = dynamic_gate_select(Vec::new(), 5);
     assert!(out.is_empty());
 }
+
+/// Regression (merge of upstream/master): the consumer side of pending memory
+/// is `take_pending_memory_for_project`, which DISCARDS any payload whose
+/// project binding does not match ("project binding changed or missing").
+/// Publishing through the unbound `set_pending_memory_with_ids_and_display`
+/// therefore makes automatic recall silently dead: the agent judges memories,
+/// publishes them, and the very next turn throws them away.
+///
+/// This pins the publish/consume contract directly, so a future publisher that
+/// forgets the binding fails here instead of silently disabling recall.
+#[test]
+fn auto_recall_publish_must_bind_the_project_or_the_consumer_discards_it() {
+    let _lock = crate::storage::lock_test_env();
+    let home = tempfile::tempdir().expect("tempdir");
+    let previous_home = std::env::var_os("JCODE_HOME");
+    crate::env::set_var("JCODE_HOME", home.path());
+    let project = "/tmp/jcode-binding-contract";
+
+    // The bound path snapshots the selected memories, so they must really
+    // exist in this project's store for the binding to validate.
+    let entry = crate::memory::MemoryEntry::new(MemoryCategory::Fact, "binding contract fixture");
+    let entry_id = crate::memory::MemoryManager::new()
+        .with_project_dir(project)
+        .remember_project(entry.clone())
+        .expect("persist fixture memory");
+    // The publisher re-derives the canonical prompt and refuses to bind if the
+    // caller's prompt disagrees, so build it the same way production does.
+    let canonical = crate::memory::format_relevant_prompt(std::slice::from_ref(&entry), 1)
+        .expect("canonical prompt");
+
+    // Unbound publish: the project-scoped consumer must reject it.
+    memory::set_pending_memory_with_ids_and_display(
+        "binding-unbound",
+        canonical.clone(),
+        1,
+        vec![entry_id.clone()],
+        None,
+    );
+    assert!(
+        memory::take_pending_memory_for_project("binding-unbound", Some(project)).is_none(),
+        "an unbound publish must not survive project-scoped consumption"
+    );
+
+    // Bound publish with a matching project: survives.
+    memory::set_pending_memory_for_project(
+        "binding-bound",
+        canonical,
+        1,
+        vec![entry_id],
+        None,
+        Some(project),
+    );
+    assert!(
+        memory::take_pending_memory_for_project("binding-bound", Some(project)).is_some(),
+        "a publish bound to the consumed project must survive"
+    );
+
+    match previous_home {
+        Some(value) => crate::env::set_var("JCODE_HOME", value),
+        None => crate::env::remove_var("JCODE_HOME"),
+    }
+}
