@@ -457,7 +457,10 @@ pub fn openai_compatible_profile_static_models(profile: OpenAiCompatibleProfile)
             push("inkling");
             push("inkling-small");
             push("nemotron-3-ultra");
-            push("nemotron-3-ultra-together");
+            // `nemotron-3-ultra-together` is absent from Conifer's public
+            // catalog (2026-09-16). Do not advertise an unverified route or
+            // borrow DeepInfra's limit. Explicit selection and live discovery
+            // remain supported. See docs/CONIFER_PROVIDER.md and issue #1274.
             push("nemotron-3-super-120b");
             push("nemotron-3.5-lightning");
             push("mistral-large-latest");
@@ -492,6 +495,162 @@ pub fn openai_compatible_profile_static_models(profile: OpenAiCompatibleProfile)
             push("zai/glm-5.2");
             push("alibaba/qwen3-coder-next");
         }
+        "cortecs" => {
+            push("minimax-m2.7");
+            push("kimi-k2.5");
+            push("glm-4.7");
+            push("glm-5");
+            push("claude-haiku-4-5");
+            push("qwen3-235b-a22b-instruct-2507");
+        }
+        // Issue #79: DeepSeek's live model catalog is not always available during
+        // TUI startup, but both models should still be selectable once the direct
+        // provider is configured.
+        "deepseek" => {
+            push("deepseek-v4-flash");
+            push("deepseek-v4-pro");
+        }
+        "comtegra" => {
+            push("gpt-oss-120b");
+            push("qwen35-122b");
+            push("gte-qwen2-7b");
+            push("glm-51-nvfp4");
+        }
+        "fpt" => {
+            push("GLM-5.1");
+            push("GLM-4.7");
+            push("Llama-3.3-70B-Instruct");
+        }
+        "kimi" => {
+            push("kimi-for-coding");
+            push("kimi-k2.5");
+            push("kimi-k2.6");
+            push("kimi-k2-thinking");
+            push("kimi-k2-thinking-turbo");
+        }
+        "firmware" => {
+            push("kimi-k2.5");
+            push("zai-glm-5-1");
+            push("claude-haiku-4-5");
+            push("claude-sonnet-4-6");
+            push("grok-code-fast-1");
+            push("gemini-2.5-flash");
+        }
+        "huggingface" => {
+            push("Qwen/Qwen3-Coder-480B-A35B-Instruct");
+            push("Qwen/Qwen3-Coder-Next");
+            push("zai-org/GLM-4.7");
+            push("zai-org/GLM-5.1");
+            push("deepseek-ai/DeepSeek-V3.2");
+            push("openai/gpt-oss-120b");
+        }
+        "moonshotai" => {
+            push("kimi-k2.5");
+            push("kimi-k2.6");
+            push("kimi-k2-thinking");
+            push("kimi-k2-thinking-turbo");
+            push("kimi-k2-turbo-preview");
+        }
+        "nebius" => {
+            push("openai/gpt-oss-120b");
+            push("Qwen/Qwen3-235B-A22B-Instruct-2507");
+            push("Qwen/Qwen3.5-397B-A17B");
+            push("zai-org/GLM-5");
+            push("meta-llama/Llama-3.3-70B-Instruct");
+            push("NousResearch/Hermes-4-70B");
+        }
+        "scaleway" => {
+            push("qwen3-coder-30b-a3b-instruct");
+            push("qwen3-235b-a22b-instruct-2507");
+            push("qwen3.5-397b-a17b");
+            push("gpt-oss-120b");
+            push("mistral-small-3.2-24b-instruct-2506");
+            push("llama-3.3-70b-instruct");
+        }
+        "stackit" => {
+            push("openai/gpt-oss-120b");
+            push("Qwen/Qwen3-VL-235B-A22B-Instruct-FP8");
+            push("cortecs/Llama-3.3-70B-Instruct-FP8-Dynamic");
+            push("neuralmagic/Meta-Llama-3.1-8B-Instruct-FP8");
+            push("google/gemma-3-27b-it");
+        }
+        "perplexity" => {
+            push("sonar");
+            push("sonar-pro");
+            push("sonar-reasoning-pro");
+            push("sonar-deep-research");
+        }
+        "deepinfra" => {
+            push("moonshotai/Kimi-K2-Instruct");
+            push("Qwen/Qwen3-Coder-480B-A35B-Instruct");
+            push("Qwen/Qwen3-Coder-480B-A35B-Instruct-Turbo");
+            push("zai-org/GLM-4.7");
+            push("zai-org/GLM-5.1");
+            push("meta-llama/Llama-3.1-70B-Instruct");
+        }
+        "fireworks" => {
+            push("accounts/fireworks/routers/kimi-k2p5-turbo");
+            push("accounts/fireworks/models/kimi-k2p5");
+            push("accounts/fireworks/models/kimi-k2p6");
+            push("accounts/fireworks/models/glm-4p7");
+            push("accounts/fireworks/models/glm-5p1");
+            push("accounts/fireworks/models/deepseek-v3p2");
+        }
+        "cerebras" => {
+            push("gpt-oss-120b");
+            push("zai-glm-4.7");
+        }
+        // Keep coding models selectable while Novita's live catalog refreshes.
+        "novita" => {
+            push("zai-org/glm-5.3");
+            push("zai-org/glm-5.3-flash");
+            push("moonshotai/kimi-k3");
+            push("deepseek/deepseek-v4-pro-0813");
+        }
+        // Belvedir's router accepts `auto`, but does not expose `/models` at
+        // its OpenAI-compatible inference base.
+        "belvedir" => push("auto"),
+        // Celeris serves exactly one model per base URL today, and `/models`
+        // requires auth, so keep the documented id available pre-refresh.
+        "celeris" => {
+            push("celeris-1");
+        }
+        "xiaomi-mimo" => {
+            push("mimo-v2.5");
+            push("mimo-v2.5-pro");
+            push("mimo-v2-pro");
+            push("mimo-v2-flash");
+            push("mimo-v2-omni");
+        }
+        // Meta's catalog is authenticated, so expose the documented Muse Spark
+        // models immediately after login while the live refresh completes.
+        "meta-muse" => {
+            push("muse-spark-1.2");
+            push("muse-spark-1.1");
+        }
+        // MiniMax's `/models` endpoint is authenticated and live, but post-login
+        // model activation should not depend on the catalog refresh completing
+        // before the picker/routes are rebuilt. Keep the documented text models
+        // selectable immediately after saving a key.
+        "minimax" => {
+            push("MiniMax-M2.7");
+            push("MiniMax-M2.7-highspeed");
+            push("MiniMax-M2.5");
+            push("MiniMax-M2.5-highspeed");
+            push("MiniMax-M2.1");
+            push("MiniMax-M2.1-highspeed");
+            push("MiniMax-M2");
+        }
+        "alibaba-coding-plan" => {
+            push("qwen3-coder-plus");
+            push("qwen3.5-plus");
+            push("qwen3-max-2026-01-23");
+            push("qwen3-coder-next");
+            push("glm-5");
+            push("glm-4.7");
+            push("kimi-k2.5");
+            push("MiniMax-M2.5");
+        }
         "gemini-api" => {
             push("gemini-2.5-flash");
             push("gemini-2.5-pro");
@@ -524,6 +683,8 @@ pub fn openai_compatible_profile_context_limit(profile_id: &str, model: &str) ->
     let model = model.trim().to_ascii_lowercase();
 
     match profile_id.as_str() {
+        "conifer" => conifer_context_limit(&model)
+            .or_else(|| jcode_provider_core::models::open_weight_family_context_limit(&model)),
         // The selected upstream model may vary. Use Jcode's conservative
         // compatible-provider context budget for the Belvedir auto router.
         "belvedir" if model == "auto" => Some(128_000),
@@ -539,6 +700,29 @@ pub fn openai_compatible_profile_context_limit(profile_id: &str, model: &str) ->
         _ => jcode_provider_metadata::registry_context_limit(&profile_id, &model)
             .or_else(|| jcode_provider_core::models::open_weight_family_context_limit(&model)),
     }
+}
+
+/// Exact route-specific observations from https://api.conifer.build/v1/catalog
+/// on 2026-09-16. These fill gaps in the shared family classifier, not global
+/// model guarantees. Live/disk catalog metadata takes precedence at runtime,
+/// including for mutable `*-latest` aliases. See docs/CONIFER_PROVIDER.md.
+fn conifer_context_limit(model: &str) -> Option<usize> {
+    Some(match model {
+        "grok-4.6" | "grok-4.5" => 500_000,
+        "grok-4.3" => 1_000_000,
+        "seed-2.0-pro" | "seed-2.0-code" | "seed-2.0-mini" => 256_000,
+        "step-3.7-flash" | "step-3.7-flash-novita" => 262_144,
+        "hy3" | "hy3-tencent" | "hy3-novita" => 262_144,
+        "ling-3.0-flash" => 131_072,
+        "inkling" | "inkling-small" => 524_288,
+        "nemotron-3-ultra" | "nemotron-3-super-120b" | "nemotron-3.5-lightning" => 262_144,
+        "mistral-large-latest" | "mistral-medium-latest" | "mistral-small-latest" => 256_000,
+        "command-a-cohere" => 256_000,
+        "llama-4-maverick" => 1_048_576,
+        "llama-4-scout" => 327_680,
+        "gemma-4-31b" => 128_000,
+        _ => return None,
+    })
 }
 
 pub fn apply_openai_compatible_profile_env(profile: Option<OpenAiCompatibleProfile>) {

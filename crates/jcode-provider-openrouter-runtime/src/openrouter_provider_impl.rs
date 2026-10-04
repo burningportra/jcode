@@ -138,54 +138,11 @@ impl Provider for OpenRouterProvider {
             request["max_tokens"] = serde_json::json!(max_tokens);
         }
 
-        let mut sent_reasoning_config = false;
-        if let Some(effort) = reasoning_effort.as_deref() {
-            if self.supports_deepseek_reasoning_effort() {
-                // The `swarm` sentinel maps to the strongest real effort.
-                let effort = if jcode_base::prompt::is_swarm_effort(effort) {
-                    "max"
-                } else {
-                    effort
-                };
-                if effort != "none" {
-                    request["reasoning_effort"] = serde_json::json!(effort);
-                    sent_reasoning_config = true;
-                }
-            } else if self.supports_openai_reasoning_effort() {
-                // GPT-family models on direct compat gateways (e.g. OpenCode
-                // Zen serving gpt-5.3-codex-spark) take the standard OpenAI
-                // `reasoning_effort` field with OpenAI's effort vocabulary.
-                let effort = if strict_openai_schema
-                    && (jcode_base::prompt::is_swarm_effort(effort) || effort == "max")
-                {
-                    // Strict OpenAI-schema endpoints such as Mistral document
-                    // xhigh as their strongest accepted value and reject the
-                    // jcode/OpenAI UX alias `max`.
-                    "xhigh"
-                } else if jcode_base::prompt::is_swarm_effort(effort) {
-                    "max"
-                } else {
-                    effort
-                };
-                if effort != "none" {
-                    request["reasoning_effort"] = serde_json::json!(effort);
-                    sent_reasoning_config = true;
-                }
-            } else if Self::profile_supports_unified_reasoning(
-                self.profile_id.as_deref(),
-                self.send_openrouter_headers,
-            ) {
-                let effort = if jcode_base::prompt::is_swarm_effort(effort) {
-                    "xhigh"
-                } else {
-                    effort
-                };
-                request["reasoning"] = serde_json::json!({
-                    "effort": effort,
-                });
-                sent_reasoning_config = true;
-            }
-        }
+        let sent_reasoning_config = reasoning_effort.as_deref().is_some_and(|effort| {
+            let resolved =
+                jcode_base::prompt::swarm_root_reasoning_effort(effort).unwrap_or(effort);
+            self.apply_resolved_reasoning_effort(&mut request, resolved, strict_openai_schema)
+        });
 
         if !api_tools.is_empty() {
             request["tools"] = serde_json::json!(api_tools);
@@ -307,6 +264,7 @@ impl Provider for OpenRouterProvider {
         let api_base = self.api_base.clone();
         let auth = self.auth.clone();
         let send_openrouter_headers = self.send_openrouter_headers;
+        let conversation_id = self.conversation_id.clone();
         let request_for_retries = request;
         let model_for_stream = model.clone();
         let provider_pin = Arc::clone(&self.provider_pin);
@@ -326,6 +284,7 @@ impl Provider for OpenRouterProvider {
                 api_base,
                 auth,
                 send_openrouter_headers,
+                conversation_id,
                 request_for_retries,
                 tx,
                 provider_pin,
@@ -361,8 +320,29 @@ impl Provider for OpenRouterProvider {
         if let Some(supports_images) = self.static_image_input_support.get(&model_id) {
             return *supports_images;
         }
+        // The direct DeepSeek Flash aliases accept image_url parts (#1221).
+        // Keep Pro and unverified models text-only, and let explicit per-model
+        // input configuration above override this narrow built-in allowlist.
+        if self
+            .profile_id
+            .as_deref()
+            .is_some_and(|id| id.eq_ignore_ascii_case("deepseek"))
+        {
+            return matches!(
+                model_id.as_str(),
+                "deepseek-flash" | "deepseek-v4-flash" | "deepseek-v4-flash-vision-exp"
+            );
+        }
         if Self::profile_rejects_image_input(self.profile_id.as_deref()) {
             return false;
+        }
+
+        // The catalog already states which modalities each model accepts, so
+        // honour that before falling back to a per-provider guess. Without this
+        // a vision-capable model on the native OpenRouter route is clamped to
+        // text even though the provider advertised image input for it.
+        if self.catalog_declares_image_input(&model_id) {
+            return true;
         }
 
         // Direct OpenAI-compatible local providers such as Ollama and LM Studio
@@ -651,6 +631,7 @@ impl Provider for OpenRouterProvider {
                     api_method: api_method.clone(),
                     available: true,
                     detail: route_detail,
+                    usage: None,
                     cheapness: None,
                 }
             })
@@ -815,6 +796,9 @@ impl Provider for OpenRouterProvider {
             static_context_limits: self.static_context_limits.clone(),
             static_image_input_support: self.static_image_input_support.clone(),
             send_openrouter_headers: self.send_openrouter_headers,
+            // A fork is a new conversation (new session or subagent), so it
+            // gets its own stable id.
+            conversation_id: new_conversation_id(),
             models_cache: Arc::clone(&self.models_cache),
             model_catalog_refresh: Arc::clone(&self.model_catalog_refresh),
             provider_routing: Arc::new(RwLock::new(
@@ -911,4 +895,48 @@ impl OpenRouterProvider {
         // `/models` catalog refreshes (issue #579).
         self.supports_provider_features || self.profile_id.is_none() || self.is_user_named_profile()
     }
+
+    /// Whether the model catalog declares `image` as an accepted input modality
+    /// for this model.
+    ///
+    /// Memory decides whenever it holds an opinion about the model, so a freshly
+    /// fetched catalog is never overruled by a stale copy on disk. Only when
+    /// memory is silent does the persisted catalog answer, and that fallback is
+    /// what makes the first request after startup behave: the in-memory cache is
+    /// initialised empty while the catalog is normally already on disk from the
+    /// previous run, so memory alone would keep clamping images until the first
+    /// refresh completed.
+    ///
+    /// `supports_image_input` is a sync trait method, so the in-memory read uses
+    /// `try_read` rather than awaiting the tokio lock; a busy lock defers to the
+    /// disk copy instead of blocking.
+    pub(crate) fn catalog_declares_image_input(&self, model_id: &str) -> bool {
+        if !self.supports_model_catalog {
+            return false;
+        }
+        if let Ok(cache) = self.models_cache.try_read()
+            && let Some(model) = cache
+                .models
+                .iter()
+                .find(|model| model.id.trim().eq_ignore_ascii_case(model_id))
+        {
+            return declares_image_input(model);
+        }
+        self.load_usable_model_disk_cache_entry()
+            .is_some_and(|entry| {
+                entry
+                    .models
+                    .iter()
+                    .find(|model| model.id.trim().eq_ignore_ascii_case(model_id))
+                    .is_some_and(declares_image_input)
+            })
+    }
+}
+
+/// Whether one catalog entry declares `image` as an accepted input modality.
+fn declares_image_input(model: &jcode_provider_openrouter::ModelInfo) -> bool {
+    model
+        .input
+        .iter()
+        .any(|modality| modality.eq_ignore_ascii_case("image"))
 }

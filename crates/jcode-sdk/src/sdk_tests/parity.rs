@@ -34,12 +34,15 @@ const CAPABILITIES: &[Capability] = &[
     cap("restore_session", "restoreSession"),
     cap("set_retention_policy", "setRetentionPolicy"),
     cap("create_session", "createSession"),
+    cap("create_session_with_options", "createSession"),
     cap("attach_session", "attachSession"),
     cap("fork_session", "forkSession"),
     cap("detach_session", "detachSession"),
     cap("send_message", "sendMessage"),
+    cap("send_system_reminder", "sendSystemReminder"),
     cap("cancel", "cancel"),
     cap("soft_interrupt", "softInterrupt"),
+    cap("soft_interrupt_with_images", "softInterruptWithImages"),
     cap("get_history", "getHistory"),
     cap("get_history_with_images", "getHistoryWithImages"),
     cap("peek_session", "peekSession"),
@@ -51,15 +54,24 @@ const CAPABILITIES: &[Capability] = &[
     cap("get_runtime_info", "getRuntimeInfo"),
     cap("set_api_key", "setApiKey"),
     cap("clear_api_key", "clearApiKey"),
+    cap("notify_auth_changed", "notifyAuthChanged"),
+    cap("invalidate_usage", "invalidateUsage"),
     cap("read_file", "readFile"),
     cap("find_files", "findFiles"),
     cap("search_text", "searchText"),
     cap("file_status", "fileStatus"),
     cap("set_model", "setModel"),
+    cap("configure_tools", "configureTools"),
+    cap("list_tools", "listTools"),
+    cap("submit_tool_result", "submitToolResult"),
     cap("set_reasoning_effort", "setReasoningEffort"),
     cap("compact", "compact"),
     cap("rename_session", "renameSession"),
+    cap("set_session_saved", "setSessionSaved"),
+    cap("applet_action", "appletAction"),
+    cap("close_applet", "closeApplet"),
     cap("cancel_soft_interrupts", "cancelSoftInterrupts"),
+    cap("background_tool", "backgroundTool"),
     cap("ping", "ping"),
     cap("run", "run"),
     cap("run_structured", "runStructured"),
@@ -165,6 +177,11 @@ fn neither_sdk_has_an_untriaged_public_capability() {
 
 /// Rust-specific members, with the reason each one is not mirrored.
 const RUST_ONLY: &[&str] = &[
+    // Rust's native process transport/launch strategy. TypeScript accepts a
+    // caller-supplied transport; a built-in SSH launcher is not yet mirrored.
+    "connect_ssh",
+    // Rust-only shared OpenSSH ownership lease for independent reconnects.
+    "shared_ssh_transport",
     // `connect_with` is the explicit transport seam Rust tests use; TypeScript
     // accepts its transport through the options passed to `connect`.
     "connect_with",

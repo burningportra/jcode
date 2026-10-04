@@ -18,7 +18,7 @@ use crossterm::event::{KeyCode, KeyModifiers};
 use std::sync::Arc;
 
 impl App {
-    fn open_auth_browser(url: &str) -> bool {
+    pub(super) fn open_auth_browser(url: &str) -> bool {
         // Honors --no-browser/NO_BROWSER/JCODE_NO_BROWSER and never opens real
         // browser windows from test binaries (login flows are exercised by TUI
         // tests; without this guard a test run pops OAuth pages on the
@@ -1819,7 +1819,7 @@ impl App {
         self.set_status_notice("Grok Build: preparing sign-in...");
         self.begin_pending_login(PendingLogin::GrokBuild);
         self.push_display_message(DisplayMessage::system(
-            "Grok Build Login\n\nJcode is preparing the managed provider backend. The xAI sign-in URL and device code will appear here. You do not need to install the Grok CLI.\n\nType /cancel to dismiss this login."
+            "Grok Build Login\n\nRequesting an xAI sign-in URL and device code. They will appear here. You do not need to install the Grok CLI.\n\nType /cancel to dismiss this login."
                 .to_string(),
         ));
 
@@ -1863,17 +1863,6 @@ impl App {
 
             match crate::auth::grok_build::complete_device_login(&client, &authorization).await {
                 Ok(()) => {
-                    // The ACP executable is a private provider backend, not an
-                    // authentication dependency. Provision it only after the
-                    // native OAuth flow has completed.
-                    if let Err(error) = crate::auth::grok_build::ensure_cli().await {
-                        Bus::global().publish(BusEvent::LoginCompleted(LoginCompleted {
-                            provider: "grok-build".to_string(),
-                            success: false,
-                            message: format!("Grok Build login succeeded, but its managed runtime could not be prepared: {error:#}"),
-                        }));
-                        return;
-                    }
                     Bus::global().publish(BusEvent::LoginCompleted(LoginCompleted {
                         provider: "grok-build".to_string(),
                         success: true,
@@ -2172,6 +2161,10 @@ impl App {
         }
 
         match pending {
+            PendingLogin::Remote => {
+                // SSH input must never fall through to laptop credential handlers.
+                self.append_ssh_login_input(&input);
+            }
             PendingLogin::ClaudeAccount {
                 verifier,
                 label,

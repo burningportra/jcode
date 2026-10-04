@@ -168,6 +168,7 @@ fn run_stage(op: &QueryOp, state: &mut PipeState, root: &Path) -> Result<(), Str
                 paths_only: true,
                 hidden: false,
                 no_ignore: false,
+                no_follow: false,
                 path: None,
                 glob: None,
             };
@@ -193,6 +194,7 @@ fn run_stage(op: &QueryOp, state: &mut PipeState, root: &Path) -> Result<(), Str
                 max_files: MAX_FILES,
                 hidden: false,
                 no_ignore: false,
+                no_follow: false,
                 path: None,
                 glob: None,
             };

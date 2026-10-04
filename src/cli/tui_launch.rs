@@ -101,9 +101,24 @@ pub async fn run_tui_client(
     if let Some(ref session_id) = resume_session {
         set_current_session(session_id);
     }
-    spawn_session_signal_watchers();
+    let native_ssh = std::env::var_os("JCODE_SSH_REMOTE").is_some();
+    if !native_ssh {
+        spawn_session_signal_watchers();
+    }
 
-    if let Some(ref session_id) = resume_session {
+    if native_ssh {
+        let host = std::env::var("JCODE_SSH_REMOTE").unwrap_or_default();
+        let label = resume_session.as_deref().unwrap_or("new session");
+        crate::process_title::set_client_remote_display_title(
+            &host,
+            label,
+            super::selfdev::client_selfdev_requested(),
+        );
+        let _ = crossterm::execute!(
+            std::io::stdout(),
+            crossterm::terminal::SetTitle(format!("jcode SSH {host} {label}"))
+        );
+    } else if let Some(ref session_id) = resume_session {
         let session_name = id::extract_session_name(session_id)
             .map(|s| s.to_string())
             .unwrap_or_else(|| session_id.clone());
@@ -158,10 +173,42 @@ pub async fn run_tui_client(
     // we are about to exec a follow-up process.
     let run_result = result?;
 
-    tui_runtime.finish_for_run_result(&run_result, false);
+    if native_ssh {
+        // No local exec/reload may escape the SSH lifetime guard or inherit
+        // remote session IDs as if they referred to laptop session files.
+        tui_runtime.finish(true);
+        if let Some(handoff) = run_result.cloud_handoff.clone() {
+            // `/local` from a cloud attach: the SSH guard in `ssh.rs` must
+            // close before we exec, so hand the target back to it.
+            super::cloud_move::stash_handoff(handoff);
+            return Ok(());
+        }
+        if has_requested_action(&run_result) {
+            anyhow::bail!(
+                "local reload/update actions are unavailable during SSH attach; reconnect after updating explicitly"
+            );
+        }
+        if run_result.exit_code.is_some_and(|code| code != 0) {
+            anyhow::bail!(
+                "SSH client exited with code {}",
+                run_result.exit_code.unwrap()
+            );
+        }
+        if let Some(ref session_id) = run_result.session_id {
+            print_session_resume_hint(session_id);
+        }
+        crate::tui::herdr::release();
+        return Ok(());
+    }
+
+    tui_runtime.finish_for_run_result(&run_result, run_result.cloud_handoff.is_some());
 
     if let Some(code) = run_result.exit_code {
         std::process::exit(code);
+    }
+
+    if let Some(handoff) = run_result.cloud_handoff.clone() {
+        return super::cloud_move::exec_handoff(handoff);
     }
 
     execute_requested_action(&run_result)?;
@@ -170,6 +217,11 @@ pub async fn run_tui_client(
         && let Some(ref session_id) = run_result.session_id
     {
         print_session_resume_hint(session_id);
+    }
+    if !has_requested_action(&run_result) {
+        // The user quit (reload/update exec back into jcode in this pane and
+        // keep reporting, so they must not release it).
+        crate::tui::herdr::release();
     }
 
     Ok(())

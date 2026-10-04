@@ -11,7 +11,7 @@ use std::path::Path;
 use std::sync::Mutex;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-static PENDING_MEMORY_TEST_LOCK: Mutex<()> = Mutex::new(());
+pub(crate) static PENDING_MEMORY_TEST_LOCK: Mutex<()> = Mutex::new(());
 
 fn with_temp_home<F, T>(f: F) -> T
 where

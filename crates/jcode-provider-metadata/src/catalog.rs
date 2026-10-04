@@ -341,6 +341,17 @@ pub const FIREWORKS_PROFILE: OpenAiCompatibleProfile = OpenAiCompatibleProfile {
     requires_api_key: true,
 };
 
+pub const NOVITA_PROFILE: OpenAiCompatibleProfile = OpenAiCompatibleProfile {
+    id: "novita",
+    display_name: "Novita AI",
+    api_base: "https://api.novita.ai/openai",
+    api_key_env: "NOVITA_API_KEY",
+    env_file: "novita.env",
+    setup_url: "https://novita.ai/settings/key-management",
+    default_model: Some("zai-org/glm-5.3"),
+    requires_api_key: true,
+};
+
 pub const MINIMAX_PROFILE: OpenAiCompatibleProfile = OpenAiCompatibleProfile {
     id: "minimax",
     display_name: "MiniMax",
@@ -496,6 +507,21 @@ pub const WAFER_PROFILE: OpenAiCompatibleProfile = OpenAiCompatibleProfile {
     requires_api_key: true,
 };
 
+// Yolo-Auto is an OpenAI-compatible gateway. Its `/v1/models` listing is
+// authenticated, so the full catalog is discovered with the account key after
+// login; `default_model` keeps the documented `yolo` alias selected until that
+// refresh lands, and `yolo-small` is the other documented alias.
+pub const YOLO_AUTO_PROFILE: OpenAiCompatibleProfile = OpenAiCompatibleProfile {
+    id: "yolo-auto",
+    display_name: "Yolo-Auto",
+    api_base: "https://yolo-auto.com/v1",
+    api_key_env: "YOLO_AUTO_API_KEY",
+    env_file: "yolo-auto.env",
+    setup_url: "https://yolo-auto.com/docs",
+    default_model: Some("yolo"),
+    requires_api_key: true,
+};
+
 pub const OPENAI_COMPAT_PROFILE: OpenAiCompatibleProfile = OpenAiCompatibleProfile {
     id: "openai-compatible",
     display_name: "OpenAI-compatible",
@@ -541,6 +567,7 @@ pub(crate) const OPENAI_COMPAT_PROFILES: &[OpenAiCompatibleProfile] = &[
     TOGETHER_AI_PROFILE,
     DEEPINFRA_PROFILE,
     FIREWORKS_PROFILE,
+    NOVITA_PROFILE,
     MINIMAX_PROFILE,
     XAI_PROFILE,
     NVIDIA_NIM_PROFILE,
@@ -548,6 +575,7 @@ pub(crate) const OPENAI_COMPAT_PROFILES: &[OpenAiCompatibleProfile] = &[
     META_MUSE_PROFILE,
     CELERIS_PROFILE,
     WAFER_PROFILE,
+    YOLO_AUTO_PROFILE,
     LMSTUDIO_PROFILE,
     OLLAMA_PROFILE,
     OPENAI_COMPAT_PROFILE,
@@ -1058,6 +1086,19 @@ pub const FIREWORKS_LOGIN_PROVIDER: LoginProviderDescriptor = LoginProviderDescr
     order: LoginProviderSurfaceOrder::new(Some(37), Some(37), Some(37), Some(37), Some(37)),
 };
 
+pub const NOVITA_LOGIN_PROVIDER: LoginProviderDescriptor = LoginProviderDescriptor {
+    id: "novita",
+    display_name: "Novita AI",
+    auth_kind: LoginProviderAuthKind::ApiKey,
+    auth_state_key: LoginProviderAuthStateKey::OpenRouterLike,
+    auth_status_method: "API key",
+    aliases: &["novita-ai", "novita.ai"],
+    menu_detail: "Pay-as-you-go API key",
+    recommended: false,
+    target: LoginProviderTarget::OpenAiCompatible(NOVITA_PROFILE),
+    order: LoginProviderSurfaceOrder::new(Some(39), Some(39), Some(39), Some(39), Some(39)),
+};
+
 pub const MINIMAX_LOGIN_PROVIDER: LoginProviderDescriptor = LoginProviderDescriptor {
     id: "minimax",
     display_name: "MiniMax",
@@ -1290,6 +1331,19 @@ pub const WAFER_LOGIN_PROVIDER: LoginProviderDescriptor = LoginProviderDescripto
     order: LoginProviderSurfaceOrder::new(Some(41), Some(41), Some(41), Some(41), Some(41)),
 };
 
+pub const YOLO_AUTO_LOGIN_PROVIDER: LoginProviderDescriptor = LoginProviderDescriptor {
+    id: "yolo-auto",
+    display_name: "Yolo-Auto",
+    auth_kind: LoginProviderAuthKind::ApiKey,
+    auth_state_key: LoginProviderAuthStateKey::OpenRouterLike,
+    auth_status_method: "API key",
+    aliases: &[],
+    menu_detail: "API key, OpenAI-compatible API",
+    recommended: false,
+    target: LoginProviderTarget::OpenAiCompatible(YOLO_AUTO_PROFILE),
+    order: LoginProviderSurfaceOrder::new(Some(42), Some(42), Some(42), Some(42), Some(42)),
+};
+
 pub const GOOGLE_LOGIN_PROVIDER: LoginProviderDescriptor = LoginProviderDescriptor {
     id: "google",
     display_name: "Google/Gmail",
@@ -1342,6 +1396,7 @@ pub(crate) const LOGIN_PROVIDERS: &[LoginProviderDescriptor] = &[
     TOGETHER_AI_LOGIN_PROVIDER,
     DEEPINFRA_LOGIN_PROVIDER,
     FIREWORKS_LOGIN_PROVIDER,
+    NOVITA_LOGIN_PROVIDER,
     MINIMAX_LOGIN_PROVIDER,
     XAI_LOGIN_PROVIDER,
     GROK_BUILD_LOGIN_PROVIDER,
@@ -1351,6 +1406,7 @@ pub(crate) const LOGIN_PROVIDERS: &[LoginProviderDescriptor] = &[
     META_MUSE_LOGIN_PROVIDER,
     CELERIS_LOGIN_PROVIDER,
     WAFER_LOGIN_PROVIDER,
+    YOLO_AUTO_LOGIN_PROVIDER,
     LMSTUDIO_LOGIN_PROVIDER,
     OLLAMA_LOGIN_PROVIDER,
     OPENAI_COMPAT_LOGIN_PROVIDER,

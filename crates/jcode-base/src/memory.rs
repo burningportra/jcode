@@ -46,8 +46,9 @@ pub use pending::{
     PendingMemory, clear_all_injected_memories, clear_all_pending_memory, clear_injected_memories,
     clear_pending_memory, has_any_pending_memory, has_pending_memory, is_memory_injected,
     is_memory_injected_any, mark_memories_injected, mark_memories_known, set_pending_memory,
-    set_pending_memory_with_ids, set_pending_memory_with_ids_and_display, sync_injected_memories,
-    take_pending_memory,
+    set_pending_memory_for_project, set_pending_memory_with_ids,
+    set_pending_memory_with_ids_and_display, sync_injected_memories, take_pending_memory,
+    take_pending_memory_for_project,
 };
 #[cfg(test)]
 use pending::{backdate_injected_memory_for_test, insert_pending_memory_for_test};
@@ -185,6 +186,18 @@ impl MemoryEntryEmbeddingExt for MemoryEntry {
     }
 }
 
+/// On-disk path of a project's memory store, keyed by a hash of the project
+/// directory. Shared by `MemoryManager` and out-of-band movers (cloud move).
+pub fn project_memory_file(project_dir: &std::path::Path) -> Result<PathBuf> {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let mut hasher = DefaultHasher::new();
+    project_dir.hash(&mut hasher);
+    let project_hash = format!("{:016x}", hasher.finish());
+    let memory_dir = storage::jcode_dir()?.join("memory").join("projects");
+    Ok(memory_dir.join(format!("{}.json", project_hash)))
+}
+
 #[derive(Debug, Clone)]
 pub struct MemoryManager {
     project_dir: Option<PathBuf>,
@@ -262,16 +275,7 @@ impl MemoryManager {
             None => return Ok(None),
         };
 
-        let project_hash = {
-            use std::collections::hash_map::DefaultHasher;
-            use std::hash::{Hash, Hasher};
-            let mut hasher = DefaultHasher::new();
-            project_dir.hash(&mut hasher);
-            format!("{:016x}", hasher.finish())
-        };
-
-        let memory_dir = storage::jcode_dir()?.join("memory").join("projects");
-        Ok(Some(memory_dir.join(format!("{}.json", project_hash))))
+        project_memory_file(&project_dir).map(Some)
     }
 
     fn legacy_notes_path(&self) -> Result<Option<PathBuf>> {

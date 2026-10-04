@@ -99,11 +99,12 @@ fn create_visible_spawn_session(
     if selfdev_requested {
         session.set_canary("self-dev");
     }
-    // Persist a real snapshot now (not the no-op empty-session save) so the
-    // freshly spawned `--fresh-spawn --resume <id>` pane can resolve this id
-    // against the local session store on its first try instead of hard-exiting
-    // with "No session found matching ...".
-    session.persist_startup_snapshot()?;
+    // The headed client attaches in a separate process and must find the
+    // prepared model/provider/effort on disk, so bypass the untouched-session
+    // save gate from 783c979a0. This also lets a freshly spawned
+    // `--fresh-spawn --resume <id>` pane resolve the id against the local
+    // session store on its first try.
+    session.save_prepared()?;
 
     Ok((session.id.clone(), cwd))
 }
@@ -368,15 +369,29 @@ fn selection_for_concrete_model(
 }
 
 fn resolve_swarm_spawn_selection(
+    requested_model: Option<String>,
     configured_swarm_model: Option<String>,
     coordinator: &CoordinatorSpawnIdentity,
 ) -> SwarmSpawnSelection {
+    // An explicit per-worker choice overrides the configured default. The
+    // inheritance sentinels bypass even a concrete configured model.
+    if let Some(model) = requested_model
+        .map(|model| model.trim().to_string())
+        .filter(|model| !model.is_empty())
+    {
+        return if is_inherit_sentinel(&model) {
+            inherit_coordinator_selection(coordinator)
+        } else {
+            selection_for_concrete_model(model, coordinator)
+        };
+    }
     // Treat empty strings and the explicit "inherit"/"coordinator" sentinels as
     // "no override": spawned swarm agents should inherit the coordinator's model
     // unless `agents.swarm_model` is deliberately set to a concrete model. This
     // avoids the surprising case where a stale `swarm_model` config pins every
     // spawned agent to an unrelated model/provider.
     let configured_swarm_model = configured_swarm_model
+        .map(|model| model.trim().to_string())
         .filter(|model| !model.trim().is_empty() && !is_inherit_sentinel(model));
 
     match configured_swarm_model {
@@ -539,6 +554,24 @@ async fn register_visible_spawned_member(
     broadcast_swarm_status(swarm_id, swarm_members, swarms_by_id).await;
 }
 
+/// Resolve the reasoning effort for a spawned swarm worker (#1165).
+///
+/// Precedence mirrors the model path: an explicit `effort` on the spawn call
+/// wins, then the `agents.swarm_effort` config pin, and only then does the
+/// worker inherit the provider-wide reasoning effort (`None`).
+pub(super) fn resolve_swarm_spawn_effort(
+    requested_effort: Option<&str>,
+    configured_swarm_effort: Option<&str>,
+) -> Option<String> {
+    let clean = |effort: Option<&str>| {
+        effort
+            .map(str::trim)
+            .filter(|effort| !effort.is_empty())
+            .map(str::to_string)
+    };
+    clean(requested_effort).or_else(|| clean(configured_swarm_effort))
+}
+
 #[expect(
     clippy::too_many_arguments,
     reason = "server-side swarm spawning needs session, swarm state, provider, and event sinks together"
@@ -549,6 +582,7 @@ pub(super) async fn spawn_swarm_agent(
     working_dir: Option<String>,
     initial_message: Option<String>,
     spawn_mode: Option<SwarmSpawnMode>,
+    requested_model: Option<String>,
     requested_effort: Option<String>,
     label: Option<String>,
     sessions: &SessionAgents,
@@ -577,18 +611,23 @@ pub(super) async fn spawn_swarm_agent(
     let agents_config = &crate::config::config().agents;
     let configured_swarm_model = agents_config.swarm_model.clone();
     let resolved_spawn_mode = spawn_mode.unwrap_or(agents_config.swarm_spawn_mode);
-    let selection = resolve_swarm_spawn_selection(configured_swarm_model.clone(), &coordinator);
+    let selection = resolve_swarm_spawn_selection(
+        requested_model.clone(),
+        configured_swarm_model.clone(),
+        &coordinator,
+    );
     let spawn_model = selection.model.clone();
     let spawn_provider_key = selection.provider_key.clone();
     let spawn_route_api_method = selection.route_api_method.clone();
-    let spawn_effort = requested_effort
-        .as_deref()
-        .map(str::trim)
-        .filter(|effort| !effort.is_empty())
-        .map(str::to_string);
+    let spawn_effort = resolve_swarm_spawn_effort(
+        requested_effort.as_deref(),
+        agents_config.swarm_effort.as_deref(),
+    );
     crate::logging::info(&format!(
-        "Swarm spawn model resolution: requested_effort={:?} configured_swarm_model={:?} coordinator_model={:?} coordinator_provider_key={:?} coordinator_route={:?} -> spawn_model={:?} spawn_provider_key={:?} spawn_route={:?}",
-        spawn_effort,
+        "Swarm spawn model resolution: requested_model={:?} requested_effort={:?} configured_swarm_effort={:?} configured_swarm_model={:?} coordinator_model={:?} coordinator_provider_key={:?} coordinator_route={:?} -> spawn_model={:?} spawn_provider_key={:?} spawn_route={:?}",
+        requested_model,
+        requested_effort,
+        agents_config.swarm_effort,
         configured_swarm_model,
         coordinator.model,
         coordinator.provider_key,
@@ -817,6 +856,7 @@ pub(super) async fn handle_comm_spawn(
     initial_message: Option<String>,
     request_nonce: Option<String>,
     spawn_mode: Option<SwarmSpawnMode>,
+    model: Option<String>,
     effort: Option<String>,
     label: Option<String>,
     client_event_tx: &mpsc::UnboundedSender<ServerEvent>,
@@ -876,6 +916,7 @@ pub(super) async fn handle_comm_spawn(
                 .map(|mode| format!("{mode:?}"))
                 .unwrap_or_default(),
             effort.clone().unwrap_or_default(),
+            model.clone().unwrap_or_default(),
             label.clone().unwrap_or_default(),
         ],
     );
@@ -898,6 +939,7 @@ pub(super) async fn handle_comm_spawn(
         working_dir,
         initial_message,
         spawn_mode,
+        model,
         effort,
         label,
         sessions,

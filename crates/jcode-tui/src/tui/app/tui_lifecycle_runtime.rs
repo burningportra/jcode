@@ -61,6 +61,15 @@ impl App {
         if self.suppress_terminal_title_updates {
             return;
         }
+        if let Some(host) = crate::tui::ssh_remote_host() {
+            let session = self
+                .remote_session_id
+                .as_deref()
+                .or(self.resume_session_id.as_deref())
+                .unwrap_or("connecting");
+            self.set_terminal_title_base(session, format!("jcode SSH {host} {session}"));
+            return;
+        }
         let session_id = if self.is_remote {
             self.remote_session_id
                 .as_deref()
@@ -114,10 +123,7 @@ impl App {
             Some(&fallback_label),
             is_canary,
         );
-        let _ = crossterm::execute!(
-            std::io::stdout(),
-            crossterm::terminal::SetTitle(window_title)
-        );
+        self.set_terminal_title_base(session_id, window_title);
     }
 
     pub(super) fn reconnect_target_session_id(&self) -> Option<String> {
@@ -207,7 +213,7 @@ impl App {
     /// client is idle, re-exec onto the new binary so TUI-side changes apply too.
     /// Returns true when a client reload was requested.
     pub(super) fn maybe_self_reload_after_server_reload(&mut self) -> bool {
-        if !self.is_remote {
+        if !self.is_remote || crate::tui::is_ssh_remote() {
             return false;
         }
         let is_selfdev_session = self.remote_is_canary.unwrap_or(self.session.is_canary);
@@ -249,7 +255,10 @@ impl App {
             crate::logging::info(&format!("MCP: Found {} server(s) in config", server_count));
 
             let (successes, failures) = {
-                let manager = self.mcp_manager.write().await;
+                // `connect_all` uses the manager's internal locks. Keep only a
+                // read guard here so MCP management reads are not blocked by a
+                // slow initialize handshake.
+                let manager = self.mcp_manager.read().await;
                 let result = manager.connect_all().await.unwrap_or((0, Vec::new()));
                 // Cache server names with tool counts
                 let servers = manager.connected_servers().await;

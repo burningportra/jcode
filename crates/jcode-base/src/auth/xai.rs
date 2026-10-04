@@ -324,6 +324,7 @@ pub async fn login(options: LoginOptions) -> Result<XaiTokens> {
         &verification_url,
         "Or scan this QR on another device:",
         "    ",
+        false,
     ) {
         eprintln!("{qr}\n");
     }

@@ -42,7 +42,7 @@ pub const ANTHROPIC_RUNTIME: &str = "anthropic";
 /// Registry key for the OpenAI (Codex) provider runtime.
 pub const OPENAI_RUNTIME: &str = "openai";
 
-/// Registry key for Grok Build's Grok CLI ACP runtime.
+/// Registry key for the Grok Build (Grok CLI subscription) HTTP runtime.
 pub const GROK_BUILD_RUNTIME: &str = "grok-build";
 
 /// Registry key / compatible-profile id for the xAI Grok OAuth runtime.

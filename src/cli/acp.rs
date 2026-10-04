@@ -765,7 +765,10 @@ impl AcpRuntime {
         let subscribe_id = 1;
         session
             .send(&Request::Subscribe {
+                system_prompt: None,
+                supports_pdf_panels: false,
                 crash_on_disconnect: false,
+                continue_on_disconnect: false,
                 id: subscribe_id,
                 working_dir: Some(cwd.display().to_string()),
                 selfdev: None,
@@ -819,7 +822,10 @@ impl AcpRuntime {
         let resume_id = 1;
         session
             .send(&Request::Subscribe {
+                system_prompt: None,
+                supports_pdf_panels: false,
                 crash_on_disconnect: false,
+                continue_on_disconnect: false,
                 id: resume_id,
                 working_dir: Some(cwd.display().to_string()),
                 selfdev: None,
@@ -1275,7 +1281,12 @@ async fn request_history(session: &DaemonSession) -> Result<ServerEvent> {
 
 async fn request_model_catalog(session: &DaemonSession) -> Result<ServerEvent> {
     let id = session.next_id();
-    session.send(&Request::GetModelCatalog { id }).await?;
+    session
+        .send(&Request::GetModelCatalog {
+            id,
+            subscribe_usage_updates: false,
+        })
+        .await?;
     loop {
         match session.read_event().await? {
             ServerEvent::Ack { .. } => {}
@@ -1417,6 +1428,7 @@ async fn wait_for_model_changed(session: &DaemonSession, request_id: u64) -> Res
                 model,
                 provider_name,
                 error,
+                ..
             } if id == request_id => {
                 if let Some(error) = error {
                     anyhow::bail!(error);
@@ -1488,7 +1500,7 @@ impl EventMapper {
                     "status": "pending",
                 })]
             }
-            ServerEvent::ToolInput { delta } => {
+            ServerEvent::ToolInput { delta, .. } => {
                 let Some(tool_id) = self.current_tool_id.clone() else {
                     return Vec::new();
                 };
@@ -1838,7 +1850,7 @@ fn tool_title(name: &str) -> String {
         "bash" => "Running shell command".to_string(),
         "read" => "Reading file".to_string(),
         "write" => "Writing file".to_string(),
-        "edit" | "multiedit" | "patch" | "apply_patch" => "Editing files".to_string(),
+        "edit" | "multiedit" | "patch" | "apply_patch" | "replace" => "Editing files".to_string(),
         "agentgrep" | "grep" | "glob" | "ls" => "Searching workspace".to_string(),
         "webfetch" | "websearch" => "Fetching web content".to_string(),
         other => other.replace('_', " "),
@@ -1848,7 +1860,7 @@ fn tool_title(name: &str) -> String {
 pub(crate) fn tool_kind(name: &str) -> &'static str {
     match name {
         "read" => "read",
-        "write" | "edit" | "multiedit" | "patch" | "apply_patch" => "edit",
+        "write" | "edit" | "multiedit" | "patch" | "apply_patch" | "replace" => "edit",
         "bash" | "bg" | "selfdev" => "execute",
         "agentgrep" | "grep" | "glob" | "ls" | "session_search" | "conversation_search" => "search",
         "webfetch" | "websearch" | "codesearch" => "fetch",
@@ -1988,6 +2000,7 @@ mod tests {
         assert_eq!(start[0]["kind"], "execute");
 
         let input = mapper.map_event(ServerEvent::ToolInput {
+            id: None,
             delta: "{\"command\":\"true\"}".to_string(),
         });
         assert_eq!(input[0]["rawInput"]["command"], "true");

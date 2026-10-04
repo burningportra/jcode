@@ -60,6 +60,7 @@ fn text_refs(root: &Path, symbol: &str) -> Vec<String> {
         paths_only: true,
         hidden: false,
         no_ignore: false,
+        no_follow: false,
         path: None,
         glob: None,
     };
