@@ -275,3 +275,61 @@ fn auto_recall_publish_must_bind_the_project_or_the_consumer_discards_it() {
         None => crate::env::remove_var("JCODE_HOME"),
     }
 }
+
+/// Drives the agent's real publish call and then the real consumer.
+///
+/// The contract test above pins the pending-memory API itself; this one pins
+/// the agent's use of it, so a future edit that reverts to an unbound setter
+/// fails here. Without the project binding this assertion fails with the
+/// payload silently discarded, which is exactly how the merge regression
+/// presented: recall ran, judged, published, and then threw everything away.
+#[test]
+fn agent_publish_survives_project_scoped_consumption() {
+    let _lock = crate::storage::lock_test_env();
+    let home = tempfile::tempdir().expect("tempdir");
+    let previous_home = std::env::var_os("JCODE_HOME");
+    crate::env::set_var("JCODE_HOME", home.path());
+
+    let project = "/tmp/jcode-agent-publish-binding";
+    let entry = crate::memory::MemoryEntry::new(MemoryCategory::Fact, "agent publish fixture");
+    let stored_id = crate::memory::MemoryManager::new()
+        .with_project_dir(project)
+        .remember_project(entry.clone())
+        .expect("persist fixture memory");
+    // `remember_project` may normalize the entry (ids, embeddings), so publish
+    // what the store actually holds, like the real retrieval path does.
+    let stored = crate::memory::MemoryManager::new()
+        .with_project_dir(project)
+        .list_all()
+        .expect("list stored memories")
+        .into_iter()
+        .find(|candidate| candidate.id == stored_id)
+        .expect("fixture memory is retrievable");
+
+    let (_tx, rx) = mpsc::channel(1);
+    let mut agent = MemoryAgent::new(rx);
+    let session_id = "agent-publish-binding";
+    // The agent reads the project from its own session state, which is what
+    // makes the published binding match the project consumed below.
+    agent.sessions.insert(
+        session_id.to_string(),
+        SessionState {
+            working_dir: Some(project.to_string()),
+            ..Default::default()
+        },
+    );
+
+    let relevant = vec![stored];
+    let prompt = memory::format_relevant_prompt(&relevant, 1).expect("canonical prompt");
+    let count = agent.publish_relevant_memories(session_id, prompt, &relevant);
+    assert_eq!(count, 1, "one rendered memory");
+
+    let pending = memory::take_pending_memory_for_project(session_id, Some(project))
+        .expect("the agent's published payload must survive project-scoped consumption");
+    assert_eq!(pending.memory_ids, vec![stored_id]);
+
+    match previous_home {
+        Some(value) => crate::env::set_var("JCODE_HOME", value),
+        None => crate::env::remove_var("JCODE_HOME"),
+    }
+}

@@ -486,6 +486,52 @@ impl MemoryAgent {
         crate::logging::info("Memory agent stopped");
     }
 
+    /// Publish judged memories as this session's pending recall payload.
+    ///
+    /// The consumer is `memory::take_pending_memory_for_project`, which
+    /// discards any payload whose project binding is missing or does not match
+    /// the project being consumed. Publishing through an unbound setter here
+    /// therefore disables automatic recall entirely, with no compile error and
+    /// no failing test elsewhere. Extracted so that contract is covered by a
+    /// test that executes this exact call (see
+    /// `memory_agent_tests::agent_publish_survives_project_scoped_consumption`).
+    ///
+    /// Returns the rendered memory count for the UI state.
+    fn publish_relevant_memories(
+        &mut self,
+        session_id: &str,
+        prompt: String,
+        relevant: &[MemoryEntry],
+    ) -> usize {
+        let display_prompt =
+            memory::format_relevant_display_prompt(relevant, MAX_MEMORIES_PER_TURN);
+        let count = prompt
+            .lines()
+            .map(str::trim_start)
+            .filter(|line| {
+                line.split_once(". ")
+                    .map(|(prefix, _)| {
+                        !prefix.is_empty() && prefix.chars().all(|c| c.is_ascii_digit())
+                    })
+                    .unwrap_or(false)
+            })
+            .count()
+            .max(1);
+        let project_dir = self
+            .sessions
+            .get(session_id)
+            .and_then(|state| state.working_dir.clone());
+        memory::set_pending_memory_for_project_with_selection(
+            session_id,
+            prompt,
+            count,
+            relevant,
+            display_prompt,
+            project_dir.as_deref(),
+        );
+        count
+    }
+
     /// Process a context update
     async fn process_context(
         &mut self,
@@ -890,39 +936,7 @@ impl MemoryAgent {
             }
 
             if let Some(prompt) = memory::format_relevant_prompt(&relevant, MAX_MEMORIES_PER_TURN) {
-                let display_prompt =
-                    memory::format_relevant_display_prompt(&relevant, MAX_MEMORIES_PER_TURN);
-                let count = prompt
-                    .lines()
-                    .map(str::trim_start)
-                    .filter(|line| {
-                        line.split_once(". ")
-                            .map(|(prefix, _)| {
-                                !prefix.is_empty() && prefix.chars().all(|c| c.is_ascii_digit())
-                            })
-                            .unwrap_or(false)
-                    })
-                    .count()
-                    .max(1);
-
-                // Must bind the project: `take_pending_memory_for_project` is
-                // the consumer, and it discards any payload whose binding is
-                // missing or mismatched. Publishing unbound here silently
-                // disabled automatic recall entirely. Pinned by
-                // memory_agent_tests::auto_recall_publish_must_bind_the_project_
-                // or_the_consumer_discards_it.
-                let project_dir = self
-                    .sessions
-                    .get(session_id)
-                    .and_then(|state| state.working_dir.clone());
-                memory::set_pending_memory_for_project_with_selection(
-                    session_id,
-                    prompt,
-                    count,
-                    &relevant,
-                    display_prompt,
-                    project_dir.as_deref(),
-                );
+                let count = self.publish_relevant_memories(session_id, prompt, &relevant);
                 memory::set_state(MemoryState::FoundRelevant { count });
             } else {
                 memory::set_state(MemoryState::Idle);
