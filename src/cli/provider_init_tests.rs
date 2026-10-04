@@ -884,6 +884,11 @@ async fn auto_provider_uses_config_default_named_no_auth_provider() {
         "JCODE_RUNTIME_PROVIDER",
         "JCODE_ACTIVE_PROVIDER",
         "JCODE_INITIAL_PROVIDER_EXPLICIT",
+        // Fork-local OpenAI-compatible profiles. `Auto` scans the whole
+        // catalog, so any of these present in the developer's shell would
+        // satisfy it and defeat the "must fail without credentials" contract.
+        "AI_GATEWAY_API_KEY",
+        "WAFER_API_KEY",
     ]
     .iter()
     .map(|k| (k.to_string(), std::env::var(k).ok()))
@@ -910,6 +915,8 @@ async fn auto_provider_uses_config_default_named_no_auth_provider() {
         "JCODE_RUNTIME_PROVIDER",
         "JCODE_ACTIVE_PROVIDER",
         "JCODE_INITIAL_PROVIDER_EXPLICIT",
+        "AI_GATEWAY_API_KEY",
+        "WAFER_API_KEY",
     ] {
         crate::env::remove_var(key);
     }
@@ -975,6 +982,11 @@ async fn auto_provider_noninteractive_skips_untrusted_external_auth_instead_of_b
         "JCODE_RUNTIME_PROVIDER",
         "JCODE_ACTIVE_PROVIDER",
         "JCODE_INITIAL_PROVIDER_EXPLICIT",
+        // Fork-local OpenAI-compatible profiles: `Auto` scans the whole
+        // catalog, so a developer shell with either key set would satisfy it
+        // and defeat this test's "must fail without credentials" contract.
+        "AI_GATEWAY_API_KEY",
+        "WAFER_API_KEY",
     ]
     .iter()
     .map(|k| (k.to_string(), std::env::var(k).ok()))
@@ -992,6 +1004,8 @@ async fn auto_provider_noninteractive_skips_untrusted_external_auth_instead_of_b
         "CURSOR_API_KEY",
         "JCODE_ACTIVE_PROVIDER",
         "JCODE_INITIAL_PROVIDER_EXPLICIT",
+        "AI_GATEWAY_API_KEY",
+        "WAFER_API_KEY",
     ] {
         crate::env::remove_var(key);
     }

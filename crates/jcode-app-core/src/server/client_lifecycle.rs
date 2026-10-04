@@ -106,11 +106,59 @@ static PROMPT_SUGGESTION_SENDERS: LazyLock<
     StdMutex<HashMap<String, mpsc::UnboundedSender<ServerEvent>>>,
 > = LazyLock::new(|| StdMutex::new(HashMap::new()));
 
+/// Sessions whose attached client asked for prompt suggestions.
+///
+/// `Subscribe { prompt_suggestions }` is the client's authoritative opt-in.
+/// Generation is expensive (a sidecar completion per successful turn) and must
+/// never run for a client that declined, so the sender registry below is only
+/// populated for sessions listed here.
+static PROMPT_SUGGESTION_OPT_IN: LazyLock<StdMutex<HashSet<String>>> =
+    LazyLock::new(|| StdMutex::new(HashSet::new()));
+
+/// Record (or clear) a session's prompt-suggestion opt-in from `Subscribe`.
+pub(super) fn set_prompt_suggestion_opt_in(session_id: &str, opted_in: bool) {
+    if let Ok(mut opt_in) = PROMPT_SUGGESTION_OPT_IN.lock() {
+        if opted_in {
+            opt_in.insert(session_id.to_string());
+        } else {
+            opt_in.remove(session_id);
+        }
+    }
+    if !opted_in {
+        unregister_prompt_suggestion_sender(session_id);
+    }
+}
+
+fn prompt_suggestions_opted_in(session_id: &str) -> bool {
+    PROMPT_SUGGESTION_OPT_IN
+        .lock()
+        .map(|opt_in| opt_in.contains(session_id))
+        .unwrap_or(false)
+}
+
 /// Drop prompt-suggestion state when a session is removed from the server.
 /// The per-session generation entry would otherwise leak for the life of the
 /// process and an in-flight generation task would keep running.
 pub(super) async fn remove_session_prompt_suggestions(session_id: &str) {
     PROMPT_SUGGESTIONS.remove_session(session_id).await;
+    unregister_prompt_suggestion_sender(session_id);
+    if let Ok(mut opt_in) = PROMPT_SUGGESTION_OPT_IN.lock() {
+        opt_in.remove(session_id);
+    }
+}
+
+/// Drop a disconnected client's event sender.
+///
+/// `PROMPT_SUGGESTION_SENDERS` is process-global and keyed only by session id,
+/// so without this a departed client's sender outlives its connection. A
+/// successor that reattaches to the same session then finds the map already
+/// populated, `client_supports_prompt_suggestions` reports true for a client
+/// that is gone, and generation bookkeeping is attributed to the dead
+/// connection. See tests/e2e/disconnect.rs reattach cases.
+pub(super) fn unregister_prompt_suggestion_sender(session_id: &str) {
+    if let Ok(mut senders) = PROMPT_SUGGESTION_SENDERS.lock() {
+        senders.remove(session_id);
+    }
 }
 
 fn required_subscribe_working_dir(working_dir: Option<&str>) -> std::result::Result<&str, String> {
@@ -658,6 +706,20 @@ pub(super) async fn handle_client(
         client_start.elapsed().as_millis()
     ));
     let mut client_session_id = new_agent.session_id().to_string();
+    // The connection's opening Subscribe is consumed here and never reaches the
+    // request loop, so its prompt-suggestion opt-in must be recorded now.
+    // Otherwise the very first turn of every connection would generate
+    // suggestions regardless of what the client asked for.
+    set_prompt_suggestion_opt_in(
+        &client_session_id,
+        matches!(
+            initial_request,
+            Request::Subscribe {
+                prompt_suggestions: true,
+                ..
+            }
+        ),
+    );
     let friendly_name = new_agent.session_short_name().map(|s| s.to_string());
     let client_connection_id = id::new_id("conn");
     let connected_at = Instant::now();
@@ -1696,6 +1758,7 @@ pub(super) async fn handle_client(
                 crash_on_disconnect: _,
                 continue_on_disconnect: requested_continuation,
                 terminal_env,
+                prompt_suggestions: wants_prompt_suggestions,
                 ..
             } => {
                 if let Err(message) =
@@ -1710,6 +1773,15 @@ pub(super) async fn handle_client(
                     });
                     continue;
                 }
+                // The client's opt-out is authoritative. A client that does not
+                // want suggestions must not have a sender registered for it,
+                // because `client_supports_prompt_suggestions` is derived from
+                // the presence of that entry. Registering regardless made
+                // post-turn generation run for opted-out clients, issuing a
+                // second provider completion through the sidecar (see
+                // tests/e2e/disconnect.rs "reconnection must never replay a
+                // prompt").
+                set_prompt_suggestion_opt_in(&client_session_id, wants_prompt_suggestions);
                 // Overrides are creation-only. In particular, never apply one to
                 // a target attachment or a repeated Subscribe on this connection.
                 if let Some(prompt) = new_session_system_prompt(
@@ -3539,7 +3611,14 @@ async fn start_processing_message(
         Arc::clone(swarm.members),
         client_event_tx.clone(),
     );
-    if let Ok(mut senders) = PROMPT_SUGGESTION_SENDERS.lock() {
+    // Only for a client that opted in via `Subscribe { prompt_suggestions }`.
+    // `client_supports_prompt_suggestions` below is derived purely from the
+    // presence of this entry, so inserting unconditionally made post-turn
+    // generation run for opted-out clients and issue a second provider
+    // completion through the sidecar.
+    if prompt_suggestions_opted_in(client_session_id)
+        && let Ok(mut senders) = PROMPT_SUGGESTION_SENDERS.lock()
+    {
         senders.insert(client_session_id.to_string(), tx.clone());
     }
     let done_tx = processing_done_tx.clone();

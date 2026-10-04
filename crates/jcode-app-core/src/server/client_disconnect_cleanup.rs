@@ -77,6 +77,11 @@ pub(super) async fn detach_client_attachment(
     client_debug_state.write().await.unregister(debug_id);
     client_connections.write().await.remove(connection_id);
     unregister_session_event_sender(swarm_members, session_id, connection_id).await;
+    // The prompt-suggestion sender map is keyed by session id alone, so a
+    // departing client must drop its entry here (not only on destructive
+    // teardown below). Otherwise a successor reattaching to the same session
+    // inherits the dead client's sender.
+    super::client_lifecycle::unregister_prompt_suggestion_sender(session_id);
 }
 
 #[expect(
@@ -208,8 +213,14 @@ pub(super) async fn cleanup_client_connection(
     }
 
     {
-        super::client_lifecycle::remove_session_prompt_suggestions(client_session_id).await;
         if let Some(agent_arc) = super::remove_session_entry(sessions, client_session_id).await {
+            // Only once the session is genuinely being torn down. Doing this
+            // before `remove_session_entry` also wiped state for sessions that
+            // a successor had already reclaimed, which re-dispatched the
+            // in-flight turn ("reconnection must never replay a prompt" in
+            // tests/e2e/disconnect.rs). Mirrors comm_session.rs, which also
+            // clears suggestions only inside the removal branch.
+            super::client_lifecycle::remove_session_prompt_suggestions(client_session_id).await;
             let lock_result =
                 tokio::time::timeout(std::time::Duration::from_secs(2), agent_arc.lock()).await;
 

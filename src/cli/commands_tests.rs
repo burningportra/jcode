@@ -164,6 +164,14 @@ async fn memory_cli_semantic_requires_jev_but_keyword_search_remains_local() {
             "cli-jev-probe without embedding",
         ))
         .unwrap();
+    // Precondition only, and only meaningful without the local embedding
+    // stack: it shows the stored entry carries no vector, so a later
+    // `--semantic` hit could not have come from one. This fork enables the
+    // `embeddings` default feature, where `remember_project` does attach a
+    // vector. The contract under test below (semantic search must go through
+    // Jev and must not silently fall back to local embeddings) is asserted
+    // directly and holds either way.
+    #[cfg(not(feature = "embeddings"))]
     assert!(
         manager
             .list_all()
