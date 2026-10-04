@@ -496,6 +496,10 @@ mod tests {
         assert!(error.to_string().contains("exceeds 2 bytes"));
     }
 
+    /// Linux-only: APFS/HFS+ reject filenames that are not valid UTF-8
+    /// (EILSEQ at `write` time), so the fixture cannot even be created on
+    /// macOS. The guard under test is platform-independent.
+    #[cfg(target_os = "linux")]
     #[tokio::test]
     async fn rejects_non_utf8_git_paths() {
         use std::os::unix::ffi::OsStrExt;

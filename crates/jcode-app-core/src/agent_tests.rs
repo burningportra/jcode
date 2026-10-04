@@ -3058,7 +3058,6 @@ async fn post_compact_recall_merges_with_existing_reminder() {
     assert!(text.ends_with("keep going"));
 }
 
-
 // ── Context-limit auto-recovery convergence ─────────────────────────
 //
 // The Cerebras-style error that motivated the shared classifier (2026-08-30):
